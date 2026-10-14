@@ -276,6 +276,22 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(keys '.review.local = {sha: "x", status: "unknown"}')" = review ]
 }
 
+@test "bot configured and HEAD pushed and locally reviewed but not bot-reviewed: trigger it" {
+  local st=('.bot = {command: "/review-bot"}' '.review.bot = {sha: null, status: "none"}')
+  [ "$(keys "${st[@]}")" = bot-trigger ]
+  [ "$(step bot-trigger who "${st[@]}")" = run ]
+  [ "$(step bot-trigger cmd "${st[@]}")" = "pr-act trigger" ]
+  [ "$(step bot-trigger say "${st[@]}")" = "trigger the review bot (/review-bot)" ]
+  # unpushed, or the local review behind: those first, no trigger yet
+  [ "$(keys "${st[@]}" '.push.ahead = 1')" = push ]
+  [ "$(keys "${st[@]}" '.review.local = {sha: "x", status: "uncovered", uncovered: 1}')" = review ]
+  # the bot already covers HEAD, or no bot configured: no step
+  [ "$(keys "${st[@]}" '.review.bot = {sha: "h1", status: "covered"}')" = ready ]
+  [ "$(keys '.review.bot = {sha: null, status: "none"}')" = ready ]
+  # a draft waits for the bot too
+  [ "$(keys "${st[@]}" '.pr.draft = true' '.pr.merge_state = "DRAFT"')" = bot-trigger ]
+}
+
 @test "review: a pin that covers HEAD means no review step" {
   [ "$(keys '.review.local = {sha: "x", status: "uncovered", uncovered: 2}' \
            '.review.accepted = {sha: "h1", status: "covered"}')" = ready ]

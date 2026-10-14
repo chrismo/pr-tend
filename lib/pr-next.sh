@@ -37,7 +37,9 @@ values {...s, remote}
       restack:=(sync.old_base is null ? f"git rebase {remote}/{sync.target}"
                 : f"git rebase --onto {remote}/{sync.target} {sync.old_base[0:12]}"),
       need_review:=((trails(review.local) or trails(review.bot) or trails(review.accepted))
-                    and not (covers(review.local) or covers(review.bot) or covers(review.accepted)))
+                    and not (covers(review.local) or covers(review.bot) or covers(review.accepted))),
+      bot_due:=(coalesce(bot.command, null) is not null and covers(review.local)
+                and not covers(review.bot) and not covers(review.accepted))
 | unnest [
     on(pr.state == "MERGED") ? step("merged", "run", "merged: drop the branch'"'"'s pins and enrollment, then remove this worktree", "pr-act forget") : null,
     on(pr.state == "CLOSED") ? step("closed", "you", "PR closed without merging", null) : null,
@@ -70,9 +72,11 @@ values {...s, remote}
              : on(push.diverged) ? f"force-push {plural(coalesce(sync.ahead, push.ahead), "commit")} (rewritten)"
              : f"push {plural(push.ahead, "commit")}", "pr-act push") : null,
     pr is null and len(errors) == 0 ? step("open-pr", "run", "ship: push, open a draft PR", "pr-act ship") : null,
-    has_pr and draft_ready and not need_review
+    has_pr and draft_ready and not need_review and not bot_due
       ? step("draft", "run", "CI green and reviewed: mark the PR ready for review", "gh pr ready") : null,
     open and need_review ? step("review", "agent", "review the changes since the last review", "pr-act review") : null,
+    has_pr and not to_push and not foreign and bot_due
+      ? step("bot-trigger", "run", f"trigger the review bot ({bot.command})", "pr-act trigger") : null,
     has_pr and on(ci.verdict == "inconclusive") ? step("ci-rerun", "run", "rerun cancelled CI", "gh pr checks") : null,
     has_pr and not to_push and (on(ci.verdict == "pending") or on(ci.for_head == false))
       ? step("ci-wait", "wait", on(ci.verdict == "pending") ? "CI running" : "CI hasn'"'"'t reported on HEAD yet",

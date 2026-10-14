@@ -734,7 +734,12 @@ from running them.
    `pr-act review`; handing findings to the branch's agent is the loop's. [#11]
 10. The loop: watcher dispatches verbs (below, "Process supervision"). After
     4–9 because a verb has to behave by hand first. [#12]
-11. Bot trigger — waits until there is a bot to trigger. [#13]
+11. Bot trigger — waits until there is a bot to trigger. Done 2026-10-14:
+    `pr-act trigger` posts `settings.botCommand` on the PR and pins `bot` at
+    HEAD (with its base); NEXT's `bot-trigger` step runs it once HEAD is
+    pushed and the local review covers it. The sandbox has a toy bot
+    (`.github/workflows/review-bot.yml`) that answers `/review-bot` with a
+    review. [#13]
 12. `pr-act start` + implement; `pr-act attach` — last; chrismo starts the work
     by hand while dogfooding. [#14]
 

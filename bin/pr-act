@@ -16,6 +16,7 @@
 #   pr-act review   [<branch>]
 #   pr-act describe [<branch>]
 #   pr-act ship     [--force] [<branch>]
+#   pr-act trigger  [--force] [<branch>]
 #
 # Examples:
 #   pr-act enroll                      pr-watch starts tracking this branch
@@ -70,10 +71,15 @@
 #             else the default branch) and enroll; with a PR already open, fix
 #             up its title, body and base instead. Warns when the local review
 #             doesn't cover HEAD; the draft stays a draft until it does
+#   trigger   post settings.botCommand on the PR so the review bot runs, and
+#             pin bot at HEAD; nothing when already pinned there. HEAD must
+#             be on the remote (the bot reviews what GitHub has); the local
+#             review not covering HEAD is a soft refusal
 #
 # --force:
 #   address         run even if the branch is unpushed, diverged or taken over
 #   restack, push, ship   run even if taken over
+#   trigger         even when the local review doesn't cover HEAD
 #   unregister      even with branches still enrolled (the watcher drops them)
 #
 # restack options:
@@ -567,6 +573,42 @@ ship() {
   fi
 }
 
+# ── trigger ──────────────────────────────────────────────────────────────────
+
+read -r -d '' TRIGGER_GATE <<'EOF' || true
+(.errors // [] | join("; ")) as $why
+| if .pr == null then {hard: "no PR for \(.branch)\(if $why != "" then ": \($why)" else "" end)"}
+  elif .pr.state != "OPEN" then {hard: "PR #\(.pr.number) is \(.pr.state | ascii_downcase)"}
+  elif .review.bot.status == "covered" then {done: "the bot was already triggered on \(.head[0:7])"}
+  elif .push.remote_sha == null or .push.ahead > 0 or .push.diverged
+    then {hard: "\(.branch) isn't on the remote at HEAD; the bot reviews what GitHub has: pr-act push first"}
+  elif (.review.local.status | IN("covered", "rewritten-same") | not)
+    then {soft: "the local review doesn't cover HEAD (pr-act review)"}
+  else {} end
+EOF
+
+trigger() {
+  local b=$branch state command gate line head base pr_id
+  command=$(prc_get settings.botCommand "$b" false) || die "pr-config failed"
+  [[ -n $command ]] || die "no settings.botCommand configured: the comment that makes the review bot run"
+  state=$(pr-state --json "$b") || die "pr-state failed"
+  gate=$(jq -c "$TRIGGER_GATE" <<<"$state")
+  line=$(jq -r '.hard // empty' <<<"$gate"); [[ -z $line ]] || die "$line"
+  line=$(jq -r '.done // empty' <<<"$gate"); if [[ -n $line ]]; then echo "$line"; return; fi
+  line=$(jq -r '.soft // empty' <<<"$gate")
+  if [[ -n $line ]] && ! $force; then die "not triggering the bot on $b: $line (--force to trigger anyway)"; fi
+  head=$(git rev-parse "refs/heads/$b")
+  base=$(jq -r '.sync.old_base // empty' <<<"$state")
+  [[ -n $base ]] || die "can't find $b's base: $(jq -r '.errors | join("; ")' <<<"$state")"
+  pr_id=$(gql -f url="$(jq -r .pr.url <<<"$state")" \
+            -f query='query($url: URI!) { resource(url: $url) { ... on PullRequest { id } } }' \
+            --jq .data.resource.id) || die "couldn't look up PR #$(jq -r .pr.number <<<"$state")"
+  gql -f query='mutation($subject: ID!, $body: String!) { addComment(input: {subjectId: $subject, body: $body}) { clientMutationId } }' \
+      -f subject="$pr_id" -f body="$command" >/dev/null || die "posting the trigger comment failed; nothing pinned"
+  pin_write "$b" bot "$head" "$base"
+  echo "triggered the review bot on PR #$(jq -r .pr.number <<<"$state") with \"$command\"; bot pinned at ${head:0:7}"
+}
+
 # ── push ─────────────────────────────────────────────────────────────────────
 
 plural() { if (( $1 == 1 )); then echo "1 $2"; else echo "$1 $2s"; fi; }
@@ -914,5 +956,6 @@ case $verb in
   review) review ;;
   describe) describe ;;
   ship) ship ;;
+  trigger) trigger ;;
   *) die "unknown verb: $verb" ;;
 esac
