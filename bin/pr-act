@@ -40,9 +40,11 @@
 #             config wt.setup. Records the task and parent, pins base at a new
 #             branch's start point, enrolls; then implement unless
 #             --no-implement. stdout is only the worktree's path
-#   implement the agent works the recorded task (J0) in the branch's session,
-#             and may run commands to test; the pipeline commits its edits,
-#             then runs verify. "needs-input" prints the agent's question and
+#   implement the agent works the recorded task (J0) in the branch's session;
+#             the pipeline commits its edits, then runs verify. Claude may run
+#             only read-only git, the verify command when it's plain words (no
+#             globs, pipes or quotes), and settings.implementAllow's rules; pi
+#             runs nothing. "needs-input" prints the agent's question and
 #             leaves the edits uncommitted. Spends tokens
 #   enroll    mark the branch for pr-watch, and register this repo; for a
 #             stacked PR, store its parent and base before a merge erases them
@@ -110,7 +112,7 @@
 #                   start, implement)
 #
 # Config (pr-config show):
-#   settings  remote, verify, stepTimeout, replyPrefix, botLogin
+#   settings  remote, verify, stepTimeout, replyPrefix, botLogin, implementAllow
 #   harness   model, effort, provider (pi), args
 #
 # State (git config): branch.<b>.pr-tend, .pr-task, .pr-parent, .pr-session,
@@ -654,9 +656,9 @@ start() {
 read -r -d '' IMPLEMENT_PROMPT <<'EOF' || true
 Implement the task below in this worktree; its branch is checked out for this
 work. Follow the repo's own instructions (AGENTS.md, CLAUDE.md, README) for how
-to work and test here. Edit files and run what you need to check your work, but
-do not commit, push, or run gh: the pipeline commits your edits with your
-commit_message, runs the repo's checks, and opens the PR later.
+to work and test here. Edit files, but do not commit, push, or run gh: the
+pipeline commits your edits with your commit_message, runs the repo's checks,
+and opens the PR later.
 
 Return outcome "done" when the task is implemented, with a one-line
 commit_message; "needs-input" when you need a decision from the task's author
@@ -673,17 +675,32 @@ EOF
 
 # implement_run <branch> <worktree>
 implement_run() {
-  local b=$1 wt=$2 task verify before prompt result outcome summary msg
+  local b=$1 wt=$2 task verify before prompt result outcome summary msg extra rule allow=$HARNESS_CLAUDE_ALLOW
+  local -a rules=()
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
   task=$(git config --get "branch.$b.pr-task" || true)
   [[ -n $task ]] || die "no task recorded for $b: git config branch.$b.pr-task \"<task>\""
   verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "pr-config failed"
+  extra=$(cd "$wt" && prc_get settings.implementAllow "$b" false) || die "pr-config failed"
+  # A rule's * is a wildcard, so only plain words become an exact rule.
+  if [[ $verify =~ ^[A-Za-z0-9_./:=@+-]+( [A-Za-z0-9_./:=@+-]+)*$ ]]; then
+    rules+=("Bash($verify)")
+  elif [[ -n $verify && -z $extra ]]; then
+    echo "pr-act: warning: verify ($verify) isn't plain words, so the agent may not run it; allow what it may run in settings.implementAllow" >&2
+  fi
+  while IFS= read -r rule; do [[ -z $rule ]] || rules+=("$rule"); done <<<"$extra"
   step_session "$b" implement
   before=$(git rev-parse "refs/heads/$b")
   prompt="$IMPLEMENT_PROMPT"$'\n\nTask:\n'"$task"
   [[ -z $verify ]] || prompt+=$'\n\nThe repo\'s checks, which the pipeline runs after you: '"$verify"
+  if [[ $STEP_H == claude ]] && (( ${#rules[@]} )); then
+    allow+=$(printf ',%s' "${rules[@]}")
+    prompt+=$'\n\nBeyond reading files and read-only git, you may run only these (Claude Code permission rules); anything else is refused:\n'"$(printf '%s\n' "${rules[@]}")"
+  else
+    prompt+=$'\n\nYou can\'t run commands here beyond read-only git.'
+  fi
   echo "pr-act: $STEP_H ($STEP_MODE session $STEP_SID) is implementing $b…" >&2
-  result=$(cd "$wt" && HARNESS_CLAUDE_ALLOW=$HARNESS_IMPLEMENT_ALLOW \
+  result=$(cd "$wt" && HARNESS_CLAUDE_ALLOW=$allow \
              && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" "$prompt" "$IMPLEMENT_SCHEMA" "$STEP_CFG") \
     || die "the $STEP_H implement step failed or returned no usable result (session $STEP_SID)"
   step_store "$b"

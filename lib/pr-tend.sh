@@ -37,9 +37,6 @@ HARNESS_CLAUDE_ALLOW="Read,Edit,Write,Grep,Glob,Bash(git diff *),Bash(git log *)
 HARNESS_CLAUDE_DENY="Bash(git commit *),Bash(git push *),Bash(gh *)"
 # pi has no per-command bash rules, so no bash at all.
 HARNESS_PI_TOOLS="read,edit,write"
-# The implement step runs chrismo's own task, not text from a PR, so it may
-# also run commands (tests).
-HARNESS_IMPLEMENT_ALLOW="Read,Edit,Write,Grep,Glob,Bash"
 # Read-only steps (review, describe) set HARNESS_CLAUDE_ALLOW to this and
 # HARNESS_PI_TOOLS to "read" before calling harness_run.
 HARNESS_READONLY_ALLOW="Read,Grep,Glob,Bash(git diff *),Bash(git log *),Bash(git show *),Bash(git blame *)"

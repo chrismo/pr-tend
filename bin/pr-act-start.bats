@@ -314,13 +314,63 @@ started() { # a worktree for feat-x with a task, no agent run yet
   grep -qx -- "$sid" "$FX/claude.args"
 }
 
-@test "implement: the agent may run commands (to test), but not commit, push or call gh" {
+allowed() { grep -A1 -x -- --allowedTools "$FX/claude.args" | tail -1; }
+
+@test "implement: no free shell: no bare Bash, read-only git; commit, push and gh denied" {
   started
   "$PR_ACT" implement >/dev/null
-  allow=$(grep -A1 -x -- --allowedTools "$FX/claude.args" | tail -1)
+  allow=$(allowed)
   deny=$(grep -A1 -x -- --disallowedTools "$FX/claude.args" | tail -1)
-  [[ ",$allow," == *",Bash,"* ]]
+  [[ ",$allow," != *",Bash,"* ]]
+  [[ $allow == *"Bash(git diff *)"* && $allow == *Edit* ]]
   [[ $deny == *"git commit"* && $deny == *"git push"* && $deny == *"gh "* ]]
+}
+
+@test "implement: a plain verify command becomes an exact rule" {
+  started
+  echo '{"settings": {"verify": "test -f file.txt"}}' > "$PR_TEND_CONFIG"
+  "$PR_ACT" implement >/dev/null
+  [[ ",$(allowed)," == *",Bash(test -f file.txt),"* ]]
+}
+
+@test "implement: a verify with shell syntax doesn't become a rule, and says where to allow it" {
+  started
+  echo '{"settings": {"verify": "ls *.txt"}}' > "$PR_TEND_CONFIG"
+  run --separate-stderr "$PR_ACT" implement
+  [ "$status" -eq 0 ]
+  [[ $(allowed) != *"Bash(ls"* ]]
+  [[ $stderr == *"settings.implementAllow"* ]]
+}
+
+@test "implement: settings.implementAllow adds its rules, and the prompt names them" {
+  started
+  echo '{"settings": {"implementAllow": ["Bash(bats *)", "WebFetch"]}}' > "$PR_TEND_CONFIG"
+  "$PR_ACT" implement >/dev/null
+  [[ ",$(allowed)," == *",Bash(bats *),WebFetch,"* ]]
+  grep -qF 'Bash(bats *)' "$FX/claude.prompt"
+}
+
+@test "implement: pi gets no shell, and its prompt names no Claude rules" {
+  started
+  cat > "$TMP/fakebin/pi" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FX/pi.args"
+[[ -x $FX/agent ]] && "$FX/agent"
+printf '```json\n%s\n```\n' "$(cat "$FX/result.json")"
+EOF
+  chmod +x "$TMP/fakebin/pi"
+  echo '{"settings": {"verify": "test -f file.txt", "implementAllow": ["Bash(bats *)"]}}' > "$PR_TEND_CONFIG"
+  run "$PR_ACT" implement --harness pi
+  [ "$status" -eq 0 ]
+  [ "$(grep -A1 -x -- --tools "$FX/pi.args" | tail -1)" = read,edit,write ]
+  [[ $(<"$FX/pi.args") != *"Bash("* ]]
+  grep -q "can't run commands" "$FX/pi.args"
+}
+
+@test "implement: with nothing allowed, the prompt says the agent can't run commands" {
+  started
+  "$PR_ACT" implement >/dev/null
+  grep -q "can't run commands" "$FX/claude.prompt"
 }
 
 @test "implement: commits the agent made itself count as its work" {

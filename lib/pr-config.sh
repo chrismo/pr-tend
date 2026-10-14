@@ -13,7 +13,7 @@
 PRC_DEFAULTS='{"harness": "claude",
   "settings": {"remote": "origin", "stepTimeout": 1800, "interval": 300, "replyPrefix": "🤖 ",
                "verify": "", "localReview": "", "botCommand": "", "notify": "",
-               "botLogin": [], "botIgnore": [], "botIgnoreBody": []}}'
+               "botLogin": [], "botIgnore": [], "botIgnoreBody": [], "implementAllow": []}}'
 PRC_SKELETON='{"harness": "claude", "harnesses": {"claude": {}, "pi": {}}, "steps": {}, "settings": {}}'
 
 # A step is a pr-act verb that runs an agent: add new ones here. The global-only
@@ -22,7 +22,7 @@ PRC_HARNESSES=(claude pi)
 PRC_STEPS=(address ci-fix describe implement review)
 PRC_GLOBAL_ONLY=(remote interval notify)
 PRC_SETTINGS='stepTimeout?:uint64,replyPrefix?:string,verify?:string,localReview?:string,botCommand?:string,
-              botLogin?:[string],botIgnore?:[string],botIgnoreBody?:[string]'
+              botLogin?:[string],botIgnore?:[string],botIgnoreBody?:[string],implementAllow?:[string]'
 PRC_TYPES='type hclaude = {model?:string,effort?:enum(low,medium,high,xhigh,max),args?:string}
 type hpi = {provider?:string,model?:string,effort?:enum(off,minimal,low,medium,high,xhigh,max),args?:string}
 type harness = enum(claude,pi)

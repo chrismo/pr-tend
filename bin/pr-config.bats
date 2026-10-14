@@ -1003,6 +1003,18 @@ old_super() {
   [ "$("$PR_CONFIG" get settings.localReview)" = ./review ]
 }
 
+@test "settings.implementAllow: a typed list setting, empty by default" {
+  run "$PR_CONFIG" get settings.implementAllow
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  write_global '{"settings":{"implementAllow":["Bash(bats *)"]}}'
+  [ "$("$PR_CONFIG" get settings.implementAllow)" = "Bash(bats *)" ]
+  write_branch feat '{"settings":{"implementAllow":"Bash"}}'
+  run "$PR_CONFIG" get settings.implementAllow
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"settings.implementAllow"* ]]
+}
+
 @test "validate: a wrong type is an error with the bad value" {
   write_global '{"settings":{"stepTimeout":"30m"}}'
   run "$PR_CONFIG" get settings.remote
