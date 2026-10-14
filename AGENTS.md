@@ -45,7 +45,7 @@ This is a TDD repo: write a failing bats test first, then make it pass.
 under 2 minutes on a 10-core machine (424/424 in 107 s, 2026-10-13):
 
 ```bash
-bats --jobs 10 lib/pr-next.bats bin/pr-*.bats ci/*.bats
+bats --jobs 10 lib/*.bats bin/pr-*.bats ci/*.bats
 bats install.bats
 ```
 

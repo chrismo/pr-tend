@@ -16,6 +16,16 @@ with_timeout() {
   ' "$@"
 }
 
+# pin_write <branch> <kind> <sha> <base>: record a review pin and the base
+# it was taken against. pr-state compares base..pin with the branch's current
+# base..HEAD, so a restack (which moves the base) doesn't make a reviewed
+# change look changed. Kinds: local, bot, accepted (see design.md, O6).
+pin_write() {
+  case $2 in local|bot|accepted) ;; *) echo "unknown pin: $2 (local, bot, accepted)" >&2; return 1 ;; esac
+  git update-ref -m "pin $2" "refs/pr-tend/$1/$2" "$3" \
+    && git update-ref -m "pin $2 base" "refs/pr-tend/$1/$2-base" "$4"
+}
+
 # commits_not_ours <reflog> <sha>: how many commits of <sha> no reflog entry reaches.
 commits_not_ours() {
   sed -n 's/^./^&/p' <<<"$1" | git rev-list --count --stdin "$2"

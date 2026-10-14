@@ -531,6 +531,27 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
   [ "$(field .review.local.status)" = rewritten-same ]
 }
 
+@test "review: a pin's recorded base keeps it covered across a restack past a squash-merged parent" {
+  git switch -qc p && commit p.txt p
+  git switch -qc feat && commit a.txt a
+  git update-ref refs/pr-tend/feat/local HEAD
+  git update-ref refs/pr-tend/feat/local-base p
+  commit p.txt p "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null  # p squash-merged
+  git fetch -q && git rebase -q --onto origin/main p feat
+  state
+  [ "$(field .review.local.status)" = rewritten-same ]
+}
+
+@test "review: without a recorded base, the same restack looks like a changed change (why -base exists)" {
+  git switch -qc p && commit p.txt p
+  git switch -qc feat && commit a.txt a
+  git update-ref refs/pr-tend/feat/local HEAD
+  commit p.txt p "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
+  git fetch -q && git rebase -q --onto origin/main p feat
+  state
+  [ "$(field .review.local.status)" = rewritten-changed ]
+}
+
 @test "review: a rewrite that changes the change is not covered" {
   git switch -qc feat && commit a.txt a
   git update-ref refs/pr-tend/feat/local HEAD
