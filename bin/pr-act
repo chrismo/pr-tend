@@ -428,6 +428,7 @@ review() {
   timeout=$(prc_get settings.stepTimeout "$b" false) || die "pr-config failed"
   [[ $timeout =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $timeout"
   task=$(git config --get "branch.$b.pr-task" || true)
+  echo "pr-act: reviewing $b at ${head:0:7} against ${base:0:7} with $reviewer…" >&2
   findings=$(cd "$wt" && PR_TEND_BASE=$base PR_TEND_HEAD=$head PR_TEND_TASK=$task \
                with_timeout "$timeout" sh -c "$reviewer" </dev/null) \
     || die "the reviewer failed ($reviewer); nothing pinned"

@@ -44,7 +44,7 @@ HARNESS_READONLY_ALLOW="Read,Grep,Glob,Bash(git diff *),Bash(git log *),Bash(git
 # Runs one headless agent step in $PWD; prints the step's JSON result.
 # settings-json is prc_step's output: model, effort, provider and args.
 harness_run() {
-  local h=$1 sid=$2 mode=$3 timeout=$4 prompt=$5 schema=$6 settings=${7:-'{}'} out
+  local h=$1 sid=$2 mode=$3 timeout=$4 prompt=$5 schema=$6 settings=${7:-'{}'} out err
   local model effort provider args
   local -a typed=() extra
   jq -e 'type == "object"' <<<"$settings" >/dev/null || return 1
@@ -68,9 +68,15 @@ harness_run() {
       [[ $mode == resume ]] && sess=(--resume "$sid")
       # The prompt goes first: --allowedTools and --disallowedTools are variadic
       # and would swallow a trailing one.
-      out=$(with_timeout "$timeout" claude -p "$prompt" "${sess[@]}" --output-format json --json-schema "$schema" \
+      err=$(mktemp) || return 1
+      if ! out=$(with_timeout "$timeout" claude -p "$prompt" "${sess[@]}" --output-format json --json-schema "$schema" \
               --permission-mode acceptEdits --allowedTools "$HARNESS_CLAUDE_ALLOW" \
-              --disallowedTools "$HARNESS_CLAUDE_DENY" "${typed[@]}" "${extra[@]}" </dev/null) || return
+              --disallowedTools "$HARNESS_CLAUDE_DENY" "${typed[@]}" "${extra[@]}" </dev/null 2>"$err"); then
+        cat "$err" >&2
+        rm -f "$err"
+        return 1
+      fi
+      rm -f "$err"
       jq -ce 'select(.is_error | not) | .structured_output // (.result | fromjson?) // empty | objects' <<<"$out" 2>/dev/null
       ;;
     pi)

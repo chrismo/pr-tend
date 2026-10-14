@@ -108,7 +108,7 @@ pin() { git rev-parse -q --verify "refs/pr-tend/feat/$1" || true; }
   [ "$status" -ne 0 ]
 }
 
-@test "the default reviewer is bin/pr-review-local" {
+@test "the default reviewer is bin/pr-review-local and announces the review" {
   "$PR_CONFIG" unset --global settings.localReview
   cat > "$TMP/fakebin/claude" <<'EOF'
 #!/usr/bin/env bash
@@ -116,8 +116,22 @@ printf '%s\n' "$@" > "$FX/claude.args"
 echo '{"type": "result", "is_error": false, "structured_output": {"findings": []}}'
 EOF
   chmod +x "$TMP/fakebin/claude"
-  run "$PR_ACT" review
+  run --separate-stderr "$PR_ACT" review
   [ "$status" -eq 0 ]
   [ -e "$FX/claude.args" ]
+  [[ "$stderr" == *"reviewing feat at"* ]]
   [ "$(pin local)" = "$(git rev-parse HEAD)" ]
+}
+
+@test "successful Claude stderr does not leak its JSON protocol output" {
+  "$PR_CONFIG" unset --global settings.localReview
+  cat > "$TMP/fakebin/claude" <<'EOF'
+#!/usr/bin/env bash
+echo '{"type":"result","private":"protocol noise"}' >&2
+echo '{"type": "result", "is_error": false, "structured_output": {"findings": []}}'
+EOF
+  chmod +x "$TMP/fakebin/claude"
+  run --separate-stderr "$PR_ACT" review
+  [ "$status" -eq 0 ]
+  [[ "$stderr" != *"protocol noise"* ]]
 }
