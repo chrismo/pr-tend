@@ -59,7 +59,7 @@ values {...s, remote}
       ? step("read", "you", f"read {plural(threads.info, "bot item")} in pr-state --long, then ack", "pr-act ack") : null,
     open and not foreign and to_push
       ? step("push", "run", push.remote_sha is null ? f"push: not on {remote} yet"
-             : on(push.diverged) ? f"force-push {plural(push.ahead, "commit")} (rewritten)"
+             : on(push.diverged) ? f"force-push {plural(coalesce(sync.ahead, push.ahead), "commit")} (rewritten)"
              : f"push {plural(push.ahead, "commit")}", "pr-act push") : null,
     pr is null and len(errors) == 0 ? step("open-pr", "you", "open a PR", "gh pr create") : null,
     has_pr and on(pr.draft) ? step("draft", "you", "mark the PR ready for review", "gh pr ready") : null,
