@@ -39,18 +39,19 @@ LAUNCH_AGENTS=${PR_WATCH_LAUNCH_AGENTS:-$HOME/Library/LaunchAgents}
 TIMEOUT=${PR_WATCH_TIMEOUT:-120}
 
 read -r -d '' CLASSIFY <<'EOF' || true
-if (.next | type) != "array" or .next == [] then {glyph: "⚠️", reasons: [], note: "pr-state gave no next steps"}
-else [.next[].key] as $k
-| [.next[] | select(.key | IN("ci-red", "conflict", "human", "foreign")) | {key, msg: .say}] as $red
-| if $k == ["merged"] then {glyph: "🏁", reasons: [{key: "merged", msg: .next[0].say}]}
-  elif $k == ["closed"] then {glyph: "🚫", reasons: []}
-  elif $red != [] then {glyph: "❌", reasons: $red}
-  elif any($k[]; IN("errors", "stale")) then {glyph: "⚠️", reasons: []}
-  elif $k == ["ready"] then {glyph: "✅", reasons: [{key: "ready", msg: .next[0].say}]}
-  elif all(.next[]; .who == "wait") then {glyph: "⏳", reasons: []}
-  else {glyph: "🔧", reasons: []}
-  end
-end
+values {next: kind(next) == "array" ? next : []}
+| values {next, k: coalesce([unnest next | values key], []),
+          red: coalesce([unnest next | where key in ["ci-red", "conflict", "human", "foreign"] | values {key, msg: say}], []),
+          waiting: len(coalesce([unnest next | where who != "wait"], [])) == 0}
+| values case
+    when len(next) == 0 then {glyph: "⚠️", reasons: [], note: "pr-state gave no next steps"}
+    when k == ["merged"] then {glyph: "🏁", reasons: [{key: "merged", msg: next[0].say}]}
+    when k == ["closed"] then {glyph: "🚫", reasons: []}
+    when len(red) > 0 then {glyph: "❌", reasons: red}
+    when "errors" in k or "stale" in k then {glyph: "⚠️", reasons: []}
+    when k == ["ready"] then {glyph: "✅", reasons: [{key: "ready", msg: next[0].say}]}
+    when waiting then {glyph: "⏳", reasons: []}
+    else {glyph: "🔧", reasons: []} end
 EOF
 
 # Notifier stdout would land in the pass record (check runs inside $(...)).
@@ -84,26 +85,27 @@ check() {
     return
   fi
   rm -f "$errf"
-  if ! cls=$(jq -c "$CLASSIFY" <<<"$json" 2>/dev/null) || [[ -z $cls ]]; then
+  if ! cls=$(printf '%s\n' "$json" | prc_json "$CLASSIFY" 2>/dev/null) || [[ -z $cls ]]; then
     write_glyph "$wt" "$b" ⚠️
     printf '%s\t%s\t⚠️\tunparseable pr-state output\n' "$name" "$b"
     return
   fi
-  glyph=$(jq -r .glyph <<<"$cls")
+  glyph=$(printf '%s\n' "$cls" | prc_line 'values glyph')
 
   state_file="$STATE_DIR/branches/$(basename "$repo")-$(printf '%s' "$repo" | shasum | cut -c1-8)/$b.json"
   mkdir -p "$(dirname "$state_file")"
   # An unreadable previous state re-notifies rather than silently dropping reasons.
-  prev=$(jq -c '[.reasons[].key]' "$state_file" 2>/dev/null) || prev='[]'
+  prev=$(cat "$state_file" 2>/dev/null | prc_json 'values coalesce([unnest reasons | values key], [])' 2>/dev/null) || prev='[]'
   [[ -n $prev ]] || prev='[]'
   while IFS= read -r line; do
     [[ -n $line ]] && notify "$name $b" "$line"
-  done < <(jq -r --argjson prev "$prev" '.reasons[] | select(.key | IN($prev[]) | not) | .msg' <<<"$cls")
-  jq -n --argjson s "$json" --argjson c "$cls" '$c + {state: $s}' > "$state_file.tmp" \
+  done < <(printf '{"prev":%s,"c":%s}\n' "$prev" "$cls" | prc_line 'unnest {prev, r: c.reasons} | where not (r.key in prev) | values r.msg')
+  printf '{"c":%s,"s":%s}\n' "$cls" "$json" | prc_json 'values {...c, state: s}' > "$state_file.tmp" \
     && mv "$state_file.tmp" "$state_file"
 
   write_glyph "$wt" "$b" "$glyph"
-  printf '%s\t%s\t%s\t%s\n' "$name" "$b" "$glyph" "$(jq -r '[.reasons[].msg, (.note // empty)] | join("; ")' <<<"$cls")"
+  printf '%s\t%s\t%s\t%s\n' "$name" "$b" "$glyph" \
+    "$(printf '%s\n' "$cls" | prc_line 'values sj(coalesce([unnest [...reasons, {msg: coalesce(note, null)}] | where msg is not null | values msg], []), "; ")')"
 }
 
 # sweep_pins <repo>: delete refs/pr-tend/<b>/* whose branch no longer exists.

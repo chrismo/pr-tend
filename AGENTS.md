@@ -60,6 +60,14 @@ bash --version | head -1
 PATH="/opt/homebrew/opt/bash/bin:$PATH" bats ...   # if 3.2 comes first
 ```
 
+**Stress-test a changed SuperDB query.** super 0.3.0 has panicked
+intermittently on one construct, so `ci/super-stress` runs every named query
+(the `read -r -d '' NAME <<'EOF'` heredocs in `bin/pr-*` and `lib/pr-next.sh`'s
+`PRN_QUERY`) 200 times over `ci/fixtures/` and fails on a panic or a differing
+output. Run it after touching one; CI runs it too. SuperDB's edges (missing
+fields are errors, `has()` lies on fused types, dynamic `grep` is not a
+regex) are in `docs/pr-workflow/design.md`, "SuperDB notes".
+
 **Every script is `#!/usr/bin/env bash5`, `install.sh` included.** Test them
 by running them, not sourcing, so the shebang picks the bash. agent-rig's
 `install.sh` makes the `~/.local/bin/bash5` link; without it a script fails

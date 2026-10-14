@@ -1162,6 +1162,36 @@ old_super() {
   [ "$bots" = '[]' ]
 }
 
+@test "lib: prc_json runs a query over piped JSON and prints each result as one JSON line" {
+  source "$BATS_TEST_DIRNAME/../lib/pr-config.sh"
+  [ "$(printf '{"a":[1,2],"b":"x"}\n' | prc_json 'values {n: len(a), b}, b')" = $'{"n":2,"b":"x"}\n"x"' ]
+}
+
+@test "lib: prc_line prints strings raw, one per line, and an empty string as an empty line" {
+  source "$BATS_TEST_DIRNAME/../lib/pr-config.sh"
+  [ "$(printf '{"s":"a b","e":"","n":3}\n' | prc_line 'values s, e, n' | wc -l | tr -d ' ')" = 3 ]
+  [ "$(printf '{"s":"a b","e":"","n":3}\n' | prc_line 'values s')" = "a b" ]
+  [ "$(printf '{"s":"a b","e":"","n":3}\n' | prc_line 'values n')" = 3 ]
+}
+
+@test "lib: prc_val prints one value of a document; prc_strings lists lines, or [] for none" {
+  source "$BATS_TEST_DIRNAME/../lib/pr-config.sh"
+  [ "$(prc_val '{"a":{"b":"x y"}}' a.b)" = "x y" ]
+  [ "$(prc_val '{"a":null}' 'coalesce(a, "none")')" = none ]
+  [ "$(printf 'one\ntwo 2\n' | prc_strings)" = '["one","two 2"]' ]
+  [ "$(printf '' | prc_strings)" = '[]' ]
+}
+
+@test "lib: prc_json and prc_line fail on input that isn't JSON" {
+  source "$BATS_TEST_DIRNAME/../lib/pr-config.sh"
+  local s=()
+  set +e
+  out=$(printf 'nope\n' | prc_json 'values this' 2>/dev/null); s+=($?)
+  out=$(printf 'nope\n' | prc_line 'values this' 2>/dev/null); s+=($?)
+  set -e
+  [ "${s[*]}" = "1 1" ]
+}
+
 @test "lib: sourcing it runs nothing and leaves the shell options alone" {
   run bash -c 'set +e; source "$1"; echo "opts=$-"' _ "$BATS_TEST_DIRNAME/../lib/pr-config.sh"
   [ "$status" -eq 0 ]

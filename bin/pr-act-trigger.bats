@@ -33,7 +33,7 @@ case $q in
   *addComment*) printf 'addComment %s\n' "${fields[*]}" >> "$GH/calls"
     [[ -e $GH/fail-comment ]] && { echo "gh: boom" >&2; exit 1; }
     echo '{"data":{"addComment":{"clientMutationId":null}}}' ;;
-  *resource\(url*) printf 'resource %s\n' "${fields[*]}" >> "$GH/calls"; echo PR_node7 ;;
+  *resource\(url*) printf 'resource %s\n' "${fields[*]}" >> "$GH/calls"; echo '{"data":{"resource":{"id":"PR_node7"}}}' ;;
   *) if [[ -f $GH/$b.json ]]; then cat "$GH/$b.json"
      else echo '{"data":{"viewer":{"login":"me"},"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"nodes":[]}}}}'
      fi ;;

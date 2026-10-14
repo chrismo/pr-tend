@@ -32,7 +32,7 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository"
 branch=$(git branch --show-current 2>/dev/null || true)
 
 cfg=$(prc_step review "$branch" "") || die "pr-config failed"
-h=$(jq -r .harness <<<"$cfg")
+h=$(printf '%s\n' "$cfg" | prc_line 'values harness') || die "pr-config failed"
 timeout=$(prc_get settings.stepTimeout "$branch" false) || die "pr-config failed"
 [[ $timeout =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $timeout"
 
@@ -58,5 +58,6 @@ HARNESS_PI_TOOLS="read"
 sid=$(uuidgen | tr 'A-F' 'a-f')
 result=$(harness_run "$h" "$sid" new "$timeout" "$prompt" "$SCHEMA" "$cfg") \
   || die "the $h review failed or returned no usable result"
-jq -ce '.findings | arrays' <<<"$result" >/dev/null 2>&1 || die "the $h review returned no findings list"
-jq -c '.findings' <<<"$result"
+findings=$(printf '%s\n' "$result" | prc_json 'values findings | where kind(this) == "array"' 2>/dev/null) \
+  && [[ -n $findings ]] || die "the $h review returned no findings list"
+printf '%s\n' "$findings"
