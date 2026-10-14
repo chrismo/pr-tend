@@ -53,7 +53,7 @@ read -r -d '' SCHEMA <<'EOF' || true
 EOF
 
 # Read-only: harness_run takes its tool lists from these.
-HARNESS_CLAUDE_ALLOW="Read,Grep,Glob,Bash(git diff *),Bash(git log *),Bash(git show *),Bash(git blame *)"
+HARNESS_CLAUDE_ALLOW=$HARNESS_READONLY_ALLOW
 HARNESS_PI_TOOLS="read"
 sid=$(uuidgen | tr 'A-F' 'a-f')
 result=$(harness_run "$h" "$sid" new "$timeout" "$prompt" "$SCHEMA" "$cfg") \

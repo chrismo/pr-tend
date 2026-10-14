@@ -36,6 +36,9 @@ HARNESS_CLAUDE_ALLOW="Read,Edit,Write,Grep,Glob,Bash(git diff *),Bash(git log *)
 HARNESS_CLAUDE_DENY="Bash(git commit *),Bash(git push *),Bash(gh *)"
 # pi has no per-command bash rules, so no bash at all.
 HARNESS_PI_TOOLS="read,edit,write"
+# Read-only steps (review, describe) set HARNESS_CLAUDE_ALLOW to this and
+# HARNESS_PI_TOOLS to "read" before calling harness_run.
+HARNESS_READONLY_ALLOW="Read,Grep,Glob,Bash(git diff *),Bash(git log *),Bash(git show *),Bash(git blame *)"
 
 # harness_run <harness> <session-id> <new|resume> <timeout> <prompt> <json-schema> [<settings-json>]
 # Runs one headless agent step in $PWD; prints the step's JSON result.

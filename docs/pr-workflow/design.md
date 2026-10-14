@@ -720,7 +720,11 @@ from running them.
    a tree change counts as failure. `pr-act address` runs the same code. [#9]
 8. `pr-act ship` + `describe` — push, `gh pr create`, and the description step.
    After the other manual verbs because creating a PR by hand is the cheapest
-   thing chrismo does. [#10]
+   thing chrismo does. Done 2026-10-14: describe is read-only in the branch's
+   session and stores `{title, body}` for HEAD; ship reuses it, rechecks HEAD,
+   pushes, opens a **draft** PR on the parent (or fixes up an open PR's title,
+   body and base) and enrolls. NEXT marks the draft ready only once CI is green
+   and the review covers HEAD. [#10]
 9. Local review (`bin/pr-review-local`) — the model half of the old step 5. With
    no bot, it is the only source of review findings. Done 2026-10-14, with
    `pr-act review`; handing findings to the branch's agent is the loop's. [#11]
@@ -865,8 +869,9 @@ short-lived, so it can't own children like their daemons do. Plan:
   spike, below); `pi -p --session` still unverified [#23]
 - resuming a session that's open interactively elsewhere — what breaks? (the
   lock exists to prevent it; confirm it's needed) [#20]
-- `--json-schema` for the describe step; pi equivalent, or fall back to commit
-  messages [#21]
+- ~~`--json-schema` for the describe step~~ verified for Claude on the sandbox
+  (ship smoke test, 2026-10-14); pi's fenced-json fallback still needs a real
+  model run (its default provider's quota was exhausted) [#21]
 - GitHub auto-retarget on parent merge [#22]
 - ~~patch-id false-escalation rate in A2~~ confirmed real; switch to `-U0` (above)
 - **Session ID stability:** Sortie's Claude adapter treats the minted

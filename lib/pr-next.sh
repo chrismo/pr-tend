@@ -28,6 +28,9 @@ values {...s, remote}
       chase:=(on(sync.target != sync.default) or on(parent.merged)),
       merge_state:=coalesce(pr.merge_state, "UNKNOWN"),
       gh_behind:=on(pr.merge_state == "BEHIND"),
+      draft_ready:=(on(pr.draft) and not (push.remote_sha is null or n(push.ahead) > 0)
+                    and not (on(push.remote_ours == false) and n(push.theirs) > 0)
+                    and (on(ci.verdict == "green") or on(ci.verdict == "none"))),
       review_required:=on(pr.review_decision == "REVIEW_REQUIRED"),
       stacked:=(on(pr.base != sync.default) and (on(parent.pr.state == "OPEN") or on(parent.merged))),
       parent_closed:=(on(pr.base != sync.default) and on(parent.pr.state == "CLOSED")),
@@ -66,8 +69,9 @@ values {...s, remote}
       ? step("push", "run", push.remote_sha is null ? f"push: not on {remote} yet"
              : on(push.diverged) ? f"force-push {plural(coalesce(sync.ahead, push.ahead), "commit")} (rewritten)"
              : f"push {plural(push.ahead, "commit")}", "pr-act push") : null,
-    pr is null and len(errors) == 0 ? step("open-pr", "you", "open a PR", "gh pr create") : null,
-    has_pr and on(pr.draft) ? step("draft", "you", "mark the PR ready for review", "gh pr ready") : null,
+    pr is null and len(errors) == 0 ? step("open-pr", "run", "ship: push, open a draft PR", "pr-act ship") : null,
+    has_pr and draft_ready and not need_review
+      ? step("draft", "run", "CI green and reviewed: mark the PR ready for review", "gh pr ready") : null,
     open and need_review ? step("review", "agent", "review the changes since the last review", "pr-act review") : null,
     has_pr and on(ci.verdict == "inconclusive") ? step("ci-rerun", "run", "rerun cancelled CI", "gh pr checks") : null,
     has_pr and not to_push and (on(ci.verdict == "pending") or on(ci.for_head == false))
@@ -82,7 +86,7 @@ values {...s, remote}
     has_pr and review_required
       ? step("review-wait", "wait", len(coalesce(pr.review_requests, [])) > 0
              ? f"waiting on review from {join(pr.review_requests, ", ")}" : "waiting on a required review", null) : null,
-    has_pr and not review_required and not stacked and not parent_closed and not gh_behind
+    has_pr and not review_required and not stacked and not parent_closed and not gh_behind and not on(pr.draft)
       ? (merge_state in ["CLEAN", "UNSTABLE", "HAS_HOOKS"] ? step("ready", "you", "ready to merge", "gh pr merge")
          : merge_state == "UNKNOWN" ? step("merge-wait", "wait", "GitHub hasn'"'"'t decided whether it can merge yet", null)
          : step("blocked", "you", f"GitHub says {why_blocked(merge_state)}: see why", "gh pr view --web")) : null
