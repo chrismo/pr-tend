@@ -288,9 +288,11 @@ fn login(a): unbot(coalesce(a.login, ""))
 fn is_bot(a, bots): on(a.__typename == "Bot") or (login(a) != "" and login(a) in bots)
 fn ignored(a, ign): login(a) in ign
 -- First line with text, HTML comments, tags and heading / quote markers removed.
-fn excerpt(b): coalesce(coalesce([unnest split(regexp_replace(coalesce(b, ""), "(?s)<!--.*?-->", ""), "\n")
-                 | values regexp_replace(regexp_replace(regexp_replace(this, "<[^>]*>", ""), "^[#>\\s]+", ""), "\\s+$", "")
-                 | where this != ""], [])[0], "")[0:100]
+fn excerpt(b): coalesce(coalesce([
+    unnest split(regexp_replace(coalesce(b, ""), "(?s)<!--.*?-->", ""), "\n")
+    | values regexp_replace(regexp_replace(regexp_replace(this, "<[^>]*>", ""), "^[#>\\s]+", ""), "\\s+$", "")
+    | where this != ""
+  ], [])[0], "")[0:100]
 fn detail(x): {author: coalesce(x.author.login, null), url: coalesce(x.url, null), excerpt: excerpt(coalesce(x.body, null))}
 fn ci_k(v): v in ["pending", "PENDING", "EXPECTED"] ? "pending"
             : v in ["SUCCESS", "NEUTRAL", "SKIPPED"] ? "ok"
@@ -299,44 +301,60 @@ fn ci_class(x): ci_k(coalesce(x.__typename == "CheckRun" ? (x.status != "COMPLET
 fn cnt(a, t): len(coalesce([unnest {t, x: a} | where x.type == t], []))
 fn matches(b, res): len(coalesce([unnest {b, re: res} | where len(regexp(re, b)) > 0], [])) > 0
 values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
-        g: {viewer, bots: coalesce([unnest bots | values unbot(this)], []), ign: coalesce([unnest ignore | values unbot(this)], []),
-            ignore_body, handled}}
+        g: {viewer, bots: coalesce([unnest bots | values unbot(this)], []),
+            ign: coalesce([unnest ignore | values unbot(this)], []), ignore_body, handled}}
 | values {a, c, g,
-    ctx: coalesce([unnest coalesce(c.statusCheckRollup.contexts.nodes, []) | values {name: coalesce(name, context, null), k: ci_class(this)}], []),
-    hv: coalesce([unnest {g, r: coalesce(a.pr.reviews.nodes, [])}
-          | where not (is_bot(coalesce(r.author, {}), g.bots) or ignored(coalesce(r.author, {}), g.ign))
-                and coalesce(r.state, "") in ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]
-          | values r | count {r: this, j}], [])}
+    ctx: coalesce([
+      unnest coalesce(c.statusCheckRollup.contexts.nodes, [])
+      | values {name: coalesce(name, context, null), k: ci_class(this)}
+    ], []),
+    hv: coalesce([
+      unnest {g, r: coalesce(a.pr.reviews.nodes, [])}
+      | where not (is_bot(coalesce(r.author, {}), g.bots) or ignored(coalesce(r.author, {}), g.ign))
+            and coalesce(r.state, "") in ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]
+      | values r
+      | count {r: this, j}
+    ], [])}
 | values {a, c, ctx, owed: [
-    ...coalesce([unnest {g, t: coalesce(a.pr.reviewThreads.nodes, [])}
-        | where not on(t.isResolved) and coalesce(t.last.nodes[0].author.login, "") != g.viewer
-              and not ignored(coalesce(t.first.nodes[0].author, {}), g.ign)
-        | values {id: t.id, type: "thread", path: t.path, line: t.line, outdated: t.isOutdated,
-                  kind: is_bot(coalesce(t.first.nodes[0].author, {}), g.bots) ? "bot" : "human",
-                  last: coalesce(t.last.nodes[0].author.login, null), mark: "!", ...detail(coalesce(t.first.nodes[0], {}))}], []),
-    ...coalesce([unnest {g, x: [...coalesce([unnest coalesce(a.pr.reviews.nodes, []) | values {n: this, type: "review"}], []),
-                            ...coalesce([unnest coalesce(a.pr.comments.nodes, []) | values {n: this, type: "comment"}], [])]}
-        | where is_bot(coalesce(x.n.author, {}), g.bots) and not ignored(coalesce(x.n.author, {}), g.ign)
-              and grep("\\S", coalesce(x.n.body, "")) and not matches(coalesce(x.n.body, ""), g.ignore_body)
-              and not (x.n.id in g.handled)
-        | values {id: x.n.id, type: x.type, path: null, line: null, outdated: null, kind: "bot",
-                  last: coalesce(x.n.author.login, null), mark: on(x.n.state == "CHANGES_REQUESTED") ? "!" : "i", ...detail(x.n)}], []),
+    ...coalesce([
+      unnest {g, t: coalesce(a.pr.reviewThreads.nodes, [])}
+      | where not on(t.isResolved) and coalesce(t.last.nodes[0].author.login, "") != g.viewer
+            and not ignored(coalesce(t.first.nodes[0].author, {}), g.ign)
+      | values {id: t.id, type: "thread", path: t.path, line: t.line, outdated: t.isOutdated,
+                kind: is_bot(coalesce(t.first.nodes[0].author, {}), g.bots) ? "bot" : "human",
+                last: coalesce(t.last.nodes[0].author.login, null), mark: "!",
+                ...detail(coalesce(t.first.nodes[0], {}))}
+    ], []),
+    ...coalesce([
+      unnest {g, x: [...coalesce([unnest coalesce(a.pr.reviews.nodes, []) | values {n: this, type: "review"}], []),
+                     ...coalesce([unnest coalesce(a.pr.comments.nodes, []) | values {n: this, type: "comment"}], [])]}
+      | where is_bot(coalesce(x.n.author, {}), g.bots) and not ignored(coalesce(x.n.author, {}), g.ign)
+            and grep("\\S", coalesce(x.n.body, "")) and not matches(coalesce(x.n.body, ""), g.ignore_body)
+            and not (x.n.id in g.handled)
+      | values {id: x.n.id, type: x.type, path: null, line: null, outdated: null, kind: "bot",
+                last: coalesce(x.n.author.login, null), mark: on(x.n.state == "CHANGES_REQUESTED") ? "!" : "i",
+                ...detail(x.n)}
+    ], []),
     -- A reviewer verdict is their latest approving, requesting or dismissed review.
-    ...coalesce([unnest {all: hv, e: hv}
-        | where on(e.r.state == "CHANGES_REQUESTED")
-              and len(coalesce([unnest {e, x: all} | where x.j > e.j and coalesce(x.r.author.login, "") == coalesce(e.r.author.login, "")], [])) == 0
-        | sort coalesce(e.r.author.login, "")
-        | values {id: e.r.id, type: "review", path: null, line: null, outdated: null, kind: "human",
-                  last: coalesce(e.r.author.login, null), mark: "!", ...detail(e.r)}], [])]}
+    ...coalesce([
+      unnest {all: hv, e: hv}
+      | where on(e.r.state == "CHANGES_REQUESTED")
+            and len(coalesce([unnest {e, x: all} | where x.j > e.j and coalesce(x.r.author.login, "") == coalesce(e.r.author.login, "")], [])) == 0
+      | sort coalesce(e.r.author.login, "")
+      | values {id: e.r.id, type: "review", path: null, line: null, outdated: null, kind: "human",
+                last: coalesce(e.r.author.login, null), mark: "!", ...detail(e.r)}
+    ], [])]}
 | values {s: a, c, ctx, owed, ob: coalesce([unnest owed | where kind == "bot"], [])}
 | values {
     branch: s.branch, head: s.head,
     pr: nul(s.pr) ? null : {number: s.pr.number, url: s.pr.url, state: s.pr.state, draft: s.pr.isDraft,
                             base: s.pr.baseRefName, head_sha: s.pr.headRefOid, mergeable: s.pr.mergeable,
                             merge_state: s.pr.mergeStateStatus, review_decision: s.pr.reviewDecision,
-                            review_requests: coalesce([unnest coalesce(s.pr.reviewRequests.nodes, [])
-                                                       | values coalesce(requestedReviewer.login, requestedReviewer.slug, null)
-                                                       | where this is not null], [])},
+                            review_requests: coalesce([
+                              unnest coalesce(s.pr.reviewRequests.nodes, [])
+                              | values coalesce(requestedReviewer.login, requestedReviewer.slug, null)
+                              | where this is not null
+                            ], [])},
     parent: {name: s.parent, source: s.parent_source, merged: s.parent_merged,
              pr: nul(s.parent_pr) ? null : {number: s.parent_pr.number, state: s.parent_pr.state, head_sha: s.parent_pr.headRefOid}},
     sync: {target: s.target, default: s.default_branch, ahead: s.sync_ahead, behind: s.behind, up_to_date: s.up_to_date,
@@ -361,8 +379,10 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
     bot: {command: nn(s.bot_command)},
     session: {enrolled: s.enrolled == "true", harness: nn(s.harness), id: nn(s.session), locked: s.lock != ""},
     stored: {handled: s.handled,
-             refs: unflatten(coalesce([unnest {p: f"refs/pr-tend/{s.branch}/", r: s.refs}
-                                       | values {key: [split(r, " ")[0][len(p):]], value: split(r, " ")[1]}], []))},
+             refs: unflatten(coalesce([
+               unnest {p: f"refs/pr-tend/{s.branch}/", r: s.refs}
+               | values {key: [split(r, " ")[0][len(p):]], value: split(r, " ")[1]}
+             ], []))},
     errors: s.errors
   }
 EOF
@@ -416,10 +436,12 @@ EOF
 read -r -d '' LONG <<'EOF' || true
 fn sp(k): k <= 0 ? "" : "                                                                                                                                                                                                        "[0:k]
 fn pad(s, w): s || sp(w - len(s))
-values {it: coalesce([unnest threads.items
-          | values {mark, type: this.type, author: coalesce(author, last, ""),
-                    text: sj(coalesce([unnest [nul(path) ? "" : f"{path}:{line}", coalesce(excerpt, "")] | where this != ""], []), "  "),
-                    url: coalesce(url, "")}], [])}
+values {it: coalesce([
+    unnest threads.items
+    | values {mark, type: this.type, author: coalesce(author, last, ""),
+              text: sj(coalesce([unnest [nul(path) ? "" : f"{path}:{line}", coalesce(excerpt, "")] | where this != ""], []), "  "),
+              url: coalesce(url, "")}
+  ], [])}
 | values {it, tw: coalesce([unnest it | values len(this.type) | sort -this][0], 0),
               aw: coalesce([unnest it | values len(author) | sort -this][0], 0),
               xw: coalesce([unnest it | values len(text) | sort -this][0], 0)}
