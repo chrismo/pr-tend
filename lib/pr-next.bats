@@ -101,10 +101,14 @@ step() { # step <key> <field> <jq-assignment...>
 }
 
 @test "a push that isn't ours: chrismo looks, and no push is suggested" {
-  [ "$(keys '.push.remote_ours = false' '.push.behind = 2' '.push.ahead = 1' '.push.diverged = true')" = foreign ]
-  [ "$(step foreign cmd '.push.remote_ours = false' '.push.behind = 2')" = "git log HEAD..origin/feat" ]
-  [ "$(step foreign say '.push.remote_ours = false' '.push.behind = 2')" = "origin/feat has 2 commits that aren't yours" ]
-  [ "$(step foreign say '.push.remote_ours = false' '.push.behind = 1')" = "origin/feat has 1 commit that isn't yours" ]
+  [ "$(keys '.push.remote_ours = false' '.push.behind = 2' '.push.theirs = 2' '.push.ahead = 1' '.push.diverged = true')" = foreign ]
+  [ "$(step foreign cmd '.push.remote_ours = false' '.push.behind = 2' '.push.theirs = 2')" = "git log HEAD..origin/feat" ]
+  [ "$(step foreign say '.push.remote_ours = false' '.push.behind = 2' '.push.theirs = 2')" = "origin/feat has 2 commits that aren't yours" ]
+  [ "$(step foreign say '.push.remote_ours = false' '.push.behind = 1' '.push.theirs = 1')" = "origin/feat has 1 commit that isn't yours" ]
+}
+
+@test "a push that isn't ours: our own pre-amend commits under it aren't counted" {
+  [ "$(step foreign say '.push.remote_ours = false' '.push.behind = 2' '.push.theirs = 1')" = "origin/feat has 1 commit that isn't yours" ]
 }
 
 @test "human items: chrismo replies, via the --long list" {
@@ -244,7 +248,7 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
 }
 
 @test "the remote and branch reach commands as data" {
-  [ "$(printf '%s\n' "$READY" | jq -c '.push.remote_ours = false | .push.behind = 1 | .branch = "a\"b"' \
+  [ "$(printf '%s\n' "$READY" | jq -c '.push.remote_ours = false | .push.behind = 1 | .push.theirs = 1 | .branch = "a\"b"' \
         | prn_next 'up"x' | jq -r '.[] | select(.key == "foreign") | .cmd')" = 'git log HEAD..up"x/a"b' ]
 }
 

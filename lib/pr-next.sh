@@ -22,7 +22,7 @@ fn why_blocked(m): m == "BLOCKED" ? "the merge is blocked" : m == "BEHIND" ? "th
                    : m == "DIRTY" ? "there are conflicts" : m == "DRAFT" ? "it'"'"'s a draft" : lower(m)
 values {...s, remote}
 | put open:=(pr is null or on(pr.state == "OPEN")), has_pr:=on(pr.state == "OPEN"),
-      foreign:=(on(push.remote_ours == false) and n(push.behind) > 0),
+      foreign:=(on(push.remote_ours == false) and n(push.theirs) > 0),
       bot_blocking:=(n(threads.owed_bot) - n(threads.info)),
       to_push:=(push.remote_sha is null or n(push.ahead) > 0),
       chase:=(on(sync.target != sync.default) or on(parent.merged)),
@@ -41,7 +41,7 @@ values {...s, remote}
       ? step("stale", "run", "fetch: GitHub is ahead of your remote refs, so the steps below may be wrong",
            f"git fetch --prune {remote}") : null,
     open and foreign
-      ? step("foreign", "you", f"{remote}/{branch} has {plural(push.behind, "commit")} that {push.behind == 1 ? "isn'"'"'t" : "aren'"'"'t"} yours",
+      ? step("foreign", "you", f"{remote}/{branch} has {plural(push.theirs, "commit")} that {push.theirs == 1 ? "isn'"'"'t" : "aren'"'"'t"} yours",
              f"git log HEAD..{remote}/{branch}") : null,
     open and n(threads.owed_human) > 0
       ? step("human", "you", f"reply to {plural(threads.owed_human, "human item")}", "pr-state --long") : null,

@@ -43,6 +43,7 @@ set -euo pipefail
 
 source "$(dirname "$(realpath "$0")")/../lib/pr-config.sh"
 source "$(dirname "$(realpath "$0")")/../lib/pr-next.sh"
+source "$(dirname "$(realpath "$0")")/../lib/pr-tend.sh"
 
 read -r -d '' QUERY <<'EOF' || true
 query($owner: String!, $repo: String!, $branch: String!) {
@@ -209,17 +210,19 @@ fi
 # ── O4 local vs remote ───────────────────────────────────────────────────────
 
 remote_sha=$(ref "refs/remotes/$remote/$branch")
-remote_ours=null diverged=false push_behind=0
+remote_ours=null diverged=false push_behind=0 theirs=null
 if [[ -z $remote_sha ]]; then
   ahead=$(count "$head" --not --remotes="$remote")
 else
   ahead=$(count "$remote_sha..$head")
   push_behind=$(count "$head..$remote_sha")
   (( ahead > 0 && push_behind > 0 )) && diverged=true
-  if grep -qx "$remote_sha" <<<"$(git reflog show --format=%H "refs/heads/$branch" 2>/dev/null)"; then
+  reflog=$(git reflog show --format=%H "refs/heads/$branch" 2>/dev/null) || reflog=
+  if grep -qx "$remote_sha" <<<"$reflog"; then
     remote_ours=true
   else
     remote_ours=false
+    theirs=$(commits_not_ours "$reflog" "$remote_sha")
   fi
 fi
 
@@ -277,7 +280,7 @@ state=$(jq -n \
   --arg target "$target" --arg default_branch "$default_branch" --argjson behind "$behind" --argjson up_to_date "$up_to_date" \
   --argjson old_base "$(jnull "$old_base")" --argjson conflict "$conflict" \
   --argjson remote_sha "$(jnull "$remote_sha")" --argjson ahead "$ahead" \
-  --argjson push_behind "$push_behind" --argjson diverged "$diverged" --argjson remote_ours "$remote_ours" \
+  --argjson push_behind "$push_behind" --argjson diverged "$diverged" --argjson remote_ours "$remote_ours" --argjson theirs "$theirs" \
   --argjson stale "$stale_json" \
   --argjson r_local "${review[local]}" --argjson r_bot "${review[bot]}" \
   --argjson r_accepted "${review[accepted]}" \
@@ -336,7 +339,7 @@ state=$(jq -n \
                pr: (if $parent_pr == null then null else
                       {number: $parent_pr.number, state: $parent_pr.state, head_sha: $parent_pr.headRefOid} end)},
       sync: {target: $target, default: $default_branch, behind: $behind, up_to_date: $up_to_date, old_base: $old_base, conflict: $conflict},
-      push: {remote_sha: $remote_sha, ahead: $ahead, behind: $push_behind, diverged: $diverged, remote_ours: $remote_ours},
+      push: {remote_sha: $remote_sha, ahead: $ahead, behind: $push_behind, diverged: $diverged, remote_ours: $remote_ours, theirs: $theirs},
       fresh: (if $gh_ok and $parent_ok then $stale == [] else null end), stale: $stale,
       ci: {sha: $c.oid, for_head: (if $c == null then null else $c.oid == $head end),
            verdict: (if ($ctx | length) == 0 then "none"

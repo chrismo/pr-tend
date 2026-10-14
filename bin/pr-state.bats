@@ -375,6 +375,26 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
   state
   [ "$(field .push.behind)" = 1 ]
   [ "$(field .push.remote_ours)" = false ]
+  [ "$(field .push.theirs)" = 1 ]
+}
+
+@test "push: our pre-amend commit under someone else's isn't counted as theirs" {
+  git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
+  git -C "$TMP/other" fetch -q && git -C "$TMP/other" switch -q feat
+  commit x.txt x "$TMP/other" && git -C "$TMP/other" push -q origin feat 2>/dev/null
+  printf 'a2\n' > a.txt && git commit -qa --amend --no-edit
+  git fetch -q
+  state
+  [ "$(field .push.behind)" = 2 ]
+  [ "$(field .push.remote_ours)" = false ]
+  [ "$(field .push.theirs)" = 1 ]
+}
+
+@test "push: theirs is null when the remote head is ours" {
+  git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
+  printf 'a2\n' > a.txt && git commit -qa --amend --no-edit
+  state
+  [ "$(field .push.theirs)" = null ]
 }
 
 # ── freshness: GitHub's SHAs vs the local remote-tracking refs ──────────────
