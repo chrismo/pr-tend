@@ -77,7 +77,7 @@ prc_branch_arg() { # <branch-or-empty>
   echo "$b"
 }
 
-# Duplicated from dscout bin/lib/superdb.sh. The asdf shim re-resolves on every
+# Duplicated from a work repo's bin/lib/superdb.sh. The asdf shim re-resolves on every
 # call (~14x slower), so call the pinned install directly; fall back to `super`
 # on PATH when no pinned install exists.
 prc_superdb_binary() {

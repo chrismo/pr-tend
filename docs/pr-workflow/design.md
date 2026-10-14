@@ -68,10 +68,10 @@ existing state.
 | Per-step turn cap | **No.** Neither CLI shows a turn-cap flag (`--help`, 2026-10-11); `--max-budget-usd` bounds Claude steps. |
 | Verify before reply | **No, for now.** Revisit if we move fix steps to cheaper models (OpenHands-style per-thread "was it incorporated?" check). |
 | Handed-off feedback | Multi-valued `branch.<name>.pr-handled <comment-id>` (git config `--add`). Mostly a guard for review bodies and in-flight steps; threads already dedup via "last speaker is us" (O7). |
-| Step prompts | Lookup chain, nearest wins: `<scope>/.pr-tend/<step>.md` walking up to the repo root → agent-rig defaults. `scope` = `branch.<name>.pr-scope`, set by `pr-act start --scope <app-dir>` (monorepo: per app); default repo root. |
+| Step prompts | Lookup chain, nearest wins: `<scope>/.pr-tend/<step>.md` walking up to the repo root → pr-tend defaults. `scope` = `branch.<name>.pr-scope`, set by `pr-act start --scope <app-dir>` (monorepo: per app); default repo root. |
 | Build vs adopt | Self-built. AO evaluated (below), not adopted; round 2 (2026-10-11) found nothing to adopt wholesale — see "Prior art, round 2". |
 | Who drives | **Pipeline drives, reaffirmed** after round 2. Symphony / Gas Town (agent drives the PR loop from prompts) are the opposite camp; Sortie / Archon match us. Keeps tokens down; stochastic only where judgment is needed. |
-| GitHub native stacks (`gh stack`) | **Not used by the pipeline.** Too heavy for local automation; read only for git tricks. Guard only: chrismo uses `gh stack` at work, so a branch can be in a native stack anyway — then O1 sees the `stack` field and the pipeline skips A2 / A4 (GitHub restacks server-side and refuses base edits) rather than race it. |
+| GitHub native stacks (`gh stack`) | **Not used by the pipeline.** Too heavy for local automation; read only for git tricks. Guard only: chrismo uses `gh stack` at work, so a branch can be in a native stack anyway — then O1 sees the `stack` field and the pipeline skips A2 / A4 (GitHub restacks server-side and refuses base edits) rather than race it. Not built: [#17]. |
 
 ## Harness adapter — the only per-agent code
 
@@ -263,7 +263,7 @@ The harness command and timeouts can't be overridden per step;
 **Not built:** warn when a step override sets `model` but not `effort` and an
 `effort` is inherited, because level names depend on the model (Sortie's
 `agent.effort.inherited`). Today nothing warns; the typed files only check that
-`effort` is one of the harness CLI's levels.
+`effort` is one of the harness CLI's levels. [#18]
 
 Each adapter maps these keys to its CLI flags (checked against `--help`,
 2026-10-12): claude `--model`, `--effort`; pi `--provider` (needs `--model`),
@@ -542,7 +542,7 @@ git config [--global] pr-tend.localReview <command>
 ```
 
 Any executable. What it does inside (prompt, model, emulating the backend bot
-or not) is out of scope; agent-rig defines only the contract, and ships a
+or not) is out of scope; pr-tend defines only the contract, and ships a
 default `bin/pr-review-local` (thin `claude -p` wrapper + prompt file). It
 invokes Claude through `harness_run` in `lib/pr-tend.sh`, so it gets the same auth handling
 (unset `ANTHROPIC_API_KEY`, never `--bare`).
@@ -698,31 +698,27 @@ from running them.
 3. `pr-act address` (bot feedback) + harness adapter — done, see below
 4. **Bootstrap spike.** Enroll an existing branch with no `pr-act start` and
    check that `pr-state` derives the missing records (A2 fallback chain). Every
-   later step assumes it works; if it doesn't, fix it first.
+   later step assumes it works; if it doesn't, fix it first. [#7]
 5. `pr-act restack` + `push` incl. reconciliation — done 2026-10-13, see below
 6. **Retarget**, pulled out of the old step 6: after a parent merges, restack
    onto `main` and change the PR's base. It is stack maintenance, so it sits
-   next to restack.
+   next to restack. [#8]
 7. `pr-act verify` — the zero-token half of the old step 5. Gates every later
-   step.
+   step. [#9]
 8. `pr-act ship` + `describe` — push, `gh pr create`, and the description step.
    After the other manual verbs because creating a PR by hand is the cheapest
-   thing chrismo does.
+   thing chrismo does. [#10]
 9. Local review (`bin/pr-review-local`) — the model half of the old step 5. With
-   no bot, it is the only source of review findings.
+   no bot, it is the only source of review findings. [#11]
 10. The loop: watcher dispatches verbs (below, "Process supervision"). After
-    4–9 because a verb has to behave by hand first.
-11. Bot trigger — waits until there is a bot to trigger.
+    4–9 because a verb has to behave by hand first. [#12]
+11. Bot trigger — waits until there is a bot to trigger. [#13]
 12. `pr-act start` + implement; `pr-act attach` — last; chrismo starts the work
-    himself while dogfooding.
+    by hand while dogfooding. [#14]
 
-Two decisions sit outside the list and change it:
-
-- **Extract the pipeline into its own repo** (chrismo is considering it) before
-  step 6. Retarget and ship both touch the namespace and config paths, so
-  moving after them means the rename and the move happen twice.
-- **Settle the name** before step 5 lands. Each verb adds state under
-  `pr-tend.*`, and a rename means migrating it.
+Two decisions that had to come before steps 5 and 6 are settled: the name is
+`pr-tend`, and the pipeline moved out of agent-rig into its own repo
+(2026-10-13).
 
 ## `pr-act address` — built 2026-10-12
 
@@ -823,14 +819,12 @@ merged PR's `headRefOid`), and each refusal and rollback above.
 `pr-act address` publishes through the same code, so its push follows the same
 rules: before, a plain `git push` failed on any rewritten branch.
 
-Not built yet: J1 (conflict resolution by an agent); per-pin bases
-([req-review #2](req-review.md#2-restacking-breaks-o6s-rewritten-by-rebase-check));
-the native `gh stack` guard (pr-state doesn't report a stack yet); rewriting
-`pr-parent` after the parent merges (req-review #8); retarget (step 6).
-Known: pr-state's `foreign` step counts `push.behind`, which includes our own
-pre-amend commits, so it can say "2 commits that aren't yours" where push says 1.
+Not built yet: J1, conflict resolution by an agent ([#15]); per-pin bases
+([#16]); the native `gh stack` guard ([#17]); retarget, including rewriting
+`pr-parent` after the parent merges ([#8]). Known: pr-state's `foreign` step
+overcounts ([#1]).
 
-## Process supervision — plan for the loop (not built)
+## Process supervision — plan for the loop (not built, [#12])
 
 From Symphony SPEC §7–8 and Sortie (`orchestrator/reconcile.go`, `slot.go`,
 `procutil/pgid_unix.go`, ADR-0002): a tick reconciles running work first, then
@@ -853,12 +847,12 @@ short-lived, so it can't own children like their daemons do. Plan:
 ## To verify (spikes before building on them)
 
 - ~~`--resume -p` keeps context across processes~~ observed for Claude (fork
-  spike, below); `pi -p --session` still unverified
+  spike, below); `pi -p --session` still unverified [#23]
 - resuming a session that's open interactively elsewhere — what breaks? (the
-  lock exists to prevent it; confirm it's needed)
+  lock exists to prevent it; confirm it's needed) [#20]
 - `--json-schema` for the describe step; pi equivalent, or fall back to commit
-  messages
-- GitHub auto-retarget on parent merge
+  messages [#21]
+- GitHub auto-retarget on parent merge [#22]
 - ~~patch-id false-escalation rate in A2~~ confirmed real; switch to `-U0` (above)
 - **Session ID stability:** Sortie's Claude adapter treats the minted
   `--session-id` as provisional and adopts whatever ID the runtime reports.
@@ -896,7 +890,7 @@ short-lived, so it can't own children like their daemons do. Plan:
 ## Known issues
 
 - **FIXED 2026-10-13: NEXT and pr-watch's ✅ said "ready to merge" when GitHub
-  blocked the merge** (found on PR dscout/dscout#30055: `reviewDecision:
+  blocked the merge** (found on a work PR: `reviewDecision:
   REVIEW_REQUIRED`, `mergeStateStatus: BLOCKED`). `pr-state` asked only for
   `mergeable` ("no conflicts"), and `ready` was what was left when no other step
   applied.
@@ -915,28 +909,10 @@ short-lived, so it can't own children like their daemons do. Plan:
   - pr-watch: ⏳ when every step is a wait; `blocked` is 🔧. Checked read-only
     on cli/cli#14640 (`REVIEW_REQUIRED` / `BLOCKED`, two users requested).
 
-  Still untested: `mergeStateStatus: BEHIND` may be the evidence that makes
-  "behind the default branch" a real step, on repos that require up-to-date
-  branches. #30055 was 50 behind main and still reported `BLOCKED`. So either
-  dscout doesn't require it, or `BLOCKED` takes precedence. Today `BEHIND`
-  alone gives the generic "GitHub says the branch is behind" step.
-- **`pr-state`: a clone of your own fork may not find the PR (untested).** If
-  a repo is cloned from your own fork, gh may query the fork instead of the
-  upstream project, so the PR wouldn't be found.
-- **Glyph only shows when the title is redrawn.** The watcher writes the glyph
-  file; the tab title picks it up the next time `tab-status` runs (a Claude hook).
-  A tab with no Claude session never redraws, and the shell-prompt title
-  (`set-title.sh`, deployed from the brain repo) doesn't read the glyph at all.
-- **Same-named worktrees in two repos share a glyph file.** Glyph files are
-  keyed by worktree basename, like `tab-status`'s own files. The branch check
-  hides a mismatch unless both enrolled branches also share a name.
-- **No command to unregister a repo (low priority).** `pr-act enroll` adds the
-  main worktree to global `pr-tend.repo`, but `pr-act unenroll` only clears the
-  branch mark, and `pr-watch uninstall` removes the whole launchd job. Nothing
-  removes one repo from the list, so a repo you no longer want watched stays
-  registered until `git config --global --unset pr-tend.repo <path>`. A
-  registered repo with no enrolled branches, or a missing directory, is skipped,
-  so the cost is clutter, not wrong behavior.
+  Still untested: whether `mergeStateStatus: BEHIND` makes "behind the default
+  branch" a real step ([#6]).
+
+Open bugs are tracked as issues: [#1], [#2], [#3], [#4], [#5].
 
 ## Open
 
@@ -962,7 +938,7 @@ short-lived, so it can't own children like their daemons do. Plan:
   human read. On vibe-friendly tasks it may not be needed: the watcher could
   ack on its own, or an agent could triage `i` items. Revisit with a per-PR
   signal, likely the same label that steers J5.
-- **TODO: move `pr-state`, `pr-act` and `pr-watch` from `jq` to SuperDB.**
+- **TODO: move `pr-state`, `pr-act` and `pr-watch` from `jq` to SuperDB** ([#19]).
   Decided 2026-10-13: SuperDB, always. `pr-config` is done. The rest still shell
   out to `jq`, including the `CLASSIFY` filter and the GraphQL shaping. Not part
   of the restack work. **Caution:** super 0.3.0 panicked intermittently on one
@@ -988,3 +964,27 @@ clones in `~/modev/pr-workflow-prior-art/` (sortie, av, gh-stack, attractor, sym
   layer).
 - **Still distinctive:** stack-aware restack with a post-condition, local review
   before the bot, git-native state.
+
+[#1]: https://github.com/chrismo/pr-tend/issues/1
+[#2]: https://github.com/chrismo/pr-tend/issues/2
+[#3]: https://github.com/chrismo/pr-tend/issues/3
+[#4]: https://github.com/chrismo/pr-tend/issues/4
+[#5]: https://github.com/chrismo/pr-tend/issues/5
+[#6]: https://github.com/chrismo/pr-tend/issues/6
+[#7]: https://github.com/chrismo/pr-tend/issues/7
+[#8]: https://github.com/chrismo/pr-tend/issues/8
+[#9]: https://github.com/chrismo/pr-tend/issues/9
+[#10]: https://github.com/chrismo/pr-tend/issues/10
+[#11]: https://github.com/chrismo/pr-tend/issues/11
+[#12]: https://github.com/chrismo/pr-tend/issues/12
+[#13]: https://github.com/chrismo/pr-tend/issues/13
+[#14]: https://github.com/chrismo/pr-tend/issues/14
+[#15]: https://github.com/chrismo/pr-tend/issues/15
+[#16]: https://github.com/chrismo/pr-tend/issues/16
+[#17]: https://github.com/chrismo/pr-tend/issues/17
+[#18]: https://github.com/chrismo/pr-tend/issues/18
+[#19]: https://github.com/chrismo/pr-tend/issues/19
+[#20]: https://github.com/chrismo/pr-tend/issues/20
+[#21]: https://github.com/chrismo/pr-tend/issues/21
+[#22]: https://github.com/chrismo/pr-tend/issues/22
+[#23]: https://github.com/chrismo/pr-tend/issues/23
