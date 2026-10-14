@@ -22,6 +22,7 @@ setup() {
   mkdir -p "$GH" "$TMP/fakebin"
   cat > "$TMP/fakebin/gh" <<'EOF'
 #!/usr/bin/env bash
+if [[ $1 == pr && $2 == edit ]]; then echo "$*" >> "$GH/calls"; exit 0; fi
 b=""
 for a; do [[ $a == branch=* ]] && b=${a#branch=}; done
 [[ ${GH_FAIL_FOR:-} == "$b" ]] && { echo "gh: boom for $b" >&2; exit 1; }
@@ -66,6 +67,26 @@ open_pr() {
     repository: {defaultBranchRef: {name: "main"},
       pullRequests: {nodes: [{number: $n, state: "OPEN", baseRefName: $base, headRefName: $b,
                               headRefOid: $h, isCrossRepository: false}]}}}}' > "$GH/$1.json"
+}
+
+# closed_pr <branch> <head-sha>: gh says <branch>'s PR was closed without merging.
+closed_pr() {
+  jq -n --arg b "$1" --arg h "$2" '{data: {viewer: {login: "me"},
+    repository: {defaultBranchRef: {name: "main"},
+      pullRequests: {nodes: [{number: 1, state: "CLOSED", baseRefName: "main", headRefName: $b,
+                              headRefOid: $h, isCrossRepository: false}]}}}}' > "$GH/$1.json"
+}
+
+# stacked_child: A off main, child off A with pr-parent A; both pushed. Sets $a_head.
+stacked_child() {
+  git switch -q main && git switch -qc A
+  edit 's/^c$/C/' a1
+  git push -q origin A 2>/dev/null
+  a_head=$(git rev-parse A)
+  git switch -qc child
+  edit 's/^f$/F/' child
+  git push -q -u origin child 2>/dev/null
+  git config branch.child.pr-parent A
 }
 
 remote_feat() { git ls-remote origin refs/heads/feat | cut -f1; }
@@ -127,6 +148,68 @@ base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
   [ "$(git log --format=%s origin/main..child)" = child ]
   grep -qx C file.txt && grep -qx D file.txt && grep -qx F file.txt
   [ "$(git rev-parse refs/pr-tend/child/base)" = "$(git rev-parse origin/main)" ]
+  [ "$(git config branch.child.pr-parent)" = main ]
+}
+
+@test "restack onto a parent closed without merging is refused" {
+  stacked_child
+  closed_pr A "$a_head"
+  upstream A 's/^d$/D/' a2
+  run "$PR_ACT" restack
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"closed without merging"* ]]
+  [ "$(git rev-parse child^)" = "$a_head" ]
+}
+
+# ── retarget ─────────────────────────────────────────────────────────────────
+
+@test "retarget: parent merged, PR still on it: base edited to main, pr-parent rewritten" {
+  stacked_child
+  merged_pr A "$a_head"
+  open_pr child A 2
+  run "$PR_ACT" retarget
+  [ "$status" -eq 0 ]
+  [ "$(cat "$GH/calls")" = "pr edit 2 --base main" ]
+  [ "$(git config branch.child.pr-parent)" = main ]
+}
+
+@test "retarget: the PR already targets main (GitHub did it): no edit, pr-parent still rewritten" {
+  stacked_child
+  merged_pr A "$a_head"
+  open_pr child main 2
+  run "$PR_ACT" retarget
+  [ "$status" -eq 0 ]
+  [ ! -e "$GH/calls" ]
+  [ "$(git config branch.child.pr-parent)" = main ]
+}
+
+@test "retarget: parent still open: refused" {
+  stacked_child
+  open_pr A main 1
+  open_pr child A 2
+  run "$PR_ACT" retarget
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"hasn't merged"* ]]
+  [ ! -e "$GH/calls" ]
+  [ "$(git config branch.child.pr-parent)" = A ]
+}
+
+@test "retarget: parent closed without merging: refused, says so" {
+  stacked_child
+  closed_pr A "$a_head"
+  open_pr child A 2
+  run "$PR_ACT" retarget
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"closed without merging"* ]]
+  [ ! -e "$GH/calls" ]
+}
+
+@test "retarget: a branch with no PR is refused" {
+  stacked_child
+  merged_pr A "$a_head"
+  run "$PR_ACT" retarget
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no PR"* ]]
 }
 
 @test "stacked on an open parent: onto the parent, not main" {

@@ -10,6 +10,7 @@
 #   pr-act address  [--force] [--no-publish] [--harness <h>] [<branch>]
 #   pr-act ack      [--id <id>]... [<branch>]
 #   pr-act restack  [--force] [<branch>]
+#   pr-act retarget [<branch>]
 #   pr-act push     [--force] [<branch>]
 #   pr-act verify   [<branch>]
 #
@@ -35,7 +36,11 @@
 #             every i item, or only the --id ones (ids from pr-state --json)
 #   restack   rebase --onto the parent (the default branch once the parent
 #             merged), check the branch's own change came through unchanged,
-#             else roll back; never pushes
+#             else roll back; never pushes. Once the branch lands on the
+#             default branch, pr-parent is rewritten to it
+#   retarget  after the parent merged: point the PR at the default branch
+#             (gh pr edit --base; GitHub usually did it already when the
+#             parent's branch was deleted) and rewrite pr-parent to it
 #   push      publish: a plain push for new commits; rewritten history is
 #             force-pushed with a lease, only over a remote head of our own.
 #             Never over commits this copy has never had, --force or not
@@ -447,7 +452,9 @@ patch_id() { git diff -U0 "$1" "$2" | git patch-id --stable | cut -d' ' -f1; }
 read -r -d '' RESTACK_GATE <<'EOF' || true
 (.errors // [] | join("; ")) as $why
 | "\($remote)/\(.sync.target)" as $onto
-| [ if .parent.merged == null and .parent.name != .sync.default
+| [ if .parent.pr.state == "CLOSED" and .parent.name != .sync.default
+      then {hard: "\(.parent.name)'s PR #\(.parent.pr.number) was closed without merging; decide what \(.branch) targets"}
+    elif .parent.merged == null and .parent.name != .sync.default
       then {hard: "can't tell whether \(.parent.name) merged: \($why)"} else empty end,
     if .sync.up_to_date == null or (.sync.up_to_date == false and .sync.old_base == null)
       then {hard: "can't restack \(.branch): \($why)"}
@@ -494,6 +501,51 @@ restack() {
   fi
   git update-ref -m "pr-act restack" "refs/pr-tend/$b/base" "$new_base"
   echo "restacked $b onto $remote/$target ($(plural "$(git rev-list --count "$new_base..$new_head")" commit)); not pushed: pr-act push"
+  parent_to_default "$b" "$state"
+}
+
+# parent_to_default <branch> <state>: once the branch is on the default branch,
+# a pr-parent naming the merged parent only makes every later pass look up a
+# dead PR. Rewrite it when the target is the default branch.
+parent_to_default() {
+  local b=$1 default target
+  default=$(jq -r .sync.default <<<"$2") target=$(jq -r .sync.target <<<"$2")
+  [[ $target == "$default" ]] || return 0
+  [[ -n $(git config --get "branch.$b.pr-parent" || true) ]] || return 0
+  git config "branch.$b.pr-parent" "$default"
+  echo "pr-parent of $b is now $default"
+}
+
+# ── retarget ─────────────────────────────────────────────────────────────────
+
+read -r -d '' RETARGET_GATE <<'EOF' || true
+(.errors // [] | join("; ")) as $why
+| if .pr == null then {hard: "no PR for \(.branch)\(if $why != "" then ": \($why)" else "" end)"}
+  elif .pr.state != "OPEN" then {hard: "PR #\(.pr.number) is \(.pr.state | ascii_downcase)"}
+  elif .parent.name == .sync.default and .pr.base == .sync.default then {done: "PR #\(.pr.number) already targets \(.sync.default)"}
+  elif .parent.pr.state == "CLOSED" then {hard: "\(.parent.name)'s PR #\(.parent.pr.number) was closed without merging; decide what \(.branch) targets"}
+  elif .parent.merged == null then {hard: "can't tell whether \(.parent.name) merged: \($why)"}
+  elif .parent.merged == false then {hard: "\(.parent.name) hasn't merged; PR #\(.pr.number) stays on it"}
+  elif .pr.base == .sync.default then {done: "PR #\(.pr.number) already targets \(.sync.default) (GitHub retargeted it)"}
+  else {edit: "\(.pr.number)"} end
+EOF
+
+retarget() {
+  local b=$branch state gate line default number
+  state=$(pr-state --json "$b") || die "pr-state failed"
+  gate=$(jq -c "$RETARGET_GATE" <<<"$state")
+  line=$(jq -r '.hard // empty' <<<"$gate")
+  [[ -z $line ]] || die "$line"
+  default=$(jq -r .sync.default <<<"$state")
+  line=$(jq -r '.done // empty' <<<"$gate")
+  if [[ -n $line ]]; then
+    echo "$line"
+  else
+    number=$(jq -r .edit <<<"$gate")
+    gh pr edit "$number" --base "$default" >/dev/null || die "gh pr edit --base $default failed for PR #$number"
+    echo "PR #$number now targets $default (was $(jq -r .pr.base <<<"$state"))"
+  fi
+  parent_to_default "$b" "$state"
 }
 
 # ── ack ──────────────────────────────────────────────────────────────────────
@@ -580,6 +632,7 @@ case $verb in
   address) address ;;
   ack) ack ;;
   restack) restack ;;
+  retarget) retarget ;;
   push) push ;;
   verify) verify ;;
   *) die "unknown verb: $verb" ;;

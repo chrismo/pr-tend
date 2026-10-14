@@ -83,12 +83,6 @@ so A2's `<new-base>` has nothing to point at and `gh pr create --base A` fails.
 Either the child waits for the parent's first ship, or the restack target falls
 back to local `A`.
 
-### 8. Parent closed without merging
-
-O2 only knows open / merged; a child of abandoned work should escalate.
-Related: after a child restacks onto `main`, should `pr-parent` be rewritten to
-`main`? Otherwise every later pass looks up a dead PR.
-
 ### 9. Someone else's fast-forward is treated as a foreign push
 
 GitHub's "Commit suggestion" and "Update branch", and fixer bots

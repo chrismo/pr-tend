@@ -29,6 +29,7 @@ values {...s, remote}
       merge_state:=coalesce(pr.merge_state, "UNKNOWN"),
       review_required:=on(pr.review_decision == "REVIEW_REQUIRED"),
       stacked:=(on(pr.base != sync.default) and (on(parent.pr.state == "OPEN") or on(parent.merged))),
+      parent_closed:=(on(pr.base != sync.default) and on(parent.pr.state == "CLOSED")),
       restack:=(sync.old_base is null ? f"git rebase {remote}/{sync.target}"
                 : f"git rebase --onto {remote}/{sync.target} {sync.old_base[0:12]}"),
       need_review:=((trails(review.local) or trails(review.bot) or trails(review.accepted))
@@ -46,9 +47,9 @@ values {...s, remote}
              f"git log HEAD..{remote}/{branch}") : null,
     open and n(threads.owed_human) > 0
       ? step("human", "you", f"reply to {plural(threads.owed_human, "human item")}", "pr-state --long") : null,
-    open and on(sync.up_to_date == false) and on(sync.conflict)
+    open and not parent_closed and on(sync.up_to_date == false) and on(sync.conflict)
       ? step("conflict", "agent", f"restack onto {sync.target} conflicts: resolve it", restack) : null,
-    open and on(sync.up_to_date == false) and not on(sync.conflict) and chase
+    open and not parent_closed and on(sync.up_to_date == false) and not on(sync.conflict) and chase
       ? step("behind", "run", f"restack onto {sync.target} ({sync.behind} behind)",
              sync.old_base is null ? restack : "pr-act restack") : null,
     has_pr and on(ci.verdict == "red")
@@ -68,15 +69,16 @@ values {...s, remote}
     has_pr and not to_push and (on(ci.verdict == "pending") or on(ci.for_head == false))
       ? step("ci-wait", "wait", on(ci.verdict == "pending") ? "CI running" : "CI hasn'"'"'t reported on HEAD yet",
              "gh pr checks --watch") : null,
+    has_pr and parent_closed
+      ? step("parent-closed", "you", f"{parent.name} (#{parent.pr.number}) was closed without merging: decide what this PR targets", null) : null,
     has_pr and stacked and on(parent.merged)
-      ? step("retarget", "you", f"{pr.base} already merged: point this PR at {sync.default}",
-             f"gh pr edit --base {sync.default}") : null,
+      ? step("retarget", "run", f"{pr.base} already merged: point this PR at {sync.default}", "pr-act retarget") : null,
     has_pr and stacked and not on(parent.merged)
       ? step("parent-wait", "wait", f"waiting on {parent.name} (#{parent.pr.number}) to merge first", null) : null,
     has_pr and review_required
       ? step("review-wait", "wait", len(coalesce(pr.review_requests, [])) > 0
              ? f"waiting on review from {join(pr.review_requests, ", ")}" : "waiting on a required review", null) : null,
-    has_pr and not review_required and not stacked
+    has_pr and not review_required and not stacked and not parent_closed
       ? (merge_state in ["CLEAN", "UNSTABLE", "HAS_HOOKS"] ? step("ready", "you", "ready to merge", "gh pr merge")
          : merge_state == "UNKNOWN" ? step("merge-wait", "wait", "GitHub hasn'"'"'t decided whether it can merge yet", null)
          : step("blocked", "you", f"GitHub says {why_blocked(merge_state)}: see why", "gh pr view --web")) : null

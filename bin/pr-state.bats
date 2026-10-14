@@ -270,6 +270,16 @@ field() { jq -r "$@" <<<"$output"; }
   [ "$(field .parent.merged)" = false ]
 }
 
+@test "parent closed without merging: not merged, and the state says so" {
+  git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.pr-parent parent
+  pr_fixture parent '.number = 3' '.state = "CLOSED"'
+  state
+  [ "$(field .parent.merged)" = false ]
+  [ "$(field .parent.pr.state)" = CLOSED ]
+}
+
 # ── O3 sync vs parent ────────────────────────────────────────────────────────
 
 @test "sync: names the default branch" {
@@ -536,7 +546,8 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
   git switch -qc feat && commit a.txt a
   git update-ref refs/pr-tend/feat/local HEAD
   git update-ref refs/pr-tend/feat/local-base p
-  commit p.txt p "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null  # p squash-merged
+  # p squash-merged: different content, else the squash commit can get p's own SHA (same tree, same second)
+  commit p.txt "p, squashed" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
   git fetch -q && git rebase -q --onto origin/main p feat
   state
   [ "$(field .review.local.status)" = rewritten-same ]
@@ -546,7 +557,7 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
   git switch -qc p && commit p.txt p
   git switch -qc feat && commit a.txt a
   git update-ref refs/pr-tend/feat/local HEAD
-  commit p.txt p "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
+  commit p.txt "p, squashed" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
   git fetch -q && git rebase -q --onto origin/main p feat
   state
   [ "$(field .review.local.status)" = rewritten-changed ]

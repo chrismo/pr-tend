@@ -75,12 +75,21 @@ step() { # step <key> <field> <jq-assignment...>
   [ "$(keys "${st[@]}" '.push.ahead = 1')" = "push parent-wait" ]
 }
 
-@test "the parent merged but the PR still targets it: chrismo points it at the default branch" {
+@test "the parent merged but the PR still targets it: retarget points it at the default branch" {
   local st=('.pr.base = "p"' '.parent = {"name": "p", "source": "pr", "merged": true, "pr": {"number": 25, "state": "MERGED", "head_sha": "x"}}')
   [ "$(keys "${st[@]}")" = retarget ]
-  [ "$(step retarget who "${st[@]}")" = you ]
+  [ "$(step retarget who "${st[@]}")" = run ]
   [ "$(step retarget say "${st[@]}")" = "p already merged: point this PR at main" ]
-  [ "$(step retarget cmd "${st[@]}")" = "gh pr edit --base main" ]
+  [ "$(step retarget cmd "${st[@]}")" = "pr-act retarget" ]
+}
+
+@test "the parent closed without merging: chrismo decides; no restack, never ready" {
+  local st=('.pr.base = "p"' '.sync.target = "p"' '.sync.up_to_date = false' '.sync.behind = 2'
+            '.parent = {"name": "p", "source": "config", "merged": false, "pr": {"number": 25, "state": "CLOSED", "head_sha": "x"}}')
+  [ "$(keys "${st[@]}")" = parent-closed ]
+  [ "$(step parent-closed who "${st[@]}")" = you ]
+  [ "$(step parent-closed say "${st[@]}")" = "p (#25) was closed without merging: decide what this PR targets" ]
+  [ "$(keys "${st[@]}" '.push.ahead = 1')" = "push parent-closed" ]
 }
 
 @test "a base branch with no PR of its own (a release branch) can still be ready" {
