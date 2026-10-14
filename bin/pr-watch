@@ -33,7 +33,8 @@ source "$(dirname "$(realpath "$0")")/../lib/pr-config.sh"
 
 STATE_DIR=${PR_TEND_STATE_DIR:-$HOME/.local/state/pr-tend}
 STATUS_DIR=${STATUS_DIR:-$HOME/.claude/tab-status}
-LABEL=com.agent-rig.pr-watch
+LABEL=com.pr-tend.pr-watch
+OLD_LABEL=com.agent-rig.pr-watch  # before the move out of agent-rig; retired on install/uninstall
 LAUNCH_AGENTS=${PR_WATCH_LAUNCH_AGENTS:-$HOME/Library/LaunchAgents}
 TIMEOUT=${PR_WATCH_TIMEOUT:-120}
 
@@ -196,12 +197,20 @@ install_job() {
 EOF
   plutil -lint -s "$tmp" || { rm -f "$tmp"; echo "pr-watch: generated plist is invalid" >&2; exit 1; }
   mv "$tmp" "$plist"
+  retire_old_label
   launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
   launchctl bootstrap "gui/$(id -u)" "$plist"
   echo "installed $plist (every ${interval}s)"
 }
 
+# A machine that installed under the old label would otherwise run two watchers.
+retire_old_label() {
+  launchctl bootout "gui/$(id -u)/$OLD_LABEL" 2>/dev/null || true
+  rm -f "$LAUNCH_AGENTS/$OLD_LABEL.plist"
+}
+
 uninstall_job() {
+  retire_old_label
   launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
   rm -f "$(plist_path)"
   echo "uninstalled $LABEL"

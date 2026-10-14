@@ -30,8 +30,9 @@ exactly. `claude` and/or `pi` for the agent steps.
 
 - `pr-watch` writes a glyph per worktree to `~/.claude/tab-status/<worktree>.pr`
   (`$STATUS_DIR`), which agent-rig's `tab-status` reads.
-- The launchd job is labelled `com.agent-rig.pr-watch`, a holdover from when
-  this lived in agent-rig.
+- The launchd job is labelled `com.pr-tend.pr-watch`. `pr-watch install` and
+  `uninstall` also retire `com.agent-rig.pr-watch`, its label before the move
+  out of agent-rig.
 
 ## Tests
 
