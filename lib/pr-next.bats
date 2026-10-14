@@ -66,6 +66,27 @@ step() { # step <key> <field> <jq-assignment...>
   [ "$(keys '.ci.verdict = "pending"' '.pr.merge_state = "UNKNOWN"')" = ci-wait ]
 }
 
+@test "stacked on an open parent PR: wait for the parent, never ready" {
+  local st=('.pr.base = "p"' '.sync.target = "p"'
+            '.parent = {"name": "p", "source": "pr", "merged": false, "pr": {"number": 25, "state": "OPEN", "head_sha": "x"}}')
+  [ "$(keys "${st[@]}")" = parent-wait ]
+  [ "$(step parent-wait who "${st[@]}")" = wait ]
+  [ "$(step parent-wait say "${st[@]}")" = "waiting on p (#25) to merge first" ]
+  [ "$(keys "${st[@]}" '.push.ahead = 1')" = "push parent-wait" ]
+}
+
+@test "the parent merged but the PR still targets it: chrismo points it at the default branch" {
+  local st=('.pr.base = "p"' '.parent = {"name": "p", "source": "pr", "merged": true, "pr": {"number": 25, "state": "MERGED", "head_sha": "x"}}')
+  [ "$(keys "${st[@]}")" = retarget ]
+  [ "$(step retarget who "${st[@]}")" = you ]
+  [ "$(step retarget say "${st[@]}")" = "p already merged: point this PR at main" ]
+  [ "$(step retarget cmd "${st[@]}")" = "gh pr edit --base main" ]
+}
+
+@test "a base branch with no PR of its own (a release branch) can still be ready" {
+  [ "$(keys '.pr.base = "release"' '.sync.target = "release"' '.parent = {"name": "release", "source": "pr", "merged": false, "pr": null}')" = ready ]
+}
+
 @test "blocked for another reason: chrismo looks on GitHub" {
   [ "$(step blocked who '.pr.merge_state = "BLOCKED"' '.pr.review_decision = "APPROVED"')" = you ]
   [ "$(step blocked say '.pr.merge_state = "BLOCKED"')" = "GitHub says the merge is blocked: see why" ]
