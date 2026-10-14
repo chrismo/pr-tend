@@ -30,7 +30,29 @@ if [[ -f $GH/$b.json ]]; then cat "$GH/$b.json"
 else echo '{"data":{"viewer":{"login":"me"},"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"nodes":[]}}}}'
 fi
 EOF
-  chmod +x "$TMP/fakebin/gh"
+  export FX="$TMP/fx"; mkdir -p "$FX"
+  cat > "$TMP/fakebin/claude" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FX/claude.args"
+args=("$@") prompt= i=0
+while (( i < $# )); do
+  case ${args[i]} in
+    --allowedTools|--disallowedTools)
+      i=$((i + 1)); while (( i < $# )) && [[ ${args[i]} != -* ]]; do i=$((i + 1)); done; continue ;;
+    --session-id|--resume|--output-format|--json-schema|--permission-mode|--model|--effort|--max-turns) i=$((i + 2)); continue ;;
+    -*) ;;
+    *) prompt=${args[i]} ;;
+  esac
+  i=$((i + 1))
+done
+printf '%s' "$prompt" > "$FX/claude.prompt"
+echo "$PWD" >> "$FX/claude.calls"
+[[ -x $FX/agent ]] && "$FX/agent"
+[[ -e $FX/fail ]] && { echo "claude: boom" >&2; exit 1; }
+jq -n --argjson r "$(cat "$FX/result.json")" '{type: "result", is_error: false, structured_output: $r}'
+EOF
+  chmod +x "$TMP/fakebin/gh" "$TMP/fakebin/claude"
+  echo '{"outcome": "done", "summary": "kept both"}' > "$FX/result.json"
   export PATH="$BATS_TEST_DIRNAME:$TMP/fakebin:$PATH"
 
   git init -q --bare "$TMP/origin.git"
@@ -235,6 +257,7 @@ base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
   [ "$status" -eq 1 ]
   [[ "$output" == *"would conflict"* ]]
   [[ "$output" == *"git rebase --onto origin/main"* ]]
+  [[ "$output" == *"pr-act restack --resolve"* ]]
   [ "$(git rev-parse HEAD)" = "$before" ]
   [ -z "$(base_pin)" ]
 }
@@ -361,4 +384,128 @@ base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
   [ "$status" -eq 0 ]
   [ -z "$(git config branch.feat.pr-parent || true)" ]
   [ -z "$(base_pin)" ]
+}
+
+# ── --resolve: the agent resolves conflicts (J1) ─────────────────────────────
+
+# resolver <replacement>: an agent that replaces every conflict block in
+# file.txt with one line.
+resolver() {
+  printf '#!/usr/bin/env bash\nperl -0pi -e "s/<<<<<<<.*?>>>>>>>[^\\n]*\\n/%s\\n/sg" file.txt\n' "$1" > "$FX/agent"
+  chmod +x "$FX/agent"
+}
+rebase_in_progress() { [[ -e $(git rev-parse --git-path rebase-merge) || -e $(git rev-parse --git-path rebase-apply) ]]; }
+
+@test "--resolve: the agent resolves a predicted conflict; base pinned; its change is unreviewed" {
+  upstream main 's/^g$/X/'
+  resolver GX
+  run "$PR_ACT" restack --resolve
+  [ "$status" -eq 0 ]
+  [ "$(git rev-parse feat^)" = "$(git rev-parse origin/main)" ]
+  grep -qx GX file.txt
+  ! grep -q '<<<<<<<' file.txt
+  [ "$(base_pin)" = "$(git rev-parse origin/main)" ]
+  [[ "$output" == *"resolved"* ]]
+  [[ "$output" == *"pr-act review"* ]]
+  ! rebase_in_progress
+  [ -z "$(git status --porcelain)" ]
+}
+
+@test "--resolve: the agent sees the conflicting files and hunks, in the branch's session, edit tools only" {
+  git config branch.feat.pr-task "capitalise g"
+  upstream main 's/^g$/X/'
+  resolver GX
+  "$PR_ACT" restack --resolve >/dev/null
+  grep -q 'file.txt' "$FX/claude.prompt"
+  grep -q '<<<<<<<' "$FX/claude.prompt"
+  grep -q 'capitalise g' "$FX/claude.prompt"
+  [ "$(cat "$FX/claude.calls")" = "$TMP/repo" ]
+  sid=$(git config branch.feat.pr-session)
+  [ -n "$sid" ]
+  grep -qx -- "$sid" "$FX/claude.args"
+  allow=$(grep -A1 -x -- --allowedTools "$FX/claude.args" | tail -1)
+  [[ $allow == *Edit* && $allow != *"git add"* && $allow != *"rebase"* ]]
+}
+
+@test "--resolve: a conflict partway through goes to the agent too" {
+  edit 's/^e$/E/' there
+  edit 's/^E$/e/' back
+  upstream main 's/^e$/X/'
+  resolver X
+  run "$PR_ACT" restack --resolve
+  [ "$status" -eq 0 ]
+  # both stops resolved to main's line, so git dropped the two now-empty commits
+  [ "$(wc -l < "$FX/claude.calls" | tr -d ' ')" = 2 ]
+  [ "$(git rev-parse feat^)" = "$(git rev-parse origin/main)" ]
+  grep -qx X file.txt && grep -qx G file.txt
+  ! rebase_in_progress
+}
+
+@test "--resolve: the agent giving up rolls back" {
+  upstream main 's/^g$/X/'
+  echo '{"outcome": "gave-up", "summary": "no sensible merge"}' > "$FX/result.json"
+  before=$(git rev-parse HEAD)
+  run "$PR_ACT" restack --resolve
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gave up"* ]]
+  [[ "$output" == *"no sensible merge"* ]]
+  [ "$(git rev-parse HEAD)" = "$before" ]
+  ! rebase_in_progress
+  [ -z "$(git status --porcelain)" ]
+  [ -z "$(base_pin)" ]
+}
+
+@test "--resolve: leftover conflict markers roll back" {
+  upstream main 's/^g$/X/'
+  printf '#!/usr/bin/env bash\ntrue\n' > "$FX/agent" && chmod +x "$FX/agent"
+  before=$(git rev-parse HEAD)
+  run "$PR_ACT" restack --resolve
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"conflict markers"* ]]
+  [ "$(git rev-parse HEAD)" = "$before" ]
+  ! rebase_in_progress
+}
+
+@test "--resolve: the agent step failing rolls back" {
+  upstream main 's/^g$/X/'
+  touch "$FX/fail"
+  before=$(git rev-parse HEAD)
+  run "$PR_ACT" restack --resolve
+  [ "$status" -eq 1 ]
+  [ "$(git rev-parse HEAD)" = "$before" ]
+  ! rebase_in_progress
+}
+
+@test "--resolve: verify runs on the result; a failure keeps the rebased branch and says so" {
+  "$BATS_TEST_DIRNAME/pr-config" set --global settings.verify "grep -qx nope file.txt"
+  upstream main 's/^g$/X/'
+  resolver GX
+  run "$PR_ACT" restack --resolve
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"verify failed"* ]]
+  [ "$(git rev-parse feat^)" = "$(git rev-parse origin/main)" ]
+  [ "$(base_pin)" = "$(git rev-parse origin/main)" ]
+}
+
+@test "--resolve: more than 3 stops gives up and rolls back" {
+  edit 's/^a$/A/' a1
+  edit 's/^b$/B/' b1
+  edit 's/^c$/C/' c1
+  edit 's/^d$/D/' d1
+  upstream main 's/^a$/1/; s/^b$/2/; s/^c$/3/; s/^d$/4/'
+  resolver R
+  before=$(git rev-parse HEAD)
+  run "$PR_ACT" restack --resolve
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"stopped 4 times"* ]]
+  [ "$(git rev-parse HEAD)" = "$before" ]
+  ! rebase_in_progress
+}
+
+@test "--resolve with nothing to resolve is a plain restack, no agent" {
+  upstream main 's/^b$/B/'
+  run "$PR_ACT" restack --resolve
+  [ "$status" -eq 0 ]
+  [ ! -e "$FX/claude.calls" ]
+  [ "$(git rev-parse feat^)" = "$(git rev-parse origin/main)" ]
 }

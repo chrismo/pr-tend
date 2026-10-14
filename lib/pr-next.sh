@@ -52,7 +52,7 @@ values {...s, remote}
     open and n(threads.owed_human) > 0
       ? step("human", "you", f"reply to {plural(threads.owed_human, "human item")}", "pr-state --long") : null,
     open and not parent_closed and on(sync.up_to_date == false) and on(sync.conflict)
-      ? step("conflict", "agent", f"restack onto {sync.target} conflicts: resolve it", restack) : null,
+      ? step("conflict", "agent", f"restack onto {sync.target} conflicts: resolve it", "pr-act restack --resolve") : null,
     open and not parent_closed and on(sync.up_to_date == false) and not on(sync.conflict) and chase
       ? step("behind", "run", f"restack onto {sync.target} ({sync.behind} behind)",
              sync.old_base is null ? restack : "pr-act restack")

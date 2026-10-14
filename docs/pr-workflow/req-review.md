@@ -24,17 +24,6 @@ state or the state machine itself, not just its details.
 
 ## Would break the loop
 
-### 1. A resolved restack conflict always escalates
-
-*Case: stack, parent moved, rebase conflicts.* A2 stops on the conflict, J1
-fixes it, and then the A2 post-condition compares patch-ids before and after.
-A conflict resolution changes the branch's diff by definition, so the patch-ids
-never match. The pipeline resets to the old HEAD and escalates: J1 can never
-succeed.
-
-Fix: apply the post-condition only to a clean rebase. After J1, the branch goes
-through `check` (verify, then local review) instead.
-
 ### 3. Lock / in-flight gates only agent steps, not mechanical ones
 
 *Case: parent merges while a child's agent step runs, or while chrismo is

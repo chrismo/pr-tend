@@ -483,7 +483,11 @@ after  = git diff <new-base>     HEAD       | git patch-id --stable
 ```
 
 Equal → write new `base` pin, done. Not equal → reset to old HEAD, escalate.
-[req-review #1](req-review.md#1-a-resolved-restack-conflict-always-escalates)
+Only for a clean rebase: a conflict resolved by the agent (J1, `pr-act restack
+--resolve`, built 2026-10-14) changes the diff by definition, so a resolved
+rebase skips the check, pins the base, runs verify, and goes to local review.
+Each stop is one agent step in the branch's session with edit tools only; the
+pipeline checks for leftover markers, adds and continues; 3 stops is the cap.
 
 **Observed (subagent probe, git 2.53, 2026-10-11):** default patch-id includes
 context lines, so an upstream edit inside our diff context (line 8 vs our line
