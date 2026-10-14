@@ -207,7 +207,8 @@ read -r -d '' FINDINGS_Q <<'EOF' || true
 fn unbot(s): regexp_replace(s, "\\[bot\\]$", "")
 values {ctx: {me: n.data.viewer.login, bots: coalesce([unnest bots | values unbot(this)], [])},
         nodes: coalesce([unnest n.data.nodes | where this is not null], [])}
-| values coalesce([unnest {ctx, x: nodes}
+| values coalesce([
+    unnest {ctx, x: nodes}
     | values {ctx, f: {
         id: x.id,
         type: case x.__typename when "PullRequestReviewThread" then "thread"
@@ -215,11 +216,17 @@ values {ctx: {me: n.data.viewer.login, bots: coalesce([unnest bots | values unbo
                                 when "IssueComment" then "comment" else null end,
         url: coalesce(x.url, null), path: coalesce(x.path, null), line: coalesce(x.line, null),
         outdated: coalesce(x.isOutdated, null),
-        conversation: coalesce([unnest (coalesce(x.comments.nodes, null) is not null ? x.comments.nodes : [x])
-                                | values {author: author.login, bot: author.__typename == "Bot", body}], [])}}
-    | values {f, untrusted: coalesce([unnest {ctx, c: f.conversation}
-                                     | where not (c.bot or coalesce(c.author == ctx.me, false) or coalesce(unbot(c.author) in ctx.bots, false))
-                                     | values c.author | sort this | uniq], [])}
+        conversation: coalesce([
+          unnest (coalesce(x.comments.nodes, null) is not null ? x.comments.nodes : [x])
+          | values {author: author.login, bot: author.__typename == "Bot", body}
+        ], [])}}
+    | values {f, untrusted: coalesce([
+        unnest {ctx, c: f.conversation}
+        | where not (c.bot or coalesce(c.author == ctx.me, false) or coalesce(unbot(c.author) in ctx.bots, false))
+        | values c.author
+        | sort this
+        | uniq
+      ], [])}
     | values {...f, conversation: coalesce([unnest f.conversation | values {author, body}], []), untrusted}
   ], [])
 EOF
@@ -227,16 +234,21 @@ EOF
 # The findings with the agent's answers: {f: findings, r: result, changed, held}.
 read -r -d '' PLAN_Q <<'EOF' || true
 values {held, f, ctx: {changed, items: kind(coalesce(r.items, null)) == "array" ? r.items : []}}
-| values [...coalesce([unnest {ctx, f}
-    | values {f, changed: ctx.changed, a: coalesce(coalesce([unnest {f, i: ctx.items} | where i.id == f.id | values i], [])[0], {})}
-    | values {f, changed, act: coalesce(a.action, ""), rep: coalesce(a.reply, null)}
-    | values {...f, ...(case
-        when not (act in ["fixed", "reply", "pushback", "ask"]) then {action: "ask", reply: "(the agent did not answer this one)"}
-        when not is(rep, <string>) then {action: "ask", reply: "(the agent gave no reply text)"}
-        when not grep("\\S", rep) then {action: "ask", reply: "(the agent gave no reply text)"}
-        when act == "fixed" and not changed then {action: "ask", reply: f"(said fixed but changed nothing): {rep}"}
-        else {action: act, reply: rep} end)}
-  ], []), ...held]
+| values [
+    ...coalesce([
+      unnest {ctx, f}
+      | values {f, changed: ctx.changed,
+                a: coalesce(coalesce([unnest {f, i: ctx.items} | where i.id == f.id | values i], [])[0], {})}
+      | values {f, changed, act: coalesce(a.action, ""), rep: coalesce(a.reply, null)}
+      | values {...f, ...(case
+          when not (act in ["fixed", "reply", "pushback", "ask"]) then {action: "ask", reply: "(the agent did not answer this one)"}
+          when not is(rep, <string>) then {action: "ask", reply: "(the agent gave no reply text)"}
+          when not grep("\\S", rep) then {action: "ask", reply: "(the agent gave no reply text)"}
+          when act == "fixed" and not changed then {action: "ask", reply: f"(said fixed but changed nothing): {rep}"}
+          else {action: act, reply: rep} end)}
+    ], []),
+    ...held
+  ]
 EOF
 
 # The plan, as printed: the agent's answers, then the ask items under
