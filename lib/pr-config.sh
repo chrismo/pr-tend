@@ -221,12 +221,28 @@ prc_step() {
     hexpr="\"$forced\""
   fi
   files=$(prc_files "$2" false) || return
+  prc_step_warn "$step" "$hexpr" "$files" || return
   printf '%s\n%s\n' "$PRC_DEFAULTS" "$files" | prc_super -i json -j -c "
     aggregate c:=collect(this) | values {d: c[0], f: c[1]}
     | values {f, h: $hexpr}
     | values {harness: h, ...coalesce(f.harnesses[h], {}), ...coalesce(f.steps[\"$step\"][h], {})}
     | unnest flatten(this) | where value is not null
     | aggregate kv:=collect(this) | values unflatten(kv)" -
+}
+
+# prc_step_warn <step> <harness-expr> <files>: effort level names depend on
+# the model, so a step block that sets model and leaves effort to the harness
+# block may name a level its model doesn't have. Warns on stderr; never fails
+# the step. A step block with effort written, even null, is on purpose.
+prc_step_warn() {
+  local step=$1 hexpr=$2 warn
+  warn=$(printf '%s\n%s\n' "$PRC_DEFAULTS" "$3" | prc_super -i json -f line -c "
+    aggregate c:=collect(this) | values {d: c[0], f: c[1]}
+    | values {f, h: $hexpr}
+    | values {h, sb: f.steps[\"$step\"][h], hb: f.harnesses[h]}
+    | where coalesce(sb.model, null) is not null and missing(sb.effort) and coalesce(hb.effort, null) is not null
+    | values f\"pr-config: steps.$step.{h} sets model but inherits effort {hb.effort} from harnesses.{h}; effort levels depend on the model, so set steps.$step.{h}.effort (null clears it)\"" -) || return
+  [[ -z $warn ]] || echo "$warn" >&2
 }
 
 # prc_target_file <global: true|false> <branch-or-empty>: the file set/unset write.

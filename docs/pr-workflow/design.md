@@ -264,10 +264,10 @@ Resolution, per key:
 The harness command and timeouts can't be overridden per step;
 `settings.stepTimeout` is global.
 
-**Not built:** warn when a step override sets `model` but not `effort` and an
-`effort` is inherited, because level names depend on the model (Sortie's
-`agent.effort.inherited`). Today nothing warns; the typed files only check that
-`effort` is one of the harness CLI's levels. [#18]
+`pr-config step` warns (stderr, built 2026-10-14) when the step block sets
+`model` but not `effort` and the harness block supplies one, because level
+names depend on the model (Sortie's `agent.effort.inherited`). Writing
+`effort`, even as `null`, silences it.
 
 Each adapter maps these keys to its CLI flags (checked against `--help`,
 2026-10-12): claude `--model`, `--effort`; pi `--provider` (needs `--model`),
