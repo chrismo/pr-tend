@@ -885,7 +885,7 @@ review() {
   run "$PR_STATE" --long
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 4 ]
-  [[ "${lines[0]}" == feat*"!:1 i:1"* ]] || false
+  [[ "${lines[0]}" == "https://example/pr/7 open · "*"!:1 i:1"* ]] || false
   [ "${lines[1]}" = "NEXT  agent  address 2 bot items  → pr-act address" ]
   [[ "${lines[2]}" =~ ^\ +!\ +thread\ +copilot\ +file.txt:2\ +Rename\ it\ +https://example/pr/7#t1$ ]] || false
   [[ "${lines[3]}" =~ ^\ +i\ +review\ +claude\ +Looks\ fine\ +https://example/pr/7#R1$ ]]
@@ -937,8 +937,9 @@ review() {
   run "$PR_STATE"
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 2 ]
-  [[ "${lines[0]}" == feat* ]] || false
-  [[ "${lines[0]}" == *"#7"* ]] || false
+  [[ "${lines[0]}" == "https://example/pr/7 open · "* ]] || false
+  [[ "${lines[0]}" != *"feat"* ]] || false
+  [[ "${lines[0]}" != *"#7"* ]] || false
   [[ "${lines[0]}" == *"CI red"* ]] || false
   [[ "${lines[0]}" == *"!:1 i:0"* ]] || false
   [[ "${lines[1]}" == "NEXT  you    reply to 1 human item  → pr-state --long  (+"*" more)" ]]
@@ -969,10 +970,18 @@ review() {
   [ "$(field '[.next[] | select(.key == "push") | .say][0]')" = "push: not on up yet" ]
 }
 
+@test "summary: a draft PR's link, then draft" {
+  git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
+  pr_fixture feat '.isDraft = true'
+  run "$PR_STATE"
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == "https://example/pr/7 draft · "* ]]
+}
+
 @test "summary: no PR" {
   git switch -qc feat && commit a.txt a
   run "$PR_STATE"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"no PR"* ]] || false
+  [[ "${lines[0]}" == "no PR · "* ]] || false
   [[ "$output" == *"1 unpushed"* ]]
 }
