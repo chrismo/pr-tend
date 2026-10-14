@@ -983,6 +983,14 @@ old_super() {
   [ "$output" = "pr-config: $PR_TEND_CONFIG: settings.verfy: unknown key" ]
 }
 
+@test "settings.botCommand: a typed string setting, empty by default" {
+  run "$PR_CONFIG" get settings.botCommand
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  write_global '{"settings":{"botCommand":"/review-bot"}}'
+  [ "$("$PR_CONFIG" get settings.botCommand)" = /review-bot ]
+}
+
 @test "settings.localReview: a typed string setting, empty by default" {
   run "$PR_CONFIG" get settings.localReview
   [ "$status" -eq 0 ]

@@ -17,6 +17,7 @@
 #   threads   what's owed, marked ! (blocks: unresolved threads, reviews
 #             requesting changes) or i (to read: bot review bodies and PR
 #             comments not yet marked handled)
+#   bot       the review bot's trigger comment (settings.botCommand), if any
 #   session   pipeline enrollment, harness, session id, takeover lock
 #   fresh     false when GitHub's PR / parent-PR head differs from the local
 #             remote-tracking ref, i.e. sync and push answers need a fetch
@@ -111,6 +112,7 @@ jlist() { { git config --get-all "$1" || true; } | jq -R . | jq -sc .; }
 bots=$(prc_get settings.botLogin "$branch" false json) || die "pr-config failed"
 ignore=$(prc_get settings.botIgnore "$branch" false json) || die "pr-config failed"
 ignore_body=$(prc_get settings.botIgnoreBody "$branch" false json) || die "pr-config failed"
+bot_command=$(prc_get settings.botCommand "$branch" false) || die "pr-config failed"
 jq -n --argjson r "$ignore_body" '$r[] as $re | "" | test($re)' >/dev/null 2>&1 \
   || die "botIgnoreBody has an invalid regex: $ignore_body"
 
@@ -289,7 +291,7 @@ state=$(jq -n \
   --argjson r_local "${review[local]}" --argjson r_bot "${review[bot]}" \
   --argjson r_accepted "${review[accepted]}" \
   --argjson gh_ok "$gh_ok" --argjson parent_ok "$parent_ok" \
-  --arg viewer "$viewer" --argjson bots "$bots" \
+  --arg viewer "$viewer" --argjson bots "$bots" --arg bot_command "$bot_command" \
   --argjson ignore "$ignore" --argjson ignore_body "$ignore_body" \
   --argjson handled "$(jlist "branch.$branch.pr-handled")" \
   --argjson refs "$(git for-each-ref --format='%(refname) %(objectname)' "refs/pr-tend/$branch/" \
@@ -362,6 +364,7 @@ state=$(jq -n \
                 blocking: (if $gh_ok then [$owed[] | select(.mark == "!")] | length else null end),
                 info: (if $gh_ok then [$owed[] | select(.mark == "i")] | length else null end),
                 items: $owed},
+      bot: {command: ($bot_command | nn)},
       session: {enrolled: ($enrolled == "true"), harness: ($harness | nn), id: ($session | nn),
                 locked: ($lock != "")},
       stored: {handled: $handled, refs: $refs},

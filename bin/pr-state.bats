@@ -280,6 +280,15 @@ field() { jq -r "$@" <<<"$output"; }
   [ "$(field .parent.pr.state)" = CLOSED ]
 }
 
+@test "bot: the configured trigger command is reported, null when there is none" {
+  git switch -qc feat
+  state
+  [ "$(field .bot.command)" = null ]
+  "$PR_CONFIG" set --global settings.botCommand "/review-bot"
+  state
+  [ "$(field .bot.command)" = /review-bot ]
+}
+
 # ── O3 sync vs parent ────────────────────────────────────────────────────────
 
 @test "sync: names the default branch" {
