@@ -40,6 +40,7 @@ repos() { git config --global --get-all pr-tend.repo || true; }
 @test "enroll: marks the current branch and registers the repo" {
   run "$PR_ACT" enroll
   [ "$status" -eq 0 ]
+  [[ "$output" == *"enrolled feat"* ]]
   [ "$(git config branch.feat.pr-tend)" = true ]
   [ "$(repos)" = "$TMP/repo" ]
 }

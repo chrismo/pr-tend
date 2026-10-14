@@ -18,7 +18,8 @@
 #   pr-act restack && pr-act push      catch up with the parent, then publish
 #
 # Verbs:
-#   enroll    mark the branch for pr-watch, and register this repo
+#   enroll    mark the branch for pr-watch, and register this repo; for a
+#             stacked PR, store its parent and base before a merge erases them
 #   unenroll  clear the mark
 #   address   hand owed bot feedback to an agent, then commit, verify, push,
 #             reply and resolve; items the agent marks "ask" are left for chrismo
@@ -477,6 +478,22 @@ ack() {
   printf '  %s\n' "${shown[@]}"
 }
 
+# record_lineage <branch>: while the PR's base still names a stacked parent, store
+# it and the base pin; GitHub retargets the PR to the default branch on merge.
+record_lineage() {
+  local b=$1 state parent old_base
+  state=$(pr-state --json "$b" 2>/dev/null) || return 0
+  read -r parent old_base < <(jq -r 'select(.parent.source == "pr" and .parent.name != .sync.default)
+    | "\(.parent.name) \(.sync.old_base // "")"' <<<"$state") || true
+  [[ -n ${parent:-} ]] || return 0
+  git config "branch.$b.pr-parent" "$parent"
+  echo "parent: $parent"
+  if [[ -n $old_base ]]; then
+    git update-ref "refs/pr-tend/$b/base" "$old_base"
+    echo "base pinned at ${old_base:0:7}"
+  fi
+}
+
 case $verb in
   enroll)
     git rev-parse -q --verify "refs/heads/$branch" >/dev/null || die "no such branch: $branch"
@@ -485,6 +502,8 @@ case $verb in
     if ! grep -qxF "$main_worktree" <<<"$(git config --global --get-all pr-tend.repo || true)"; then
       git config --global --add pr-tend.repo "$main_worktree"
     fi
+    echo "enrolled $branch"
+    record_lineage "$branch"
     ;;
   unenroll)
     git config --unset "branch.$branch.pr-tend" || (( $? == 5 ))  # 5: wasn't set

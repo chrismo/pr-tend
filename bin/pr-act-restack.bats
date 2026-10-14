@@ -60,6 +60,14 @@ merged_pr() {
                               headRefOid: $h, isCrossRepository: false}]}}}}' > "$GH/$1.json"
 }
 
+# open_pr <branch> <base> <number>: gh says <branch> has an open PR into <base>.
+open_pr() {
+  jq -n --arg b "$1" --arg base "$2" --argjson n "$3" --arg h "$(git rev-parse "$1")" '{data: {viewer: {login: "me"},
+    repository: {defaultBranchRef: {name: "main"},
+      pullRequests: {nodes: [{number: $n, state: "OPEN", baseRefName: $base, headRefName: $b,
+                              headRefOid: $h, isCrossRepository: false}]}}}}' > "$GH/$1.json"
+}
+
 remote_feat() { git ls-remote origin refs/heads/feat | cut -f1; }
 base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
 
@@ -238,4 +246,36 @@ base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
   [ "$(git rev-parse feat^)" = "$(git rev-parse origin/main)" ]
   grep -qx B "$TMP/wt/file.txt"
   [ "$(git branch --show-current)" = main ]
+}
+
+@test "enroll records a stacked branch's parent and base, so restack survives GitHub's retarget" {
+  git switch -q main && git switch -qc A
+  edit 's/^c$/C/' a1
+  git push -q origin A 2>/dev/null
+  a_head=$(git rev-parse A)
+  git switch -qc child
+  edit 's/^f$/F/' child
+  git push -q -u origin child 2>/dev/null
+  open_pr A main 1
+  open_pr child A 2
+  run "$PR_ACT" enroll child
+  [ "$status" -eq 0 ]
+  [ "$(git config branch.child.pr-parent)" = A ]
+  [ "$(git rev-parse refs/pr-tend/child/base)" = "$a_head" ]
+  (cd "$TMP/other" && git fetch -q origin && git checkout -q main && git merge -q --squash origin/A \
+     && git commit -qm "A (#1)" && git push -q origin main 2>/dev/null)
+  merged_pr A "$a_head"
+  open_pr child main 2
+  run "$PR_ACT" restack
+  [ "$status" -eq 0 ]
+  [ "$(git rev-parse child^)" = "$(git rev-parse origin/main)" ]
+  [ "$(git log --format=%s origin/main..child)" = child ]
+}
+
+@test "enroll records nothing for a branch whose PR targets the default branch" {
+  open_pr feat main 1
+  run "$PR_ACT" enroll
+  [ "$status" -eq 0 ]
+  [ -z "$(git config branch.feat.pr-parent || true)" ]
+  [ -z "$(base_pin)" ]
 }

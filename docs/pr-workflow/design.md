@@ -219,7 +219,7 @@ repeat offender means the step-contract prompt needs tightening.
   JSON file would not.
 - `refs/pr-tend/*` is not in the default push/fetch refspecs — stays local.
 - Lineage must be local because GitHub auto-retargets a child PR to `main` when
-  the parent merges with "delete head branches" on (per GitHub docs, untested),
+  the parent merges with its branch deleted (observed 2026-10-14, #25 → #26),
   erasing the parent name from the PR. (GitHub's native stacked PRs, GA
   2026-10-06 per agent-read docs, do keep lineage server-side — but we don't
   use them; see Decisions.)
@@ -236,9 +236,10 @@ repo-wide, not per-worktree). So: step 10 deletes the refs on merge, and every
 watcher pass also sweeps `refs/pr-tend/<b>/*` whose branch no longer exists
 (abandoned branches).
 
-**Bootstrap:** `pr-act start` records everything at creation. For a branch
-enrolled any other way, `pr-state` derives missing records (A2 fallback chain),
-verifies ancestry, and writes them.
+**Bootstrap:** `pr-act start` records everything at creation (not built). For
+a branch made any other way, `pr-act enroll` stores a stacked PR's parent and
+base pin while the PR's base still names the parent; otherwise `pr-state`
+derives what it can (A2 fallback chain) and stays read-only.
 
 ### Harness, model, effort and provider per step
 
