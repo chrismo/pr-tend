@@ -601,7 +601,7 @@ not built; a pass only observes and reports:
 
 - Enrollment: `pr-act enroll [<branch>]` sets `branch.<name>.pr-tend` and adds
   the main worktree to global `pr-tend.repo` (multi-valued), the watcher's list
-  of repos.
+  of repos. `pr-act unregister [<path>]` takes a repo off that list.
 - **Fetch first** (decided): one `git fetch --prune` per repo, then `pr-state`
   per enrolled branch. `pr-state` stays read-only, with no `--fetch` option.
 - Glyph per worktree in `~/.claude/tab-status/<worktree>.pr` as

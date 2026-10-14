@@ -114,6 +114,38 @@ repos() { git config --global --get-all pr-tend.repo || true; }
   [ "$status" -eq 0 ]
 }
 
+@test "unregister: removes this repo from the watcher's list" {
+  "$PR_ACT" enroll && "$PR_ACT" unenroll
+  [ "$(repos)" = "$TMP/repo" ]
+  run "$PR_ACT" unregister
+  [ "$status" -eq 0 ]
+  [ -z "$(repos)" ]
+}
+
+@test "unregister: refuses while branches are still enrolled; --force overrides" {
+  "$PR_ACT" enroll
+  run "$PR_ACT" unregister
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"feat"* ]]
+  [ "$(repos)" = "$TMP/repo" ]
+  run "$PR_ACT" unregister --force
+  [ "$status" -eq 0 ]
+  [ -z "$(repos)" ]
+}
+
+@test "unregister: a path, for a repo whose directory is gone" {
+  "$PR_ACT" enroll
+  git config --global --add pr-tend.repo "$TMP/gone"
+  run "$PR_ACT" unregister "$TMP/gone"
+  [ "$status" -eq 0 ]
+  [ "$(repos)" = "$TMP/repo" ]
+}
+
+@test "unregister: a repo that isn't registered is fine" {
+  run "$PR_ACT" unregister
+  [ "$status" -eq 0 ]
+}
+
 @test "--help: every verb has a usage line" {
   run "$PR_ACT" --help
   [ "$status" -eq 0 ]
