@@ -85,27 +85,27 @@ check() {
     return
   fi
   rm -f "$errf"
-  if ! cls=$(printf '%s\n' "$json" | prc_json "$CLASSIFY" 2>/dev/null) || [[ -z $cls ]]; then
+  if ! cls=$(prc_json "$CLASSIFY" "$json" 2>/dev/null) || [[ -z $cls ]]; then
     write_glyph "$wt" "$b" ⚠️
     printf '%s\t%s\t⚠️\tunparseable pr-state output\n' "$name" "$b"
     return
   fi
-  glyph=$(printf '%s\n' "$cls" | prc_line 'values glyph')
+  glyph=$(prc_line 'values glyph' "$cls")
 
   state_file="$STATE_DIR/branches/$(basename "$repo")-$(printf '%s' "$repo" | shasum | cut -c1-8)/$b.json"
   mkdir -p "$(dirname "$state_file")"
   # An unreadable previous state re-notifies rather than silently dropping reasons.
-  prev=$(cat "$state_file" 2>/dev/null | prc_json 'values coalesce([unnest reasons | values key], [])' 2>/dev/null) || prev='[]'
+  prev=$(prc_json 'values coalesce([unnest reasons | values key], [])' "$(cat "$state_file" 2>/dev/null)" 2>/dev/null) || prev='[]'
   [[ -n $prev ]] || prev='[]'
   while IFS= read -r line; do
     [[ -n $line ]] && notify "$name $b" "$line"
-  done < <(printf '{"prev":%s,"c":%s}\n' "$prev" "$cls" | prc_line 'unnest {prev, r: c.reasons} | where not (r.key in prev) | values r.msg')
-  printf '{"c":%s,"s":%s}\n' "$cls" "$json" | prc_json 'values {...c, state: s}' > "$state_file.tmp" \
+  done < <(prc_line 'unnest {prev, r: c.reasons} | where not (r.key in prev) | values r.msg' "{\"prev\": $prev, \"c\": $cls}")
+  prc_json 'values {...c, state: s}' "{\"c\": $cls, \"s\": $json}" > "$state_file.tmp" \
     && mv "$state_file.tmp" "$state_file"
 
   write_glyph "$wt" "$b" "$glyph"
   printf '%s\t%s\t%s\t%s\n' "$name" "$b" "$glyph" \
-    "$(printf '%s\n' "$cls" | prc_line 'values sj(coalesce([unnest [...reasons, {msg: coalesce(note, null)}] | where msg is not null | values msg], []), "; ")')"
+    "$(prc_line 'values sj(coalesce([unnest [...reasons, {msg: coalesce(note, null)}] | where msg is not null | values msg], []), "; ")' "$cls")"
 }
 
 # sweep_pins <repo>: delete refs/pr-tend/<b>/* whose branch no longer exists.

@@ -53,8 +53,8 @@ harness_object() {
 # object: structured_output, else the result text parsed as JSON; nothing on
 # an error result (status 1).
 harness_result() {
-  printf '%s\n' "$1" | prc_json 'where not coalesce(is_error, false)
-    | values coalesce(structured_output, parse_sup(coalesce(result, "")), null)' 2>/dev/null | harness_object
+  prc_json 'where not coalesce(is_error, false)
+    | values coalesce(structured_output, parse_sup(coalesce(result, "")), null)' "$1" 2>/dev/null | harness_object
 }
 
 # harness_run <harness> <session-id> <new|resume> <timeout> <prompt> <json-schema> [<settings-json>]
@@ -66,8 +66,8 @@ harness_run() {
   local -a typed=() extra f
   # args last, so a newline in it shifts nothing; the end marker survives $( )
   # stripping the trailing newlines of empty fields.
-  fields=$(printf '%s\n' "$settings" | prc_line 'where kind(this) == "record"
-    | values coalesce(model, ""), coalesce(effort, ""), coalesce(provider, ""), coalesce(args, ""), "<end>"') || return 1
+  fields=$(prc_line 'where kind(this) == "record"
+    | values coalesce(model, ""), coalesce(effort, ""), coalesce(provider, ""), coalesce(args, ""), "<end>"' "$settings") || return 1
   mapfile -t f <<<"$fields"
   [[ ${#f[@]} -ge 5 && ${f[-1]} == "<end>" ]] || return 1
   model=${f[0]} effort=${f[1]} provider=${f[2]} args=$(printf '%s\n' "${f[@]:3:${#f[@]}-4}")

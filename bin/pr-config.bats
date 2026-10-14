@@ -1174,6 +1174,13 @@ old_super() {
   [ "$(printf '{"s":"a b","e":"","n":3}\n' | prc_line 'values n')" = 3 ]
 }
 
+@test "lib: prc_json and prc_line take the document as a second argument instead of stdin" {
+  source "$BATS_TEST_DIRNAME/../lib/pr-config.sh"
+  [ "$(prc_json 'values {n: len(a)}' '{"a":[1,2]}')" = '{"n":2}' ]
+  [ "$(prc_line 'values s' '{"s":"raw text"}')" = "raw text" ]
+  [ "$(prc_line 'values s' '{"s":"raw text"}' < /dev/null)" = "raw text" ]
+}
+
 @test "lib: prc_val prints one value of a document; prc_strings lists lines, or [] for none" {
   source "$BATS_TEST_DIRNAME/../lib/pr-config.sh"
   [ "$(prc_val '{"a":{"b":"x y"}}' a.b)" = "x y" ]

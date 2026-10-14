@@ -104,9 +104,9 @@ prn_next() {
   local state remote kind
   state=$(cat)
   remote=$(prc_json_string "$1") || return
-  kind=$(printf '%s\n' "$state" | prc_line 'values kind(this)') || return
+  kind=$(prc_line 'values kind(this)' "$state") || return
   [[ $kind == record ]] || { echo "pr-next: pr-state JSON must be one record" >&2; return 1; }
-  printf '{"remote":%s,"s":%s}\n' "$remote" "$state" | prc_json "$PRN_QUERY"
+  prc_json "$PRN_QUERY" "{\"remote\": $remote, \"s\": $state}"
 }
 
 # prn_lines [one|all]: steps on stdin; one adds a count of the rest, all lists them as "then".
