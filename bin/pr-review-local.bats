@@ -1,0 +1,124 @@
+#!/usr/bin/env bats
+
+bats_require_minimum_version 1.5.0
+
+# Test suite for bin/pr-review-local, the default local reviewer (A8): one
+# fresh, read-only model session over the diff PR_TEND_BASE..PR_TEND_HEAD,
+# findings as a JSON list on stdout. claude and pi are stubs on PATH that
+# record their arguments and print $FX/result.json.
+
+REVIEW="$BATS_TEST_DIRNAME/pr-review-local"
+PR_CONFIG="$BATS_TEST_DIRNAME/pr-config"
+
+setup() {
+  TMP="$(cd "$BATS_TEST_TMPDIR" && pwd -P)"
+  export GIT_CONFIG_GLOBAL="$TMP/gitconfig-global"
+  export GIT_CONFIG_SYSTEM=/dev/null
+  printf '[user]\n\temail = t@example.com\n\tname = Tester\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
+  export FX="$TMP/fx"
+  export PR_TEND_CONFIG="$TMP/global.json"
+  mkdir -p "$FX" "$TMP/fakebin"
+  cat > "$TMP/fakebin/claude" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FX/claude.args"
+args=("$@") prompt= i=0
+while (( i < $# )); do
+  case ${args[i]} in
+    --allowedTools|--disallowedTools)
+      i=$((i + 1))
+      while (( i < $# )) && [[ ${args[i]} != -* ]]; do i=$((i + 1)); done
+      continue ;;
+    --session-id|--resume|--output-format|--json-schema|--permission-mode|--model|--effort|--max-turns)
+      i=$((i + 2)); continue ;;
+    -*) ;;
+    *) prompt=${args[i]} ;;
+  esac
+  i=$((i + 1))
+done
+printf '%s' "$prompt" > "$FX/claude.prompt"
+echo "$PWD" > "$FX/claude.cwd"
+[[ -e $FX/fail ]] && { echo "claude: boom" >&2; exit 1; }
+jq -n --argjson r "$(cat "$FX/result.json")" '{type: "result", is_error: false, structured_output: $r}'
+EOF
+  cat > "$TMP/fakebin/pi" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FX/pi.args"
+printf 'Done.\n\n```json\n%s\n```\n' "$(cat "$FX/result.json")"
+EOF
+  chmod +x "$TMP/fakebin/claude" "$TMP/fakebin/pi"
+  export PATH="$TMP/fakebin:$PATH"
+  echo '{"findings": []}' > "$FX/result.json"
+
+  git init -q "$TMP/repo" && cd "$TMP/repo"
+  printf 'one\ntwo\n' > file.txt && git add file.txt && git commit -qm init
+  BASE=$(git rev-parse HEAD)
+  printf 'one\ntwo\nthree added\n' > file.txt && git commit -qam "add three"
+  HEAD_SHA=$(git rev-parse HEAD)
+  export PR_TEND_BASE=$BASE PR_TEND_HEAD=$HEAD_SHA PR_TEND_TASK="add a third line"
+}
+
+@test "runs under bash 5 via the bash5 shebang" {
+  run head -1 "$REVIEW"
+  [ "$output" = "#!/usr/bin/env bash5" ]
+}
+
+@test "without PR_TEND_BASE and PR_TEND_HEAD: fails and says so" {
+  unset PR_TEND_HEAD
+  run "$REVIEW"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *PR_TEND_HEAD* ]]
+}
+
+@test "prints the reviewer's findings as a JSON list" {
+  echo '{"findings": [{"file": "file.txt", "line": 3, "severity": "warning", "body": "no newline"}]}' > "$FX/result.json"
+  run "$REVIEW"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c . <<<"$output")" = '[{"file":"file.txt","line":3,"severity":"warning","body":"no newline"}]' ]
+}
+
+@test "no findings: an empty list, exit 0" {
+  run "$REVIEW"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c . <<<"$output")" = '[]' ]
+}
+
+@test "the prompt carries the diff between base and head, and the task" {
+  "$REVIEW" >/dev/null
+  grep -q '^+three added' "$FX/claude.prompt"
+  grep -q 'add a third line' "$FX/claude.prompt"
+  [ "$(cat "$FX/claude.cwd")" = "$TMP/repo" ]
+}
+
+@test "a fresh session each run, read-only tools, a schema" {
+  "$REVIEW" >/dev/null
+  grep -qx -- --session-id "$FX/claude.args"
+  ! grep -qx -- --resume "$FX/claude.args"
+  grep -qx -- --json-schema "$FX/claude.args"
+  allow=$(grep -A1 -x -- --allowedTools "$FX/claude.args" | tail -1)
+  [[ $allow != *Edit* && $allow != *Write* ]]
+  [[ $allow == *Read* ]]
+}
+
+@test "the reviewer failing is non-zero, with nothing on stdout" {
+  touch "$FX/fail"
+  run --separate-stderr "$REVIEW"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "a result without a findings list is a failure, never clean" {
+  echo '{"verdict": "fine"}' > "$FX/result.json"
+  run --separate-stderr "$REVIEW"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "steps.review picks the harness: pi, with read-only tools" {
+  "$PR_CONFIG" set --global steps.review.harness pi
+  echo '{"findings": [{"file": "file.txt", "line": 3, "severity": "nit", "body": "x"}]}' > "$FX/result.json"
+  run "$REVIEW"
+  [ "$status" -eq 0 ]
+  [ "$(jq length <<<"$output")" = 1 ]
+  tools=$(grep -A1 -x -- --tools "$FX/pi.args" | tail -1)
+  [ "$tools" = read ]
+}

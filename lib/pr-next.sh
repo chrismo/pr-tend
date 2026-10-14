@@ -68,7 +68,7 @@ values {...s, remote}
              : f"push {plural(push.ahead, "commit")}", "pr-act push") : null,
     pr is null and len(errors) == 0 ? step("open-pr", "you", "open a PR", "gh pr create") : null,
     has_pr and on(pr.draft) ? step("draft", "you", "mark the PR ready for review", "gh pr ready") : null,
-    open and need_review ? step("review", "agent", "review the changes since the last review", null) : null,
+    open and need_review ? step("review", "agent", "review the changes since the last review", "pr-act review") : null,
     has_pr and on(ci.verdict == "inconclusive") ? step("ci-rerun", "run", "rerun cancelled CI", "gh pr checks") : null,
     has_pr and not to_push and (on(ci.verdict == "pending") or on(ci.for_head == false))
       ? step("ci-wait", "wait", on(ci.verdict == "pending") ? "CI running" : "CI hasn'"'"'t reported on HEAD yet",

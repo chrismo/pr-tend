@@ -257,6 +257,7 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
 
 @test "review behind HEAD: local review by the agent" {
   [ "$(step review who '.review.local = {sha: "x", status: "uncovered", uncovered: 2}')" = agent ]
+  [ "$(step review cmd '.review.local = {sha: "x", status: "uncovered", uncovered: 2}')" = "pr-act review" ]
   [ "$(keys '.review.local = {sha: "x", status: "rewritten-changed"}')" = review ]
   [ "$(keys '.review.local = {sha: "x", status: "unknown"}')" = review ]
 }

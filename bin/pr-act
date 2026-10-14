@@ -13,6 +13,7 @@
 #   pr-act retarget [<branch>]
 #   pr-act push     [--force] [<branch>]
 #   pr-act verify   [<branch>]
+#   pr-act review   [<branch>]
 #
 # Examples:
 #   pr-act enroll                      pr-watch starts tracking this branch
@@ -20,7 +21,7 @@
 #   pr-act address --harness pi
 #   pr-act ack                         after reading pr-state --long: the i items are done
 #   pr-act restack && pr-act push      catch up with the parent, then publish
-#   pr-act verify && pr-review-local   the zero-token gate before a review
+#   pr-act review                      verify, then the local reviewer; clean pins local
 #
 # Verbs:
 #   enroll    mark the branch for pr-watch, and register this repo; for a
@@ -48,6 +49,11 @@
 #             one line. Fail: nonzero, the output trimmed to its last 40 lines
 #             for the fix step. A command that changes the tree fails too.
 #             Gates local review and everything after it
+#   review    verify, then the local reviewer (settings.localReview, default
+#             bin/pr-review-local) over the branch's own change, base..HEAD.
+#             Clean: pin local at HEAD. Findings: printed as JSON, nothing
+#             pinned. A failed reviewer is never clean. The one verb that
+#             spends tokens
 #
 # --force:
 #   address         run even if the branch is unpushed, diverged or taken over
@@ -379,6 +385,36 @@ verify() {
   fi
 }
 
+# ── review ───────────────────────────────────────────────────────────────────
+
+review() {
+  local b=$branch wt state base head task timeout reviewer findings n
+  wt=$(worktree_for "$b")
+  [[ -n $wt ]] || die "$b isn't checked out in any worktree"
+  [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
+  state=$(cd "$wt" && pr-state --json "$b") || die "pr-state failed"
+  base=$(jq -r '.sync.old_base // empty' <<<"$state")
+  [[ -n $base ]] || die "can't find $b's base: $(jq -r '.errors | join("; ")' <<<"$state")"
+  head=$(git rev-parse "refs/heads/$b")
+  verify_run "$wt" "$b" || die "verify failed ($VERIFY_CMD); not reviewing"
+  reviewer=$(prc_get settings.localReview "$b" false) || die "pr-config failed"
+  [[ -n $reviewer ]] || reviewer="$(dirname "$(realpath "$0")")/pr-review-local"
+  timeout=$(prc_get settings.stepTimeout "$b" false) || die "pr-config failed"
+  [[ $timeout =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $timeout"
+  task=$(git config --get "branch.$b.pr-task" || true)
+  findings=$(cd "$wt" && PR_TEND_BASE=$base PR_TEND_HEAD=$head PR_TEND_TASK=$task \
+               with_timeout "$timeout" sh -c "$reviewer" </dev/null) \
+    || die "the reviewer failed ($reviewer); nothing pinned"
+  n=$(jq -e 'arrays | length' <<<"$findings" 2>/dev/null) || die "the reviewer printed no JSON list ($reviewer)"
+  if (( n == 0 )); then
+    pin_write "$b" local "$head" "$base"
+    echo "clean: $b at ${head:0:7} reviewed against ${base:0:7}; pinned local"
+  else
+    echo "pr-act: $(plural "$n" finding) on $b; nothing pinned" >&2
+    printf '%s\n' "$findings"
+  fi
+}
+
 # ── push ─────────────────────────────────────────────────────────────────────
 
 plural() { if (( $1 == 1 )); then echo "1 $2"; else echo "$1 $2s"; fi; }
@@ -635,5 +671,6 @@ case $verb in
   retarget) retarget ;;
   push) push ;;
   verify) verify ;;
+  review) review ;;
   *) die "unknown verb: $verb" ;;
 esac

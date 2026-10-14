@@ -6,7 +6,7 @@ REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOCAL_BIN="${LOCAL_BIN:-$HOME/.local/bin}"
 mkdir -p "$LOCAL_BIN"
 
-for cmd in pr-state pr-act pr-watch pr-config; do
+for cmd in pr-state pr-act pr-watch pr-config pr-review-local; do
   src="$REPO_DIR/bin/$cmd"
   dest="$LOCAL_BIN/$cmd"
   if [[ -e $dest && ! -L $dest ]]; then
