@@ -821,8 +821,9 @@ rules: before, a plain `git push` failed on any rewritten branch.
 
 Not built yet: J1, conflict resolution by an agent ([#15]); per-pin bases
 ([#16]); the native `gh stack` guard ([#17]); retarget, including rewriting
-`pr-parent` after the parent merges ([#8]). Known: pr-state's `foreign` step
-overcounts ([#1]).
+`pr-parent` after the parent merges ([#8]). pr-state's `foreign` step counts
+the remote commits push would refuse over (`push.theirs`), not `push.behind`, so
+our own pre-amend commits under someone else's push aren't counted.
 
 ## Process supervision — plan for the loop (not built, [#12])
 

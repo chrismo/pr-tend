@@ -161,7 +161,7 @@ notified() { cat "$PS_FIXTURES/notified" 2>/dev/null || true; }
 @test "glyph: CI red, conflict, human items, foreign push are ❌" {
   local a
   for a in '.ci.verdict = "red"' '.sync.up_to_date = false | .sync.conflict = true' \
-           '.threads.owed_human = 1' '.push.behind = 1 | .push.remote_ours = false'; do
+           '.threads.owed_human = 1' '.push.behind = 1 | .push.theirs = 1 | .push.remote_ours = false'; do
     ps_fixture feat "$a"
     pass
     [ "$(glyph repo)" = "❌" ] || { echo "for: $a"; return 1; }
@@ -358,7 +358,7 @@ SH
   pass
   ps_fixture feat '.sync.up_to_date = false | .sync.conflict = true'
   pass
-  ps_fixture feat '.push.behind = 1 | .push.remote_ours = false'
+  ps_fixture feat '.push.behind = 1 | .push.theirs = 1 | .push.remote_ours = false'
   pass
   ps_fixture feat '.pr.state = "MERGED"'
   pass

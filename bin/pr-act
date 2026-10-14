@@ -350,7 +350,7 @@ push_branch() {
     # Not piped into grep -q: under pipefail, git dying of SIGPIPE would read as "not ours".
     reflog=$(git reflog show --format=%H "refs/heads/$b")
     if ! grep -qx "$rsha" <<<"$reflog"; then
-      theirs=$(sed 's/^/^/' <<<"$reflog" | git rev-list --count --stdin "$rsha")
+      theirs=$(commits_not_ours "$reflog" "$rsha")
       if (( theirs == 1 )); then n="1 commit that isn't"; else n="$theirs commits that aren't"; fi
       echo "pr-act: $remote/$b has $n yours; not pushing over it." \
            "Look: git log $b..$remote/$b, then bring it into $b" >&2

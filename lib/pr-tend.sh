@@ -1,4 +1,4 @@
-# Shared by pr-act and pr-watch. Source it; needs bash 5 and jq.
+# Shared by pr-act, pr-state and pr-watch. Source it; needs bash 5 and jq.
 #
 # See docs/pr-workflow/design.md, "Harness adapter".
 
@@ -14,6 +14,11 @@ with_timeout() {
     waitpid $pid, 0;
     exit($? & 127 ? 128 + ($? & 127) : $? >> 8);
   ' "$@"
+}
+
+# commits_not_ours <reflog> <sha>: how many commits of <sha> no reflog entry reaches.
+commits_not_ours() {
+  sed -n 's/^./^&/p' <<<"$1" | git rev-list --count --stdin "$2"
 }
 
 # Claude may read and edit; the pipeline commits, pushes and talks to GitHub.
