@@ -401,6 +401,41 @@ still full copies; `pr-config init --force` replaces one with empty blocks.
 - **No JSON encoder:** SuperDB has no to-JSON function, so `get` uses a second
   call to print raw or JSON.
 
+**SuperDB notes from the jq conversion (0.3.0, observed 2026-10-14, #19):**
+`pr-state`, `pr-act`, `pr-watch` and `pr-review-local` no longer run `jq`;
+every query goes through `prc_json` / `prc_line` / `prc_val` in
+`lib/pr-config.sh`, with `PRC_FNS` (`on`, `n`, `nul`, `sj`) in scope.
+`ci/super-stress` runs each named query 200 times on `ci/fixtures/` and fails
+on a panic or a differing output (13 filters, 0 failures at conversion time).
+- **A missing field is an error value**, not null: it prints as
+  `error("missing")` / `{"error":"missing"}` and poisons comparisons, so
+  anything that may be absent is `coalesce`d. `on(x)`, `n(x)` and `nul(x)` are
+  the shorthands.
+- **`has()` is unreliable on fused types:** elements of a literal array of
+  differing records, and records from a JSON array of differing shapes, all
+  answer `has` true. Test presence with `coalesce(x, null) is not null`.
+- **`grep(pattern, s)` with a pattern from data is a substring match**, not a
+  regex; only a literal pattern is a regex. Dynamic regexes (`botIgnoreBody`)
+  go through `regexp(re, s)`, which returns `[]` on no match and an error
+  value for an invalid regex (that is the startup check). Go RE2 syntax, not
+  jq's Oniguruma: no lookaround.
+- **`join([], sep)` is an error** ("array of string arg required"), hence
+  `sj()`.
+- **An empty array subquery is null:** `[unnest x | where false]` yields null,
+  so it is always `coalesce([...], [])`.
+- **A subquery sees only its own stream:** function parameters and outer
+  fields are invisible after the first `|`; carry them in the unnested
+  record (`unnest {ctx, x: items}`), which must have exactly two fields with
+  the array second.
+- **`count {r: this, j}`** numbers a stream (1-based); `aggregate` inside a
+  subquery was avoided, as was `fork`, so output order never depends on the
+  scheduler.
+- **`-f line` prints strings raw**, one per line, which replaces `jq -r`; an
+  empty string is an empty line and `$( )` strips trailing newlines, so a run
+  that needs to count lines ends with a marker (`harness_run`).
+- **Startup is ~17 ms per call** (jq: ~4 ms), so queries are batched where a
+  loop would have called jq per item.
+
 ## Atomic actions
 
 ### Observe — deterministic, read-only (`pr-state`)
@@ -975,13 +1010,6 @@ all work is on the [pr-tend project board](https://github.com/users/chrismo/proj
   human read. On vibe-friendly tasks it may not be needed: the watcher could
   ack on its own, or an agent could triage `i` items. Revisit with a per-PR
   signal, likely the same label that steers J5.
-- **TODO: move `pr-state`, `pr-act` and `pr-watch` from `jq` to SuperDB** ([#19]).
-  Decided 2026-10-13: SuperDB, always. `pr-config` is done. The rest still shell
-  out to `jq`, including the `CLASSIFY` filter and the GraphQL shaping. Not part
-  of the restack work. **Caution:** super 0.3.0 panicked intermittently on one
-  construct (`unnest … into`, 12 of 200 runs), and these filters run unattended
-  every pass. Stress-test each converted filter (~200 runs, identical output)
-  before trusting it, as was done for the config merge and type check.
 
 ## Prior art — summary
 
@@ -1015,7 +1043,6 @@ clones in `~/modev/pr-workflow-prior-art/` (sortie, av, gh-stack, attractor, sym
 [#16]: https://github.com/chrismo/pr-tend/issues/16
 [#17]: https://github.com/chrismo/pr-tend/issues/17
 [#18]: https://github.com/chrismo/pr-tend/issues/18
-[#19]: https://github.com/chrismo/pr-tend/issues/19
 [#20]: https://github.com/chrismo/pr-tend/issues/20
 [#21]: https://github.com/chrismo/pr-tend/issues/21
 [#22]: https://github.com/chrismo/pr-tend/issues/22

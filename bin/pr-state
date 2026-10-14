@@ -107,13 +107,14 @@ is_ancestor() { git merge-base --is-ancestor "$1" "$2" 2>/dev/null; }
 count() { git rev-list --count "$@"; }
 # -U0: an upstream edit next to our lines must not read as a changed patch.
 patch_id() { git diff -U0 "$1" "$2" | git patch-id --stable | cut -d' ' -f1; }
-jnull() { if [[ -n $1 ]]; then jq -n --arg v "$1" '$v'; else echo null; fi; }
-jlist() { { git config --get-all "$1" || true; } | jq -R . | jq -sc .; }
+jstr() { prc_json_string "$1"; }
+jnull() { if [[ -n $1 ]]; then jstr "$1"; else echo null; fi; }
+jlist() { { git config --get-all "$1" || true; } | prc_strings; }
 bots=$(prc_get settings.botLogin "$branch" false json) || die "pr-config failed"
 ignore=$(prc_get settings.botIgnore "$branch" false json) || die "pr-config failed"
 ignore_body=$(prc_get settings.botIgnoreBody "$branch" false json) || die "pr-config failed"
 bot_command=$(prc_get settings.botCommand "$branch" false) || die "pr-config failed"
-jq -n --argjson r "$ignore_body" '$r[] as $re | "" | test($re)' >/dev/null 2>&1 \
+[[ $(prc_val "$ignore_body" 'len(coalesce([unnest this | where is_error(regexp(this, ""))], [])) == 0' 2>/dev/null) == true ]] \
   || die "botIgnoreBody has an invalid regex: $ignore_body"
 
 # -f, not -F, for the branch: -F would send "1234" or "true" as a non-string.
@@ -129,21 +130,21 @@ gh_query() {
 }
 # headRefName also matches strangers' fork PRs from a same-named branch; keep
 # same-repo PRs and PRs from the viewer's own fork.
-pick_pr() {
-  jq '.data.viewer.login as $me
-      | (.data.repository.pullRequests.nodes // [])
-      | map(select((.isCrossRepository | not) or .headRepositoryOwner.login == $me))
-      | (map(select(.state == "OPEN"))[0] // .[0] // null)' <<<"$RESP"
-}
+read -r -d '' PICK_PR <<'EOF' || true
+values {me: data.viewer.login, nodes: coalesce(data.repository.pullRequests.nodes, [])}
+| values coalesce([unnest {me, x: nodes} | where not on(x.isCrossRepository) or on(x.headRepositoryOwner.login == me) | values x], [])
+| values coalesce(coalesce([unnest this | where on(state == "OPEN")], [])[0], this[0], null)
+EOF
+pick_pr() { printf '%s\n' "$RESP" | prc_json "$PICK_PR"; }
 
 # ── O1 PR, O2 parent ─────────────────────────────────────────────────────────
 
 pr=null viewer="" default_branch="" gh_ok=false
 if gh_query "$branch"; then
   gh_ok=true
-  pr=$(pick_pr)
-  viewer=$(jq -r '.data.viewer.login // empty' <<<"$RESP")
-  default_branch=$(jq -r '.data.repository.defaultBranchRef.name // empty' <<<"$RESP")
+  pr=$(pick_pr) || die "couldn't read gh's answer"
+  { read -r viewer; read -r default_branch; } < <(printf '%s\n' "$RESP" \
+    | prc_line 'values coalesce(data.viewer.login, ""), coalesce(data.repository.defaultBranchRef.name, "")')
 fi
 if [[ -z $default_branch ]]; then
   default_branch=$(git symbolic-ref -q --short "refs/remotes/$remote/HEAD" 2>/dev/null || true)
@@ -154,7 +155,7 @@ fi
 parent=$(cfg pr-parent) parent_source=config
 if [[ -z $parent ]]; then
   if [[ $pr != null ]]; then
-    parent=$(jq -r .baseRefName <<<"$pr") parent_source=pr
+    parent=$(prc_val "$pr" baseRefName) parent_source=pr
   else
     parent=$default_branch parent_source=default
   fi
@@ -168,7 +169,7 @@ if [[ $parent != "$default_branch" ]]; then
 fi
 parent_merged=null
 if $parent_ok; then
-  parent_merged=$(jq -r 'if . == null then false else .state == "MERGED" end' <<<"$parent_pr")
+  parent_merged=$(prc_val "$parent_pr" 'this is null ? false : on(state == "MERGED")')
 fi
 target=$parent
 [[ $parent_merged == true ]] && target=$default_branch
@@ -183,7 +184,7 @@ else
   sync_ahead=$(count "$target_ref..$head")
   behind=$(count "$head..$target_ref")
   base_pin=$(ref "refs/pr-tend/$branch/base")
-  merged_head=$(jq -r '.headRefOid // empty' <<<"$parent_pr")
+  merged_head=$(prc_val "$parent_pr" 'coalesce(headRefOid, "")')
   if [[ -n $base_pin ]] && is_ancestor "$base_pin" "$head"; then
     old_base=$base_pin
   elif [[ $parent_merged == true && -n $merged_head ]] && is_ancestor "$merged_head" "$head"; then
@@ -235,7 +236,7 @@ fi
 
 stale=()
 stale_check() { # stale_check <pr-json> <name>
-  local gh_sha; gh_sha=$(jq -r 'select(.state == "OPEN") | .headRefOid' <<<"$1")
+  local gh_sha; gh_sha=$(printf '%s\n' "$1" | prc_line 'where on(state == "OPEN") | values headRefOid')
   if [[ -n $gh_sha && $gh_sha != "$(ref "refs/remotes/$remote/$2")" ]]; then
     stale+=("$remote/$2 is not at GitHub's ${gh_sha:0:7}")
   fi
@@ -243,18 +244,18 @@ stale_check() { # stale_check <pr-json> <name>
 [[ $pr != null ]] && stale_check "$pr" "$branch"
 [[ $parent_pr != null ]] && stale_check "$parent_pr" "$parent"
 stale_json='[]'
-(( ${#stale[@]} )) && stale_json=$(printf '%s\n' "${stale[@]}" | jq -R . | jq -sc .)
+(( ${#stale[@]} )) && stale_json=$(printf '%s\n' "${stale[@]}" | prc_strings)
 
 # ── O6 review pins ───────────────────────────────────────────────────────────
 
 pin_status() {
   local pin; pin=$(ref "refs/pr-tend/$branch/$1")
   if [[ -z $pin ]]; then
-    jq -n '{sha: null, status: "none"}'
+    echo '{"sha": null, "status": "none"}'
   elif [[ $pin == "$head" ]]; then
-    jq -n --arg s "$pin" '{sha: $s, status: "covered"}'
+    printf '{"sha": "%s", "status": "covered"}\n' "$pin"
   elif is_ancestor "$pin" "$head"; then
-    jq -n --arg s "$pin" --argjson n "$(count "$pin..$head")" '{sha: $s, status: "uncovered", uncovered: $n}'
+    printf '{"sha": "%s", "status": "uncovered", "uncovered": %s}\n' "$pin" "$(count "$pin..$head")"
   else
     local against=${target_ref:-$head} status=unknown pin_base head_base
     pin_base=$(ref "refs/pr-tend/$branch/$1-base")
@@ -264,7 +265,7 @@ pin_status() {
       status=rewritten-changed
       [[ $(patch_id "$pin_base" "$pin") == "$(patch_id "$head_base" "$head")" ]] && status=rewritten-same
     fi
-    jq -n --arg s "$pin" --arg st "$status" '{sha: $s, status: $st}'
+    printf '{"sha": "%s", "status": "%s"}\n' "$pin" "$status"
   fi
 }
 
@@ -279,141 +280,156 @@ done
 
 # ── assemble ─────────────────────────────────────────────────────────────────
 
-state=$(jq -n \
-  --arg branch "$branch" --arg head "$head" --argjson pr "$pr" \
-  --arg parent "$parent" --arg parent_source "$parent_source" \
-  --argjson parent_pr "$parent_pr" --argjson parent_merged "$parent_merged" \
-  --arg target "$target" --arg default_branch "$default_branch" --argjson sync_ahead "$sync_ahead" --argjson behind "$behind" --argjson up_to_date "$up_to_date" \
-  --argjson old_base "$(jnull "$old_base")" --argjson conflict "$conflict" \
-  --argjson remote_sha "$(jnull "$remote_sha")" --argjson ahead "$ahead" \
-  --argjson push_behind "$push_behind" --argjson diverged "$diverged" --argjson remote_ours "$remote_ours" --argjson theirs "$theirs" \
-  --argjson stale "$stale_json" \
-  --argjson r_local "${review[local]}" --argjson r_bot "${review[bot]}" \
-  --argjson r_accepted "${review[accepted]}" \
-  --argjson gh_ok "$gh_ok" --argjson parent_ok "$parent_ok" \
-  --arg viewer "$viewer" --argjson bots "$bots" --arg bot_command "$bot_command" \
-  --argjson ignore "$ignore" --argjson ignore_body "$ignore_body" \
-  --argjson handled "$(jlist "branch.$branch.pr-handled")" \
-  --argjson refs "$(git for-each-ref --format='%(refname) %(objectname)' "refs/pr-tend/$branch/" \
-                    | jq -Rn --arg p "refs/pr-tend/$branch/" '[inputs | split(" ") | {key: (.[0] | ltrimstr($p)), value: .[1]}] | from_entries')" \
-  --arg enrolled "$(cfg pr-tend)" --arg harness "$(cfg pr-harness)" \
-  --arg session "$(cfg pr-session)" --arg lock "$(cfg pr-lock)" \
-  --args '
-  def nn: if . == "" then null else . end;
-  def unbot: sub("\\[bot\\]$"; "");
-  def is_bot: .__typename == "Bot" or ((.login // "" | unbot) as $l | $l != "" and any($bots[]; unbot == $l));
-  def ignored: (.login // "" | unbot) as $l | any($ignore[]; unbot == $l);
-  # First line with text, HTML comments, tags and heading / quote markers removed.
-  def excerpt: [(. // "") | gsub("<!--[\\s\\S]*?-->"; "") | split("\n")[] | gsub("<[^>]*>"; "") | sub("^[#>\\s]+"; "") | sub("\\s+$"; "")
-                | select(. != "")][0] // "" | .[0:100];
-  def detail: {author: .author.login, url, excerpt: (.body | excerpt)};
-  def ci_class:
-    if .__typename == "CheckRun" then
-      if .status != "COMPLETED" then "pending" else .conclusion end
-    else .state end
-    | if . == "pending" or . == "PENDING" or . == "EXPECTED" then "pending"
-      elif . == "SUCCESS" or . == "NEUTRAL" or . == "SKIPPED" then "ok"
-      elif . == "CANCELLED" or . == "STALE" then "cancelled"
-      else "fail" end;
-  ($pr.commits.nodes[0].commit // null) as $c
-  | ([$c.statusCheckRollup.contexts.nodes // [] | .[] | {name: (.name // .context), k: ci_class}]) as $ctx
-  | ([$pr.reviewThreads.nodes // [] | .[]
-      | select((.isResolved | not) and ((.last.nodes[0].author.login // "") != $viewer)
-               and (.first.nodes[0].author // {} | ignored | not))
-      | {id, type: "thread", path, line, outdated: .isOutdated,
-         kind: (if .first.nodes[0].author // {} | is_bot then "bot" else "human" end),
-         last: .last.nodes[0].author.login, mark: "!"} + (.first.nodes[0] // {} | detail)]
-     + [($pr.reviews.nodes // [] | .[] | {n: ., type: "review"}), ($pr.comments.nodes // [] | .[] | {n: ., type: "comment"})
-        | select((.n.author // {} | is_bot and (ignored | not)) and (.n.body // "" | test("\\S") and (. as $b | any($ignore_body[]; . as $re | $b | test($re)) | not)) and (.n.id | IN($handled[]) | not))
-        | {id: .n.id, type, path: null, line: null, outdated: null, kind: "bot", last: .n.author.login,
-           mark: (if .n.state == "CHANGES_REQUESTED" then "!" else "i" end)} + (.n | detail)]
-     # A reviewer verdict is their latest approving, requesting or dismissed review.
-     + [$pr.reviews.nodes // [] | map(select((.author // {} | is_bot or ignored | not)
-                                             and (.state | IN("APPROVED", "CHANGES_REQUESTED", "DISMISSED"))))
-        | group_by(.author.login)[] | last | select(.state == "CHANGES_REQUESTED")
-        | {id, type: "review", path: null, line: null, outdated: null, kind: "human", last: .author.login,
-           mark: "!"} + detail]) as $owed
-  | [$owed[] | select(.kind == "bot")] as $ob
-  | {
-      branch: $branch, head: $head,
-      pr: (if $pr == null then null else
-             {number: $pr.number, url: $pr.url, state: $pr.state, draft: $pr.isDraft,
-              base: $pr.baseRefName, head_sha: $pr.headRefOid, mergeable: $pr.mergeable,
-              merge_state: $pr.mergeStateStatus, review_decision: $pr.reviewDecision,
-              review_requests: [$pr.reviewRequests.nodes // [] | .[].requestedReviewer // {} | .login // .slug // empty]} end),
-      parent: {name: $parent, source: $parent_source, merged: $parent_merged,
-               pr: (if $parent_pr == null then null else
-                      {number: $parent_pr.number, state: $parent_pr.state, head_sha: $parent_pr.headRefOid} end)},
-      sync: {target: $target, default: $default_branch, ahead: $sync_ahead, behind: $behind, up_to_date: $up_to_date, old_base: $old_base, conflict: $conflict},
-      push: {remote_sha: $remote_sha, ahead: $ahead, behind: $push_behind, diverged: $diverged, remote_ours: $remote_ours, theirs: $theirs},
-      fresh: (if $gh_ok and $parent_ok then $stale == [] else null end), stale: $stale,
-      ci: {sha: $c.oid, for_head: (if $c == null then null else $c.oid == $head end),
-           verdict: (if ($ctx | length) == 0 then "none"
-                     elif any($ctx[]; .k == "fail") then "red"
-                     elif any($ctx[]; .k == "pending") then "pending"
-                     elif any($ctx[]; .k == "cancelled") then "inconclusive"
-                     else "green" end),
-           failing: [$ctx[] | select(.k == "fail") | .name],
-           pending: [$ctx[] | select(.k == "pending") | .name]},
-      review: {local: $r_local, bot: $r_bot, accepted: $r_accepted},
-      threads: {owed_bot: (if $gh_ok then $ob | length else null end),
-                owed_human: (if $gh_ok then [$owed[] | select(.kind == "human")] | length else null end),
-                outdated: (if $gh_ok then [$owed[] | select(.outdated)] | length else null end),
-                by_type: (if $gh_ok then reduce $ob[] as $i ({thread: 0, review: 0, comment: 0}; .[$i.type] += 1)
-                          else null end),
-                blocking: (if $gh_ok then [$owed[] | select(.mark == "!")] | length else null end),
-                info: (if $gh_ok then [$owed[] | select(.mark == "i")] | length else null end),
-                items: $owed},
-      bot: {command: ($bot_command | nn)},
-      session: {enrolled: ($enrolled == "true"), harness: ($harness | nn), id: ($session | nn),
-                locked: ($lock != "")},
-      stored: {handled: $handled, refs: $refs},
-      errors: $ARGS.positional
-    }' "${errors[@]}")
+# Over the facts gathered above, as one record (see `args` below).
+read -r -d '' ASSEMBLE <<'EOF' || true
+fn unbot(s): regexp_replace(s, "\\[bot\\]$", "")
+fn nn(s): s == "" ? null : s
+fn login(a): unbot(coalesce(a.login, ""))
+fn is_bot(a, bots): on(a.__typename == "Bot") or (login(a) != "" and login(a) in bots)
+fn ignored(a, ign): login(a) in ign
+-- First line with text, HTML comments, tags and heading / quote markers removed.
+fn excerpt(b): coalesce(coalesce([unnest split(regexp_replace(coalesce(b, ""), "(?s)<!--.*?-->", ""), "\n")
+                 | values regexp_replace(regexp_replace(regexp_replace(this, "<[^>]*>", ""), "^[#>\\s]+", ""), "\\s+$", "")
+                 | where this != ""], [])[0], "")[0:100]
+fn detail(x): {author: coalesce(x.author.login, null), url: coalesce(x.url, null), excerpt: excerpt(coalesce(x.body, null))}
+fn ci_k(v): v in ["pending", "PENDING", "EXPECTED"] ? "pending"
+            : v in ["SUCCESS", "NEUTRAL", "SKIPPED"] ? "ok"
+            : v in ["CANCELLED", "STALE"] ? "cancelled" : "fail"
+fn ci_class(x): ci_k(coalesce(x.__typename == "CheckRun" ? (x.status != "COMPLETED" ? "pending" : x.conclusion) : x.state, ""))
+fn cnt(a, t): len(coalesce([unnest {t, x: a} | where x.type == t], []))
+fn matches(b, res): len(coalesce([unnest {b, re: res} | where len(regexp(re, b)) > 0], [])) > 0
+values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
+        g: {viewer, bots: coalesce([unnest bots | values unbot(this)], []), ign: coalesce([unnest ignore | values unbot(this)], []),
+            ignore_body, handled}}
+| values {a, c, g,
+    ctx: coalesce([unnest coalesce(c.statusCheckRollup.contexts.nodes, []) | values {name: coalesce(name, context, null), k: ci_class(this)}], []),
+    hv: coalesce([unnest {g, r: coalesce(a.pr.reviews.nodes, [])}
+          | where not (is_bot(coalesce(r.author, {}), g.bots) or ignored(coalesce(r.author, {}), g.ign))
+                and coalesce(r.state, "") in ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]
+          | values r | count {r: this, j}], [])}
+| values {a, c, ctx, owed: [
+    ...coalesce([unnest {g, t: coalesce(a.pr.reviewThreads.nodes, [])}
+        | where not on(t.isResolved) and coalesce(t.last.nodes[0].author.login, "") != g.viewer
+              and not ignored(coalesce(t.first.nodes[0].author, {}), g.ign)
+        | values {id: t.id, type: "thread", path: t.path, line: t.line, outdated: t.isOutdated,
+                  kind: is_bot(coalesce(t.first.nodes[0].author, {}), g.bots) ? "bot" : "human",
+                  last: coalesce(t.last.nodes[0].author.login, null), mark: "!", ...detail(coalesce(t.first.nodes[0], {}))}], []),
+    ...coalesce([unnest {g, x: [...coalesce([unnest coalesce(a.pr.reviews.nodes, []) | values {n: this, type: "review"}], []),
+                            ...coalesce([unnest coalesce(a.pr.comments.nodes, []) | values {n: this, type: "comment"}], [])]}
+        | where is_bot(coalesce(x.n.author, {}), g.bots) and not ignored(coalesce(x.n.author, {}), g.ign)
+              and grep("\\S", coalesce(x.n.body, "")) and not matches(coalesce(x.n.body, ""), g.ignore_body)
+              and not (x.n.id in g.handled)
+        | values {id: x.n.id, type: x.type, path: null, line: null, outdated: null, kind: "bot",
+                  last: coalesce(x.n.author.login, null), mark: on(x.n.state == "CHANGES_REQUESTED") ? "!" : "i", ...detail(x.n)}], []),
+    -- A reviewer verdict is their latest approving, requesting or dismissed review.
+    ...coalesce([unnest {all: hv, e: hv}
+        | where on(e.r.state == "CHANGES_REQUESTED")
+              and len(coalesce([unnest {e, x: all} | where x.j > e.j and coalesce(x.r.author.login, "") == coalesce(e.r.author.login, "")], [])) == 0
+        | sort coalesce(e.r.author.login, "")
+        | values {id: e.r.id, type: "review", path: null, line: null, outdated: null, kind: "human",
+                  last: coalesce(e.r.author.login, null), mark: "!", ...detail(e.r)}], [])]}
+| values {s: a, c, ctx, owed, ob: coalesce([unnest owed | where kind == "bot"], [])}
+| values {
+    branch: s.branch, head: s.head,
+    pr: nul(s.pr) ? null : {number: s.pr.number, url: s.pr.url, state: s.pr.state, draft: s.pr.isDraft,
+                            base: s.pr.baseRefName, head_sha: s.pr.headRefOid, mergeable: s.pr.mergeable,
+                            merge_state: s.pr.mergeStateStatus, review_decision: s.pr.reviewDecision,
+                            review_requests: coalesce([unnest coalesce(s.pr.reviewRequests.nodes, [])
+                                                       | values coalesce(requestedReviewer.login, requestedReviewer.slug, null)
+                                                       | where this is not null], [])},
+    parent: {name: s.parent, source: s.parent_source, merged: s.parent_merged,
+             pr: nul(s.parent_pr) ? null : {number: s.parent_pr.number, state: s.parent_pr.state, head_sha: s.parent_pr.headRefOid}},
+    sync: {target: s.target, default: s.default_branch, ahead: s.sync_ahead, behind: s.behind, up_to_date: s.up_to_date,
+           old_base: s.old_base, conflict: s.conflict},
+    push: {remote_sha: s.remote_sha, ahead: s.ahead, behind: s.push_behind, diverged: s.diverged, remote_ours: s.remote_ours, theirs: s.theirs},
+    fresh: s.gh_ok and s.parent_ok ? len(s.stale) == 0 : null, stale: s.stale,
+    ci: {sha: coalesce(c.oid, null), for_head: nul(c) ? null : c.oid == s.head,
+         verdict: len(ctx) == 0 ? "none"
+                  : len(coalesce([unnest ctx | where k == "fail"], [])) > 0 ? "red"
+                  : len(coalesce([unnest ctx | where k == "pending"], [])) > 0 ? "pending"
+                  : len(coalesce([unnest ctx | where k == "cancelled"], [])) > 0 ? "inconclusive" : "green",
+         failing: coalesce([unnest ctx | where k == "fail" | values name], []),
+         pending: coalesce([unnest ctx | where k == "pending" | values name], [])},
+    review: {local: s.r_local, bot: s.r_bot, accepted: s.r_accepted},
+    threads: {owed_bot: s.gh_ok ? len(ob) : null,
+              owed_human: s.gh_ok ? len(coalesce([unnest owed | where kind == "human"], [])) : null,
+              outdated: s.gh_ok ? len(coalesce([unnest owed | where on(outdated)], [])) : null,
+              by_type: s.gh_ok ? {thread: cnt(ob, "thread"), review: cnt(ob, "review"), comment: cnt(ob, "comment")} : null,
+              blocking: s.gh_ok ? len(coalesce([unnest owed | where mark == "!"], [])) : null,
+              info: s.gh_ok ? len(coalesce([unnest owed | where mark == "i"], [])) : null,
+              items: owed},
+    bot: {command: nn(s.bot_command)},
+    session: {enrolled: s.enrolled == "true", harness: nn(s.harness), id: nn(s.session), locked: s.lock != ""},
+    stored: {handled: s.handled, refs: s.refs},
+    errors: s.errors
+  }
+EOF
+
+errors_json='[]'
+(( ${#errors[@]} == 0 )) || errors_json=$(printf '%s\n' "${errors[@]}" | prc_strings)
+refs_json=$(git for-each-ref --format='%(refname) %(objectname)' "refs/pr-tend/$branch/" \
+  | while read -r r sha; do printf '%s %s\n' "${r#"refs/pr-tend/$branch/"}" "$sha"; done \
+  | prc_super -i line -j -c 'values split(this, " ") | aggregate kv:=collect({key: [this[0]], value: this[1]}) | values unflatten(coalesce(kv, []))' -)
+args=$(printf '{"branch": %s, "head": %s, "pr": %s, "parent": %s, "parent_source": %s, "parent_pr": %s, "parent_merged": %s,
+  "target": %s, "default_branch": %s, "sync_ahead": %s, "behind": %s, "up_to_date": %s, "old_base": %s, "conflict": %s,
+  "remote_sha": %s, "ahead": %s, "push_behind": %s, "diverged": %s, "remote_ours": %s, "theirs": %s, "stale": %s,
+  "r_local": %s, "r_bot": %s, "r_accepted": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s,
+  "ignore": %s, "ignore_body": %s, "handled": %s, "refs": %s, "enrolled": %s, "harness": %s, "session": %s, "lock": %s, "errors": %s}\n' \
+  "$(jstr "$branch")" "$(jstr "$head")" "$pr" "$(jstr "$parent")" "$(jstr "$parent_source")" "$parent_pr" "$parent_merged" \
+  "$(jstr "$target")" "$(jstr "$default_branch")" "$sync_ahead" "$behind" "$up_to_date" "$(jnull "$old_base")" "$conflict" \
+  "$(jnull "$remote_sha")" "$ahead" "$push_behind" "$diverged" "$remote_ours" "$theirs" "$stale_json" \
+  "${review[local]}" "${review[bot]}" "${review[accepted]}" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" \
+  "$ignore" "$ignore_body" "$(jlist "branch.$branch.pr-handled")" "$refs_json" \
+  "$(jstr "$(cfg pr-tend)")" "$(jstr "$(cfg pr-harness)")" "$(jstr "$(cfg pr-session)")" "$(jstr "$(cfg pr-lock)")" "$errors_json")
+state=$(printf '%s\n' "$args" | prc_json "$ASSEMBLE") || die "couldn't assemble the state"
 next=$(printf '%s\n' "$state" | prn_next "$remote") || die "pr-next failed"
-state=$(jq --argjson next "$next" '. + {next: $next}' <<<"$state")
+state=$(printf '{"s":%s,"next":%s}\n' "$state" "$next" | prc_json 'values {...s, next}') || die "pr-next failed"
 
 if $json; then
   echo "$state"
   exit 0
 fi
 
-jq -r '
-  def plural($n; $w): "\($n) \($w)";
-  [ .branch,
-    (if .pr == null then "no PR"
-     else "#\(.pr.number) \(if .pr.draft then "draft" else .pr.state | ascii_downcase end)" end),
-    (if .parent.merged then "parent merged → \(.sync.target)" else empty end),
-    (if .sync.up_to_date == false then
-       "↓\(.sync.behind) \(.sync.target)\(if .sync.conflict then " (conflict)" else "" end)"
-     else empty end),
-    (if .push.remote_sha == null then
-       (if .push.ahead > 0 then "\(.push.ahead) unpushed" else "not pushed" end)
-     elif .push.diverged then
-       "diverged from remote\(if .push.remote_ours then "" else " (not ours)" end)"
-     else
-       ((if .push.ahead > 0 then "\(.push.ahead) unpushed" else empty end),
-        (if .push.behind > 0 then "remote +\(.push.behind)" else empty end))
-     end),
-    (if .pr == null then empty
-     else "CI \(.ci.verdict)\(if .ci.failing != [] then " (\(.ci.failing | join(", ")))" else "" end)\(if .ci.for_head == false then " on old head" else "" end)" end),
-    (if .pr == null or .threads.blocking == null then empty
-     else "!:\(.threads.blocking) i:\(.threads.info)" end),
-    (.review | to_entries[] | select(.value != null and .value.status != "none")
-     | "\(.key) \({covered: "✓", "rewritten-same": "✓", uncovered: "+\(.value.uncovered)", "rewritten-changed": "✗", unknown: "?"}[.value.status])"),
-    (if .session.locked then "locked" else empty end),
-    (if .fresh == false then "⚠ stale: fetch" else empty end),
-    (if .errors != [] then "⚠ \(.errors | length) error(s)" else empty end)
-  ] | join(" · ")' <<<"$state"
+read -r -d '' LINE <<'EOF' || true
+fn pin(k, p): nul(p) or on(p.status == "none") ? null
+              : f"{k} {p.status in ["covered", "rewritten-same"] ? "✓" : p.status == "uncovered" ? f"+{p.uncovered}"
+                      : p.status == "rewritten-changed" ? "✗" : "?"}"
+values [
+  branch,
+  nul(pr) ? "no PR" : f"#{pr.number} {on(pr.draft) ? "draft" : lower(pr.state)}",
+  on(parent.merged) ? f"parent merged → {sync.target}" : null,
+  on(sync.up_to_date == false) ? f"↓{sync.behind} {sync.target}{on(sync.conflict) ? " (conflict)" : ""}" : null,
+  nul(push.remote_sha) ? (n(push.ahead) > 0 ? f"{push.ahead} unpushed" : "not pushed")
+  : on(push.diverged) ? f"diverged from remote{on(push.remote_ours) ? "" : " (not ours)"}"
+  : n(push.ahead) > 0 ? f"{push.ahead} unpushed" : null,
+  not nul(push.remote_sha) and not on(push.diverged) and n(push.behind) > 0 ? f"remote +{push.behind}" : null,
+  nul(pr) ? null : f"CI {ci.verdict}{len(ci.failing) > 0 ? f" ({sj(ci.failing, ", ")})" : ""}{on(ci.for_head == false) ? " on old head" : ""}",
+  nul(pr) or nul(threads.blocking) ? null : f"!:{threads.blocking} i:{threads.info}",
+  pin("local", review.local), pin("bot", review.bot), pin("accepted", review.accepted),
+  on(session.locked) ? "locked" : null,
+  on(fresh == false) ? "⚠ stale: fetch" : null,
+  len(errors) > 0 ? f"⚠ {len(errors)} error(s)" : null
+]
+| values sj(coalesce([unnest this | where this is not null], []), " · ")
+EOF
+
+read -r -d '' LONG <<'EOF' || true
+fn sp(k): k <= 0 ? "" : "                                                                                                                                                                                                        "[0:k]
+fn pad(s, w): s || sp(w - len(s))
+values {it: coalesce([unnest threads.items
+          | values {mark, type: this.type, author: coalesce(author, last, ""),
+                    text: sj(coalesce([unnest [nul(path) ? "" : f"{path}:{line}", coalesce(excerpt, "")] | where this != ""], []), "  "),
+                    url: coalesce(url, "")}], [])}
+| values {it, tw: coalesce([unnest it | values len(this.type) | sort -this][0], 0),
+              aw: coalesce([unnest it | values len(author) | sort -this][0], 0),
+              xw: coalesce([unnest it | values len(text) | sort -this][0], 0)}
+| unnest {w: {tw, aw, xw}, x: it}
+| values regexp_replace(f"  {x.mark}  {pad(x.type, w.tw)}  {pad(x.author, w.aw)}  {pad(x.text, w.xw)}  {x.url}", "\\s+$", "")
+EOF
+
+
+printf '%s\n' "$state" | prc_line "$LINE"
 printf '%s\n' "$next" | prn_lines "$($long && echo all || echo one)"
 
 $long || exit 0
-jq -r '
-  def pad($n): . + ([range(length; $n)] | map(" ") | join(""));
-  [.threads.items[] | {mark, type, author: (.author // .last // ""),
-                       text: ([(if .path then "\(.path):\(.line)" else empty end), .excerpt // ""]
-                              | map(select(. != "")) | join("  ")),
-                       url: (.url // "")}] as $it
-  | ($it | map(.type | length) | max) as $tw | ($it | map(.author | length) | max) as $aw
-  | ($it | map(.text | length) | max) as $xw
-  | $it[] | "  \(.mark)  \(.type | pad($tw))  \(.author | pad($aw))  \(.text | pad($xw))  \(.url)" | sub("\\s+$"; "")' <<<"$state"
+printf '%s\n' "$state" | prc_line "$LONG"

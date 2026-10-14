@@ -11,10 +11,9 @@
 # Behind the default branch alone is no step: it moves too often to chase.
 # A conflict with it is, and so is a restack after the parent merged.
 # Only bot items are ever marked i, so owed_bot - info is the blocking bot count.
-# null and missing fields compare as errors in SuperDB; on() and n() make them false and 0.
-PRN_QUERY='fn on(x): coalesce(x, false)
-fn n(x): coalesce(x, 0)
-fn plural(k, w): f"{k} {w}{k == 1 ? "" : "s"}"
+# on() and n() come from lib/pr-config.sh's PRC_FNS: a null or missing
+# field compares to nothing in SuperDB, and they make it false and 0.
+PRN_QUERY='fn plural(k, w): f"{k} {w}{k == 1 ? "" : "s"}"
 fn step(key, who, say, cmd): {key: key, who: who, say: say, cmd: cmd}
 fn covers(p): on(p.status in ["covered", "rewritten-same"])
 fn trails(p): on(p.status in ["uncovered", "rewritten-changed", "unknown"])
@@ -105,17 +104,17 @@ prn_next() {
   local state remote kind
   state=$(cat)
   remote=$(prc_json_string "$1") || return
-  kind=$(printf '%s\n' "$state" | prc_super -i json -f line -c 'values kind(this)' -) || return
+  kind=$(printf '%s\n' "$state" | prc_line 'values kind(this)') || return
   [[ $kind == record ]] || { echo "pr-next: pr-state JSON must be one record" >&2; return 1; }
-  printf '{"remote":%s,"s":%s}\n' "$remote" "$state" | prc_super -i json -j -c "$PRN_QUERY" -
+  printf '{"remote":%s,"s":%s}\n' "$remote" "$state" | prc_json "$PRN_QUERY"
 }
 
 # prn_lines [one|all]: steps on stdin; one adds a count of the rest, all lists them as "then".
 prn_lines() {
   local mode=${1:-one} out more=""
   local -a ls
-  out=$(prc_super -i json -f line -c 'unnest this
-    | values f"{who}{"     "[0:5-len(who)]}  {say}{cmd is null ? "" : f"  → {cmd}"}"' -) || return
+  out=$(prc_line 'unnest this
+    | values f"{who}{"     "[0:5-len(who)]}  {say}{cmd is null ? "" : f"  → {cmd}"}"') || return
   [[ -n $out ]] || return 0
   mapfile -t ls <<<"$out"
   if [[ $mode == all ]]; then

@@ -103,6 +103,27 @@ prc_super() {
   "$PRC_SUPER_BIN" "$@"
 }
 
+# Functions every query may use. A missing field is an error in SuperDB, and
+# a null or error compares to nothing, so on() and n() make them false and 0,
+# nul() is "null or absent", and sj() joins an empty list (join can't).
+PRC_FNS='fn on(x): coalesce(x, false)
+fn n(x): coalesce(x, 0)
+fn nul(x): coalesce(x, null) is null
+fn sj(a, sep): len(a) == 0 ? "" : join(a, sep)'
+
+# The two shapes every pr-* command uses: JSON on stdin through a query, with
+# PRC_FNS in scope. prc_json prints each result as one line of JSON; prc_line
+# prints strings raw (unquoted, one per line; a null prints "null", a missing
+# field error("missing"), so coalesce what may be absent).
+prc_json() { prc_super -i json -j -c "$PRC_FNS"$'\n'"$1" -; }
+prc_line() { prc_super -i json -f line -c "$PRC_FNS"$'\n'"$1" -; }
+
+# prc_val <json> <expr>: one value of a JSON document, printed raw.
+prc_val() { printf '%s\n' "$1" | prc_line "values $2"; }
+
+# prc_strings: the lines on stdin as a JSON list of strings; [] for none.
+prc_strings() { prc_super -i line -j -c 'aggregate a:=collect(this) | values coalesce(a, [])' -; }
+
 # prc_problems <global|branch> <name>: a layer's JSON on stdin; reports each
 # problem as "<name>: <problem>" and returns 1 if there are any.
 prc_problems() {
