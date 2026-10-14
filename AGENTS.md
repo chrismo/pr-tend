@@ -18,6 +18,8 @@ pr-tend tends its own PRs, so code changes go through them:
   `pr-act restack && pr-act push`.
 - chrismo merges: squash, delete the branch.
 - Docs-only and issue-tracking edits may go straight to `main`.
+- `docs/pr-workflow/` is being consumed, not kept: when work from it is built or
+  filed as an issue, delete that part of the doc in the same change.
 
 ## Development
 

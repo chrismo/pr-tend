@@ -1,10 +1,13 @@
 # PR workflow — prior art
 
-> **Working document — not for long-term keeping.** This captures design work
-> in progress for the PR workflow pipeline. Once the pipeline is built, the parts
-> worth keeping move into the code, its README, or a short decisions record, and
-> this file is deleted. Don't treat it as current documentation of anything that
-> exists.
+> **Being consumed — not for keeping.** Every part of this file moves out as
+> soon as it has a home, and is deleted here when it does: built behavior into
+> the code and its tests (the README where users need it); unbuilt work, bugs,
+> spikes and open decisions into GitHub issues on the
+> [pr-tend project board](https://github.com/users/chrismo/projects/6). No
+> duplicate docs: don't add anything here that the code or an issue already
+> says; link the issue instead. When nothing is left, delete the file. Don't
+> treat it as current documentation of anything that exists.
 
 Research behind `design.md`. Moved out of the design doc
 2026-10-11; section references (A2, O6, J3 …) point there.
