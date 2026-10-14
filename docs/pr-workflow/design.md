@@ -542,14 +542,17 @@ only after `settings.verify` passes (A10), so the model never reviews code that
 doesn't build.
 
 ```
-git config [--global] pr-tend.localReview <command>
+pr-config set [--global] settings.localReview <command>
 ```
 
 Any executable. What it does inside (prompt, model, emulating the backend bot
 or not) is out of scope; pr-tend defines only the contract, and ships a
-default `bin/pr-review-local` (thin `claude -p` wrapper + prompt file). It
-invokes Claude through `harness_run` in `lib/pr-tend.sh`, so it gets the same auth handling
-(unset `ANTHROPIC_API_KEY`, never `--bare`).
+default `bin/pr-review-local` (built 2026-10-14: `lib/review-prompt.md` plus
+the task, commits and diff, through `harness_run` in `lib/pr-tend.sh` with
+read-only tools and a new session every run; harness, model and effort from
+`pr-config step review`). `pr-act review` runs it after `pr-act verify`
+passes, over `base..HEAD`; an empty list pins `local` (with its base),
+findings are printed as JSON, and a failed reviewer pins nothing.
 
 **Contract:**
 
@@ -719,7 +722,8 @@ from running them.
    After the other manual verbs because creating a PR by hand is the cheapest
    thing chrismo does. [#10]
 9. Local review (`bin/pr-review-local`) — the model half of the old step 5. With
-   no bot, it is the only source of review findings. [#11]
+   no bot, it is the only source of review findings. Done 2026-10-14, with
+   `pr-act review`; handing findings to the branch's agent is the loop's. [#11]
 10. The loop: watcher dispatches verbs (below, "Process supervision"). After
     4–9 because a verb has to behave by hand first. [#12]
 11. Bot trigger — waits until there is a bot to trigger. [#13]

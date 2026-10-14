@@ -4,7 +4,7 @@
 # touch the real ~/.local/bin.
 
 INSTALLER="$BATS_TEST_DIRNAME/install.sh"
-COMMANDS=(pr-state pr-act pr-watch pr-config)
+COMMANDS=(pr-state pr-act pr-watch pr-config pr-review-local)
 
 setup() {
   TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pr-tend-install.XXXXXX")"

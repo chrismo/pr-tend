@@ -983,6 +983,18 @@ old_super() {
   [ "$output" = "pr-config: $PR_TEND_CONFIG: settings.verfy: unknown key" ]
 }
 
+@test "settings.localReview: a typed string setting, empty by default" {
+  run "$PR_CONFIG" get settings.localReview
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  write_global '{"settings":{"localReview":"/opt/review"}}'
+  run "$PR_CONFIG" get settings.localReview
+  [ "$status" -eq 0 ]
+  [ "$output" = /opt/review ]
+  write_branch feat '{"settings":{"localReview":"./review"}}'
+  [ "$("$PR_CONFIG" get settings.localReview)" = ./review ]
+}
+
 @test "validate: a wrong type is an error with the bad value" {
   write_global '{"settings":{"stepTimeout":"30m"}}'
   run "$PR_CONFIG" get settings.remote
