@@ -135,7 +135,7 @@ values {me: data.viewer.login, nodes: coalesce(data.repository.pullRequests.node
 | values coalesce([unnest {me, x: nodes} | where not on(x.isCrossRepository) or on(x.headRepositoryOwner.login == me) | values x], [])
 | values coalesce(coalesce([unnest this | where on(state == "OPEN")], [])[0], this[0], null)
 EOF
-pick_pr() { printf '%s\n' "$RESP" | prc_json "$PICK_PR"; }
+pick_pr() { prc_json "$PICK_PR" "$RESP"; }
 
 # ── O1 PR, O2 parent ─────────────────────────────────────────────────────────
 
@@ -143,8 +143,8 @@ pr=null viewer="" default_branch="" gh_ok=false
 if gh_query "$branch"; then
   gh_ok=true
   pr=$(pick_pr) || die "couldn't read gh's answer"
-  { read -r viewer; read -r default_branch; } < <(printf '%s\n' "$RESP" \
-    | prc_line 'values coalesce(data.viewer.login, ""), coalesce(data.repository.defaultBranchRef.name, "")')
+  { read -r viewer; read -r default_branch; } \
+    < <(prc_line 'values coalesce(data.viewer.login, ""), coalesce(data.repository.defaultBranchRef.name, "")' "$RESP")
 fi
 if [[ -z $default_branch ]]; then
   default_branch=$(git symbolic-ref -q --short "refs/remotes/$remote/HEAD" 2>/dev/null || true)
@@ -236,7 +236,7 @@ fi
 
 stale=()
 stale_check() { # stale_check <pr-json> <name>
-  local gh_sha; gh_sha=$(printf '%s\n' "$1" | prc_line 'where on(state == "OPEN") | values headRefOid')
+  local gh_sha; gh_sha=$(prc_line 'where on(state == "OPEN") | values headRefOid' "$1")
   if [[ -n $gh_sha && $gh_sha != "$(ref "refs/remotes/$remote/$2")" ]]; then
     stale+=("$remote/$2 is not at GitHub's ${gh_sha:0:7}")
   fi
@@ -381,9 +381,9 @@ args=$(printf '{"branch": %s, "head": %s, "pr": %s, "parent": %s, "parent_source
   "${review[local]}" "${review[bot]}" "${review[accepted]}" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" \
   "$ignore" "$ignore_body" "$(jlist "branch.$branch.pr-handled")" "$refs_json" \
   "$(jstr "$(cfg pr-tend)")" "$(jstr "$(cfg pr-harness)")" "$(jstr "$(cfg pr-session)")" "$(jstr "$(cfg pr-lock)")" "$errors_json")
-state=$(printf '%s\n' "$args" | prc_json "$ASSEMBLE") || die "couldn't assemble the state"
+state=$(prc_json "$ASSEMBLE" "$args") || die "couldn't assemble the state"
 next=$(printf '%s\n' "$state" | prn_next "$remote") || die "pr-next failed"
-state=$(printf '{"s":%s,"next":%s}\n' "$state" "$next" | prc_json 'values {...s, next}') || die "pr-next failed"
+state=$(prc_json 'values {...s, next}' "{\"s\": $state, \"next\": $next}") || die "pr-next failed"
 
 if $json; then
   echo "$state"
@@ -428,8 +428,8 @@ values {it: coalesce([unnest threads.items
 EOF
 
 
-printf '%s\n' "$state" | prc_line "$LINE"
+prc_line "$LINE" "$state"
 printf '%s\n' "$next" | prn_lines "$($long && echo all || echo one)"
 
 $long || exit 0
-printf '%s\n' "$state" | prc_line "$LONG"
+prc_line "$LONG" "$state"

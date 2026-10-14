@@ -263,8 +263,8 @@ EOF
 # restack) or one such record (trigger, retarget). gate_get <gate> <key>
 # prints that key's lines, in order.
 gate_get() {
-  printf '%s\n' "$1" | prc_line "unnest (kind(this) == \"array\" ? this : [this])
-    | where coalesce($2, null) is not null | values $2"
+  local q="unnest (kind(this) == \"array\" ? this : [this]) | where coalesce($2, null) is not null | values $2"
+  prc_line "$q" "$1"
 }
 
 # soft_gate <gate-json> <doing>: unless --force, list the soft refusals and exit.
@@ -287,7 +287,7 @@ gql() { gh api graphql "$@"; }
 
 report() { # report <plan> <summary>
   echo "$branch: $2"
-  printf '%s\n' "$1" | prc_line "$REPORT"
+  prc_line "$REPORT" "$1"
 }
 
 address() {
@@ -299,10 +299,10 @@ address() {
   git -C "$wt" fetch --quiet "$remote" || die "fetch from $remote failed"
   state=$(cd "$wt" && pr-state --json "$b") || die "pr-state failed"
 
-  gate=$(printf '%s\n' "$state" | prc_json "$GATE") || die "can't parse pr-state's answer"
+  gate=$(prc_json "$GATE" "$state") || die "can't parse pr-state's answer"
   line=$(gate_get "$gate" hard | head -1)
   [[ -z $line ]] || die "$line"
-  owed=$(printf '%s\n' "$state" | prc_json 'values coalesce([unnest threads.items | where kind == "bot"], [])')
+  owed=$(prc_json 'values coalesce([unnest threads.items | where kind == "bot"], [])' "$state")
   if [[ $owed == '[]' ]]; then
     echo "nothing to address on $b ($(prc_val "$state" 'coalesce(threads.owed_human, 0)') human item(s) are chrismo's)"
     return
@@ -312,15 +312,15 @@ address() {
 
   local -a id_args=()
   (( $(prc_val "$owed" 'len(this)') <= 100 )) || echo "pr-act: warning: over 100 owed items; taking the first 100" >&2
-  while IFS= read -r line; do id_args+=(-f "ids[]=$line"); done < <(printf '%s\n' "$owed" | prc_line 'unnest this | head 100 | values id')
+  while IFS= read -r line; do id_args+=(-f "ids[]=$line"); done < <(prc_line 'unnest this | head 100 | values id' "$owed")
   nodes=$(gql -f query="$NODES_Q" "${id_args[@]}") || die "couldn't fetch the findings' text"
   bots=$(prc_get settings.botLogin "$b" false json) || die "pr-config failed"
-  findings=$(printf '{"bots":%s,"n":%s}\n' "$bots" "$nodes" | prc_json "$FINDINGS_Q") || die "couldn't read the findings' text"
+  findings=$(prc_json "$FINDINGS_Q" "{\"bots\": $bots, \"n\": $nodes}") || die "couldn't read the findings' text"
   [[ $findings != '[]' ]] || die "none of the owed items could be fetched"
   local held
-  held=$(printf '%s\n' "$findings" | prc_json 'values coalesce([unnest this | where len(untrusted) > 0
-    | values {...this, action: "ask", reply: f"joined by {sj(untrusted, ", ")}: yours to answer"} | drop untrusted], [])')
-  findings=$(printf '%s\n' "$findings" | prc_json 'values coalesce([unnest this | where len(untrusted) == 0 | drop untrusted], [])')
+  held=$(prc_json 'values coalesce([unnest this | where len(untrusted) > 0
+    | values {...this, action: "ask", reply: f"joined by {sj(untrusted, ", ")}: yours to answer"} | drop untrusted], [])' "$findings")
+  findings=$(prc_json 'values coalesce([unnest this | where len(untrusted) == 0 | drop untrusted], [])' "$findings")
   if [[ $findings == '[]' ]]; then
     report "$held" "no bot feedback the agent can take"
     return
@@ -359,13 +359,13 @@ address() {
   esac
   local changed=false
   [[ -n $(git -C "$wt" status --porcelain) ]] && changed=true
-  plan=$(printf '{"f":%s,"r":%s,"changed":%s,"held":%s}\n' "$findings" "$result" "$changed" "$held" | prc_json "$PLAN_Q") \
+  plan=$(prc_json "$PLAN_Q" "{\"f\": $findings, \"r\": $result, \"changed\": $changed, \"held\": $held}") \
     || die "couldn't read the agent's answer; edits (if any) are left uncommitted in $wt"
 
   local msg
   if $changed; then
-    msg=$(printf '%s\n' "$result" | prc_line 'values {m: coalesce(commit_message, null)}
-      | values case when is(m, <string>) and grep("\\S", m) then m else "Address review feedback" end')
+    msg=$(prc_line 'values {m: coalesce(commit_message, null)}
+      | values case when is(m, <string>) and grep("\\S", m) then m else "Address review feedback" end' "$result")
     git -C "$wt" add -A && git -C "$wt" commit -q -m "$msg" || die "commit failed; the edits are left in $wt"
   fi
   verify_run "$wt" "$b" || die "verify failed ($verify); the commit is kept in $wt, nothing pushed or posted"
@@ -391,18 +391,18 @@ address() {
           -f thread="$id" >/dev/null \
         || { echo "pr-act: resolving $at failed" >&2; failed=1; }
     fi
-  done < <(printf '%s\n' "$plan" | prc_line "$REPLIES")
+  done < <(prc_line "$REPLIES" "$plan")
 
   # Review bodies and PR comments can't be replied to or resolved: answer them
   # in one PR comment and remember them in branch.<b>.pr-handled. Link, don't
   # quote: quoted text can carry what other bots act on (/commands, @mentions).
   local pj
   pj=$(prc_json_string "$prefix") || die "settings.replyPrefix isn't usable"
-  body=$(printf '{"p":%s,"plan":%s}\n' "$pj" "$plan" | prc_line '
+  body=$(prc_line '
     values {p, parts: coalesce([unnest plan | where this.type != "thread" and action != "ask"
                                 | values f"[{this.type == "review" ? "Review" : "Comment"}]({url})\n\n{reply}"], [])}
     | where len(parts) > 0
-    | values f"{p}Addressed review feedback:\n\n{join(parts, "\n\n")}"')
+    | values f"{p}Addressed review feedback:\n\n{join(parts, "\n\n")}"' "{\"p\": $pj, \"plan\": $plan}")
   if [[ -n $body ]]; then
     # By URL, not {owner}/{repo}: gh's default repo may be a fork.
     if pr_id=$(gql -f url="$(prc_val "$state" pr.url)" \
@@ -411,7 +411,7 @@ address() {
        && gql -f query='mutation($subject: ID!, $body: String!) { addComment(input: {subjectId: $subject, body: $body}) { clientMutationId } }' \
               -f subject="$pr_id" -f body="$body" >/dev/null; then
       while IFS= read -r id; do git config --add "branch.$b.pr-handled" "$id"; done \
-        < <(printf '%s\n' "$plan" | prc_line 'unnest this | where this.type != "thread" and action != "ask" | values id')
+        < <(prc_line 'unnest this | where this.type != "thread" and action != "ask" | values id' "$plan")
     else
       echo "pr-act: posting the PR comment failed" >&2; failed=1
     fi
@@ -482,7 +482,7 @@ review() {
   findings=$(cd "$wt" && PR_TEND_BASE=$base PR_TEND_HEAD=$head PR_TEND_TASK=$task \
                with_timeout "$timeout" sh -c "$reviewer" </dev/null) \
     || die "the reviewer failed ($reviewer); nothing pinned"
-  n=$(printf '%s\n' "$findings" | prc_line 'where kind(this) == "array" | values len(this)' 2>/dev/null) && [[ -n $n ]] \
+  n=$(prc_line 'where kind(this) == "array" | values len(this)' "$findings" 2>/dev/null) && [[ -n $n ]] \
     || die "the reviewer printed no JSON list ($reviewer)"
   if (( n == 0 )); then
     pin_write "$b" local "$head" "$base"
@@ -566,7 +566,7 @@ describe_run() {
   step_store "$b"
   f=$(describe_file "$b")
   mkdir -p "$(dirname "$f")"
-  printf '{"head":"%s","r":%s}\n' "$head" "$result" | prc_json 'values {head, title: r.title, body: coalesce(r.body, "")}' > "$f"
+  prc_json 'values {head, title: r.title, body: coalesce(r.body, "")}' "{\"head\": \"$head\", \"r\": $result}" > "$f"
   cat "$f"
 }
 
@@ -598,16 +598,16 @@ ship() {
     none|OPEN) ;;
     *) die "PR #$(prc_val "$state" pr.number) is $(tr '[:upper:]' '[:lower:]' <<<"$pr_state"); nothing to ship" ;;
   esac
-  printf '%s\n' "$state" | prc_line 'where not (coalesce(review.local.status, "none") in ["covered", "rewritten-same"])
-    | values "pr-act: warning: the local review doesn'"'"'t cover HEAD (pr-act review); the PR stays a draft until it does"' >&2
+  prc_line 'where not (coalesce(review.local.status, "none") in ["covered", "rewritten-same"])
+    | values "pr-act: warning: the local review doesn'"'"'t cover HEAD (pr-act review); the PR stays a draft until it does"' "$state" >&2
   head=$(git rev-parse "refs/heads/$b")
   f=$(describe_file "$b")
-  if [[ ! -f $f || $(cat "$f" | prc_line 'values head' 2>/dev/null) != "$head" ]]; then
+  if [[ ! -f $f || $(prc_line 'values head' "$(<"$f")" 2>/dev/null) != "$head" ]]; then
     describe_run "$b" "$wt" "$state" >/dev/null
     [[ $(git rev-parse "refs/heads/$b") == "$head" ]] \
       || die "HEAD moved during the describe step (${head:0:7} → $(git rev-parse --short "refs/heads/$b")); nothing pushed. Look, then ship again"
   fi
-  title=$(cat "$f" | prc_line 'values title') body=$(cat "$f" | prc_line 'values body')
+  title=$(prc_line 'values title' "$(<"$f")") body=$(prc_line 'values body' "$(<"$f")")
   push_branch "$b" "$remote" || exit 1
   parent=$(git config --get "branch.$b.pr-parent" || true)
   parent=${parent:-$(prc_val "$state" sync.default)}
@@ -645,7 +645,7 @@ trigger() {
   command=$(prc_get settings.botCommand "$b" false) || die "pr-config failed"
   [[ -n $command ]] || die "no settings.botCommand configured: the comment that makes the review bot run"
   state=$(pr-state --json "$b") || die "pr-state failed"
-  gate=$(printf '%s\n' "$state" | prc_json "$TRIGGER_GATE") || die "can't parse pr-state's answer"
+  gate=$(prc_json "$TRIGGER_GATE" "$state") || die "can't parse pr-state's answer"
   line=$(gate_get "$gate" hard); [[ -z $line ]] || die "$line"
   line=$(gate_get "$gate" done); if [[ -n $line ]]; then echo "$line"; return; fi
   line=$(gate_get "$gate" soft)
@@ -762,7 +762,7 @@ restack() {
   git -C "$wt" fetch --quiet --prune "$remote" || die "fetch from $remote failed"
   state=$(cd "$wt" && pr-state --json "$b") || die "pr-state failed"
 
-  gate=$(printf '{"remote":%s,"resolve":%s,"s":%s}\n' "$(prc_json_string "$remote")" "$resolve" "$state" | prc_json "$RESTACK_GATE") \
+  gate=$(prc_json "$RESTACK_GATE" "{\"remote\": $(prc_json_string "$remote"), \"resolve\": $resolve, \"s\": $state}") \
     || die "can't parse pr-state's answer"
   line=$(gate_get "$gate" hard | head -1)
   [[ -z $line ]] || die "$line"
@@ -882,7 +882,7 @@ resolve_conflicts() {
 # dead PR. Rewrite it when the target is the default branch.
 parent_to_default() {
   local b=$1 default target
-  { read -r default; read -r target; } < <(printf '%s\n' "$2" | prc_line 'values sync.default, sync.target')
+  { read -r default; read -r target; } < <(prc_line 'values sync.default, sync.target' "$2")
   [[ $target == "$default" ]] || return 0
   [[ -n $(git config --get "branch.$b.pr-parent" || true) ]] || return 0
   git config "branch.$b.pr-parent" "$default"
@@ -909,7 +909,7 @@ EOF
 retarget() {
   local b=$branch state gate line default number
   state=$(pr-state --json "$b") || die "pr-state failed"
-  gate=$(printf '%s\n' "$state" | prc_json "$RETARGET_GATE") || die "can't parse pr-state's answer"
+  gate=$(prc_json "$RETARGET_GATE" "$state") || die "can't parse pr-state's answer"
   line=$(gate_get "$gate" hard)
   [[ -z $line ]] || die "$line"
   default=$(prc_val "$state" sync.default)
@@ -939,12 +939,11 @@ ack() {
   local -a picked=() shown=() bad=()
   local -A found=()
   state=$(pr-state --json "$b") || die "pr-state failed"
-  check=$(printf '%s\n' "$state" | prc_line \
-    'values nul(threads.owed_bot) ? f"can'"'"'t read the PR from GitHub: {sj(coalesce(errors, []), "; ")}" : "ok"') \
+  check=$(prc_line 'values nul(threads.owed_bot) ? f"can'"'"'t read the PR from GitHub: {sj(coalesce(errors, []), "; ")}" : "ok"' "$state") \
     || die "can't parse pr-state's answer"
   [[ $check == ok ]] || die "$check"
   for id in "${ids[@]}"; do ids_json+=$sep$(prc_json_string "$id") || exit 1; sep=,; done
-  out=$(printf '{"ids":[%s],"s":%s}\n' "$ids_json" "$state" | prc_line "$ACK_Q") \
+  out=$(prc_line "$ACK_Q" "{\"ids\": [$ids_json], \"s\": $state}") \
     || die "can't parse pr-state's answer"
   while IFS='|' read -r id why what; do
     [[ -n $id ]] || continue
@@ -964,9 +963,9 @@ ack() {
 record_lineage() {
   local b=$1 state parent old_base
   state=$(pr-state --json "$b" 2>/dev/null) || return 0
-  read -r parent old_base < <(printf '%s\n' "$state" | prc_line '
+  read -r parent old_base < <(prc_line '
     where coalesce(parent.source == "pr" and parent.name != sync.default, false)
-    | values f"{parent.name} {coalesce(sync.old_base, "")}"') || true
+    | values f"{parent.name} {coalesce(sync.old_base, "")}"' "$state") || true
   [[ -n ${parent:-} ]] || return 0
   git config "branch.$b.pr-parent" "$parent"
   echo "parent: $parent"

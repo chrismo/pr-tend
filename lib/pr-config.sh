@@ -111,15 +111,18 @@ fn n(x): coalesce(x, 0)
 fn nul(x): coalesce(x, null) is null
 fn sj(a, sep): len(a) == 0 ? "" : join(a, sep)'
 
-# The two shapes every pr-* command uses: JSON on stdin through a query, with
-# PRC_FNS in scope. prc_json prints each result as one line of JSON; prc_line
-# prints strings raw (unquoted, one per line; a null prints "null", a missing
-# field error("missing"), so coalesce what may be absent).
-prc_json() { prc_super -i json -j -c "$PRC_FNS"$'\n'"$1" -; }
-prc_line() { prc_super -i json -f line -c "$PRC_FNS"$'\n'"$1" -; }
+# The two shapes every pr-* command uses: prc_json <query> [json] and
+# prc_line <query> [json] run the JSON document (the argument, else stdin)
+# through <query> with PRC_FNS in scope. prc_json prints each result as one
+# line of JSON; prc_line prints strings raw (unquoted, one per line; a null
+# prints "null", a missing field error("missing"), so coalesce what may be
+# absent). super reads nothing from a here-string, so the document is piped.
+prc_json() { prc_doc "$@" | prc_super -i json -j -c "$PRC_FNS"$'\n'"$1" -; }
+prc_line() { prc_doc "$@" | prc_super -i json -f line -c "$PRC_FNS"$'\n'"$1" -; }
+prc_doc() { if (( $# > 1 )); then printf '%s\n' "$2"; else cat; fi; }
 
 # prc_val <json> <expr>: one value of a JSON document, printed raw.
-prc_val() { printf '%s\n' "$1" | prc_line "values $2"; }
+prc_val() { prc_line "values $2" "$1"; }
 
 # prc_strings: the lines on stdin as a JSON list of strings; [] for none.
 prc_strings() { prc_super -i line -j -c 'aggregate a:=collect(this) | values coalesce(a, [])' -; }
