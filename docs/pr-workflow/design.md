@@ -706,7 +706,11 @@ from running them.
 5. `pr-act restack` + `push` incl. reconciliation — done 2026-10-13, see below
 6. **Retarget**, pulled out of the old step 6: after a parent merges, restack
    onto `main` and change the PR's base. It is stack maintenance, so it sits
-   next to restack. [#8]
+   next to restack. Done 2026-10-14: `pr-act retarget` edits the base (GitHub
+   usually already did, on the parent's branch delete) and both it and a
+   restack that lands on the default branch rewrite `pr-parent` to it. A
+   parent closed without merging is a `parent-closed` step for chrismo, and
+   restack and retarget refuse. [#8]
 7. `pr-act verify` — the zero-token half of the old step 5. Gates every later
    step. Done 2026-10-14: `settings.verify` in the branch's worktree under
    `settings.stepTimeout`; fail → nonzero, output trimmed to its last 40 lines;
