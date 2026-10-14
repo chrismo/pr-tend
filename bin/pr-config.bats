@@ -90,6 +90,41 @@ GLOBAL='{"harness":"claude",
   [ "$(jq 'has("effort")' <<<"$output")" = false ]
 }
 
+@test "step: a model override that inherits effort warns, since level names depend on the model" {
+  write_global '{"harnesses":{"claude":{"model":"strong","effort":"high"}},
+                 "steps":{"review":{"claude":{"model":"other"}}}}'
+  run --separate-stderr "$PR_CONFIG" step review
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .model <<<"$output")" = other ]
+  [ "$(jq -r .effort <<<"$output")" = high ]
+  [[ "$stderr" == *"steps.review.claude sets model but inherits effort high from harnesses.claude"* ]]
+}
+
+@test "step: the branch file's model override warns too, and the warning is once" {
+  write_global '{"harnesses":{"claude":{"model":"strong","effort":"high"}}}'
+  write_branch feat '{"steps":{"review":{"claude":{"model":"other"}}}}'
+  run --separate-stderr "$PR_CONFIG" step review
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'inherits effort' <<<"$stderr")" = 1 ]
+}
+
+@test "step: no warning when the override sets effort, clears it, or sets no model" {
+  local o
+  for o in '{"model":"other","effort":"low"}' '{"model":"other","effort":null}' '{"effort":"low"}' '{}'; do
+    write_global "{\"harnesses\":{\"claude\":{\"model\":\"strong\",\"effort\":\"high\"}},\"steps\":{\"review\":{\"claude\":$o}}}"
+    run --separate-stderr "$PR_CONFIG" step review
+    [ "$status" -eq 0 ]
+    [ -z "$stderr" ] || { echo "for: $o: $stderr"; return 1; }
+  done
+}
+
+@test "step: no warning when the harness block has no effort to inherit" {
+  write_global '{"harnesses":{"claude":{"model":"strong"}},"steps":{"review":{"claude":{"model":"other"}}}}'
+  run --separate-stderr "$PR_CONFIG" step review
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+}
+
 @test "step: the branch file overrides the global step block" {
   write_global "$GLOBAL"
   write_branch feat '{"steps":{"address":{"pi":{"model":"branch-model"}}}}'
