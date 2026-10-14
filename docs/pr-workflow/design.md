@@ -907,6 +907,12 @@ short-lived, so it can't own children like their daemons do. Plan:
       see why → gh pr view --web`
     The last two, like `ready`, only show when nothing else does: a pending or
     red CI already explains a `BLOCKED`.
+  - Stacked PRs (base isn't the default branch, 2026-10-14): never `ready`
+    while the parent's PR is open (`wait  waiting on <parent> (#N) to merge
+    first`, listed behind other steps), and after it merged but the PR still
+    targets it, `you  <base> already merged: point this PR at main → gh pr
+    edit --base main`. A base with no PR of its own (a release branch) is
+    unaffected.
   - pr-watch: ⏳ when every step is a wait; `blocked` is 🔧. Checked read-only
     on cli/cli#14640 (`REVIEW_REQUIRED` / `BLOCKED`, two users requested).
 

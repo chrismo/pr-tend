@@ -29,7 +29,7 @@
 #             else roll back; never pushes
 #   push      publish: a plain push for new commits; rewritten history is
 #             force-pushed with a lease, only over a remote head of our own.
-#             Never over commits that aren't yours, --force or not
+#             Never over commits this copy has never had, --force or not
 #
 # --force:
 #   address         run even if the branch is unpushed, diverged or taken over
@@ -326,9 +326,9 @@ plural() { if (( $1 == 1 )); then echo "1 $2"; else echo "$1 $2s"; fi; }
 
 # push_branch <branch> <remote>: publish <branch> as fetched just now. Rewritten
 # history is force-pushed with a lease on that remote head, and only when the
-# head is in the branch's reflog (we put it there). Never over others' commits.
+# head is in the branch's reflog (we put it there).
 push_branch() {
-  local b=$1 remote=$2 rsha ahead behind n reflog theirs
+  local b=$1 remote=$2 rsha ahead behind reflog theirs
   git fetch --quiet --prune "$remote" || { echo "pr-act: fetch from $remote failed" >&2; return 1; }
   rsha=$(git rev-parse -q --verify "refs/remotes/$remote/$b^{commit}" || true)
   if [[ -z $rsha ]]; then
@@ -351,9 +351,8 @@ push_branch() {
     reflog=$(git reflog show --format=%H "refs/heads/$b")
     if ! grep -qx "$rsha" <<<"$reflog"; then
       theirs=$(commits_not_ours "$reflog" "$rsha")
-      if (( theirs == 1 )); then n="1 commit that isn't"; else n="$theirs commits that aren't"; fi
-      echo "pr-act: $remote/$b has $n yours; not pushing over it." \
-           "Look: git log $b..$remote/$b, then bring it into $b" >&2
+      echo "pr-act: $remote/$b has $(plural "$theirs" commit) this copy has never had; not pushing over it." \
+           "Look: git log $b..$remote/$b, then rebase onto or merge $remote/$b and push again" >&2
       return 1
     fi
     push_ref "$b" "$remote" "$rsha" --force-with-lease="refs/heads/$b:$rsha" || return

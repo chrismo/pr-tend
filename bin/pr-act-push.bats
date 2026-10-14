@@ -81,8 +81,9 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   git commit -q --amend -m "feat, reworded"
   run "$PR_ACT" push
   [ "$status" -eq 1 ]
-  [[ "$output" == *"origin/feat has 1 commit that isn't yours; not pushing over it"* ]]
+  [[ "$output" == *"origin/feat has 1 commit this copy has never had; not pushing over it"* ]]
   [[ "$output" == *"git log feat..origin/feat"* ]]
+  [[ "$output" == *"then rebase onto or merge origin/feat and push again"* ]]
   [ "$(remote feat)" = "$theirs" ]
   run "$PR_ACT" push --force
   [ "$status" -eq 1 ]

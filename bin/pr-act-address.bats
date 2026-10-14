@@ -290,7 +290,7 @@ remote_feat() { git -C "$TMP/origin.git" rev-parse feat; }
   theirs=$(remote_feat)
   run "$PR_ACT" address --force
   [ "$status" -eq 1 ]
-  [[ "$output" == *"isn't yours"* ]]
+  [[ "$output" == *"this copy has never had"* ]]
   [ "$(remote_feat)" = "$theirs" ]
   [ "$(gh_ops)" = nodes ]
 }
