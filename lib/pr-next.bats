@@ -13,7 +13,7 @@ setup() {
     "pr": {"number": 7, "url": "u", "state": "OPEN", "draft": false, "base": "main", "head_sha": "h1", "mergeable": "MERGEABLE",
            "merge_state": "CLEAN", "review_decision": null, "review_requests": []},
     "parent": {"name": "main", "source": "pr", "merged": false, "pr": null},
-    "sync": {"target": "main", "default": "main", "behind": 0, "up_to_date": true, "old_base": "b0b0b0b0b0b0b0b0", "conflict": false},
+    "sync": {"target": "main", "default": "main", "ahead": 1, "behind": 0, "up_to_date": true, "old_base": "b0b0b0b0b0b0b0b0", "conflict": false},
     "push": {"remote_sha": "h1", "ahead": 0, "behind": 0, "diverged": false, "remote_ours": true},
     "fresh": true, "stale": [],
     "ci": {"sha": "h1", "for_head": true, "verdict": "green", "failing": [], "pending": []},
@@ -202,8 +202,15 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
 }
 
 @test "rewritten history of our own: pr-act push, which leases" {
-  [ "$(step push say '.push.ahead = 2' '.push.behind = 2' '.push.diverged = true')" = "force-push 2 commits (rewritten)" ]
+  [ "$(step push say '.push.ahead = 2' '.push.behind = 2' '.push.diverged = true' '.sync.ahead = 2')" = "force-push 2 commits (rewritten)" ]
   [ "$(step push cmd '.push.ahead = 2' '.push.behind = 2' '.push.diverged = true')" = "pr-act push" ]
+}
+
+@test "rewritten after a restack: count the branch's own commits, not what came in from the target" {
+  # After a restack onto a squash-merged parent, remote..HEAD also counts the
+  # squash commit (#31). sync.ahead is <target>..HEAD: just the branch's own.
+  [ "$(step push say '.push.ahead = 3' '.push.behind = 2' '.push.diverged = true' '.sync.ahead = 2')" = "force-push 2 commits (rewritten)" ]
+  [ "$(step push say '.push.ahead = 3' '.push.behind = 2' '.push.diverged = true' '.sync.ahead = null')" = "force-push 3 commits (rewritten)" ]
 }
 
 @test "never pushed: pr-act push" {

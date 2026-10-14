@@ -8,7 +8,7 @@
 #   pr        the branch's PR (an open one wins over closed/merged)
 #   parent    pr-parent config, else the PR base, else the default branch;
 #             a merged parent retargets sync to the default branch
-#   sync      behind the parent? would `rebase --onto` conflict?
+#   sync      ahead of / behind the parent? would `rebase --onto` conflict?
 #   push      local vs remote branch; whether the remote SHA is ours (reflog)
 #   ci        checks on the PR head commit
 #   review    coverage of HEAD by refs/pr-tend/<branch>/{local,bot,accepted}
@@ -172,10 +172,11 @@ target=$parent
 # ── O3 sync vs parent ────────────────────────────────────────────────────────
 
 target_ref=$(ref "refs/remotes/$remote/$target")
-behind=null up_to_date=null old_base="" conflict=null
+sync_ahead=null behind=null up_to_date=null old_base="" conflict=null
 if [[ -z $target_ref ]]; then
   errors+=("no $remote/$target ref (not fetched?)")
 else
+  sync_ahead=$(count "$target_ref..$head")
   behind=$(count "$head..$target_ref")
   base_pin=$(ref "refs/pr-tend/$branch/base")
   merged_head=$(jq -r '.headRefOid // empty' <<<"$parent_pr")
@@ -277,7 +278,7 @@ state=$(jq -n \
   --arg branch "$branch" --arg head "$head" --argjson pr "$pr" \
   --arg parent "$parent" --arg parent_source "$parent_source" \
   --argjson parent_pr "$parent_pr" --argjson parent_merged "$parent_merged" \
-  --arg target "$target" --arg default_branch "$default_branch" --argjson behind "$behind" --argjson up_to_date "$up_to_date" \
+  --arg target "$target" --arg default_branch "$default_branch" --argjson sync_ahead "$sync_ahead" --argjson behind "$behind" --argjson up_to_date "$up_to_date" \
   --argjson old_base "$(jnull "$old_base")" --argjson conflict "$conflict" \
   --argjson remote_sha "$(jnull "$remote_sha")" --argjson ahead "$ahead" \
   --argjson push_behind "$push_behind" --argjson diverged "$diverged" --argjson remote_ours "$remote_ours" --argjson theirs "$theirs" \
@@ -338,7 +339,7 @@ state=$(jq -n \
       parent: {name: $parent, source: $parent_source, merged: $parent_merged,
                pr: (if $parent_pr == null then null else
                       {number: $parent_pr.number, state: $parent_pr.state, head_sha: $parent_pr.headRefOid} end)},
-      sync: {target: $target, default: $default_branch, behind: $behind, up_to_date: $up_to_date, old_base: $old_base, conflict: $conflict},
+      sync: {target: $target, default: $default_branch, ahead: $sync_ahead, behind: $behind, up_to_date: $up_to_date, old_base: $old_base, conflict: $conflict},
       push: {remote_sha: $remote_sha, ahead: $ahead, behind: $push_behind, diverged: $diverged, remote_ours: $remote_ours, theirs: $theirs},
       fresh: (if $gh_ok and $parent_ok then $stale == [] else null end), stale: $stale,
       ci: {sha: $c.oid, for_head: (if $c == null then null else $c.oid == $head end),

@@ -286,6 +286,15 @@ field() { jq -r "$@" <<<"$output"; }
   [ "$(field .sync.up_to_date)" = true ]
 }
 
+@test "sync: ahead counts the branch's own commits over the target" {
+  git switch -qc feat && commit a.txt a && commit b.txt b
+  commit c.txt c "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
+  git fetch -q
+  state
+  [ "$(field .sync.ahead)" = 2 ]
+  [ "$(field .sync.behind)" = 1 ]
+}
+
 @test "sync: parent moved, restack would be clean" {
   git switch -qc feat && commit a.txt a
   commit b.txt b "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
