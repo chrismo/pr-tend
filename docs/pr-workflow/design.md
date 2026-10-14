@@ -920,7 +920,8 @@ short-lived, so it can't own children like their daemons do. Plan:
   Still untested: whether `mergeStateStatus: BEHIND` makes "behind the default
   branch" a real step ([#6]).
 
-Open bugs are tracked as issues: [#1], [#2], [#3], [#4], [#5].
+Open bugs are [issues labeled `bug`](https://github.com/chrismo/pr-tend/issues?q=is%3Aissue+is%3Aopen+label%3Abug);
+all work is on the [pr-tend project board](https://github.com/users/chrismo/projects/6).
 
 ## Open
 
@@ -973,11 +974,6 @@ clones in `~/modev/pr-workflow-prior-art/` (sortie, av, gh-stack, attractor, sym
 - **Still distinctive:** stack-aware restack with a post-condition, local review
   before the bot, git-native state.
 
-[#1]: https://github.com/chrismo/pr-tend/issues/1
-[#2]: https://github.com/chrismo/pr-tend/issues/2
-[#3]: https://github.com/chrismo/pr-tend/issues/3
-[#4]: https://github.com/chrismo/pr-tend/issues/4
-[#5]: https://github.com/chrismo/pr-tend/issues/5
 [#6]: https://github.com/chrismo/pr-tend/issues/6
 [#7]: https://github.com/chrismo/pr-tend/issues/7
 [#8]: https://github.com/chrismo/pr-tend/issues/8
