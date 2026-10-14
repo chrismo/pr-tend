@@ -25,7 +25,8 @@
 #   next      what to do, in order: {key, who, say, cmd} (lib/pr-next.sh)
 #
 # Output:
-#   default   the one-liner, then NEXT: the first step and how many follow
+#   default   the one-liner (led by the PR's url, not the branch), then NEXT:
+#             the first step and how many follow
 #   --long    the one-liner, every step, then a line per owed item
 #             (mark, type, author, excerpt, url)
 #   --json    everything
@@ -415,8 +416,7 @@ fn pin(k, p): nul(p) or on(p.status == "none") ? null
               : f"{k} {p.status in ["covered", "rewritten-same"] ? "✓" : p.status == "uncovered" ? f"+{p.uncovered}"
                       : p.status == "rewritten-changed" ? "✗" : "?"}"
 values [
-  branch,
-  nul(pr) ? "no PR" : f"#{pr.number} {on(pr.draft) ? "draft" : lower(pr.state)}",
+  nul(pr) ? "no PR" : f"{pr.url} {on(pr.draft) ? "draft" : lower(pr.state)}",
   on(parent.merged) ? f"parent merged → {sync.target}" : null,
   on(sync.up_to_date == false) ? f"↓{sync.behind} {sync.target}{on(sync.conflict) ? " (conflict)" : ""}" : null,
   nul(push.remote_sha) ? (n(push.ahead) > 0 ? f"{push.ahead} unpushed" : "not pushed")
