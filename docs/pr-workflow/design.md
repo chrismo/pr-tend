@@ -708,7 +708,9 @@ from running them.
    onto `main` and change the PR's base. It is stack maintenance, so it sits
    next to restack. [#8]
 7. `pr-act verify` — the zero-token half of the old step 5. Gates every later
-   step. [#9]
+   step. Done 2026-10-14: `settings.verify` in the branch's worktree under
+   `settings.stepTimeout`; fail → nonzero, output trimmed to its last 40 lines;
+   a tree change counts as failure. `pr-act address` runs the same code. [#9]
 8. `pr-act ship` + `describe` — push, `gh pr create`, and the description step.
    After the other manual verbs because creating a PR by hand is the cheapest
    thing chrismo does. [#10]
