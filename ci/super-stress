@@ -69,6 +69,7 @@ builtin_list() {
   add pr-act:FINDINGS_Q "$(heredoc "$act" FINDINGS_Q)" "$FIX/findings.json"
   add pr-act:PLAN_Q "$(heredoc "$act" PLAN_Q)" "$FIX/plan.json"
   add pr-act:REPORT "$(heredoc "$act" REPORT)" "$FIX/report.json" line
+  add pr-act:REPLIES "$(heredoc "$act" REPLIES)" "$FIX/report.json" line
   printf '%s\n' "$PRN_QUERY" > "$WORK/pr-next.PRN_QUERY.spq"
   add pr-next:PRN_QUERY "$WORK/pr-next.PRN_QUERY.spq" "$FIX/next.json"
 }

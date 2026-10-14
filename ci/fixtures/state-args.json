@@ -52,5 +52,5 @@
  "r_accepted": {"sha": null, "status": "none"},
  "gh_ok": true, "parent_ok": true, "viewer": "me", "bots": ["sweep-bot[bot]"], "bot_command": "/review-bot",
  "ignore": ["github-actions"], "ignore_body": ["is on the job\\.", "^Deployed"], "handled": ["R9"],
- "refs": {"local": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", "local-base": "0000000000000000000000000000000000000000"},
+ "refs": ["refs/pr-tend/feat/local a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", "refs/pr-tend/feat/local-base 0000000000000000000000000000000000000000"],
  "enrolled": "true", "harness": "claude", "session": "abc-123", "lock": "", "errors": ["gh (other): boom"]}

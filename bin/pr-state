@@ -360,16 +360,16 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
               items: owed},
     bot: {command: nn(s.bot_command)},
     session: {enrolled: s.enrolled == "true", harness: nn(s.harness), id: nn(s.session), locked: s.lock != ""},
-    stored: {handled: s.handled, refs: s.refs},
+    stored: {handled: s.handled,
+             refs: unflatten(coalesce([unnest {p: f"refs/pr-tend/{s.branch}/", r: s.refs}
+                                       | values {key: [split(r, " ")[0][len(p):]], value: split(r, " ")[1]}], []))},
     errors: s.errors
   }
 EOF
 
 errors_json='[]'
 (( ${#errors[@]} == 0 )) || errors_json=$(printf '%s\n' "${errors[@]}" | prc_strings)
-refs_json=$(git for-each-ref --format='%(refname) %(objectname)' "refs/pr-tend/$branch/" \
-  | while read -r r sha; do printf '%s %s\n' "${r#"refs/pr-tend/$branch/"}" "$sha"; done \
-  | prc_super -i line -j -c 'values split(this, " ") | aggregate kv:=collect({key: [this[0]], value: this[1]}) | values unflatten(coalesce(kv, []))' -)
+refs_json=$(git for-each-ref --format='%(refname) %(objectname)' "refs/pr-tend/$branch/" | prc_strings)
 args=$(printf '{"branch": %s, "head": %s, "pr": %s, "parent": %s, "parent_source": %s, "parent_pr": %s, "parent_merged": %s,
   "target": %s, "default_branch": %s, "sync_ahead": %s, "behind": %s, "up_to_date": %s, "old_base": %s, "conflict": %s,
   "remote_sha": %s, "ahead": %s, "push_behind": %s, "diverged": %s, "remote_ours": %s, "theirs": %s, "stale": %s,

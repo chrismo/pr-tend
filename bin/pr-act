@@ -251,6 +251,14 @@ values [
 ] | unnest this
 EOF
 
+# The thread replies to post: id, action, where and the reply (any number of
+# lines), then a record separator, per item.
+read -r -d '' REPLIES <<'EOF' || true
+fn where(it): it.type == "thread" ? f"{it.path}:{it.line}" : it.type == "review" ? "review body" : "PR comment"
+unnest this | where this.type == "thread" and action != "ask"
+| values id, action, where(this), reply, "\u001e"
+EOF
+
 # A gate is a list of {hard}, {soft}, {warn} and {done} records (address,
 # restack) or one such record (trigger, retarget). gate_get <gate> <key>
 # prints that key's lines, in order.
@@ -276,8 +284,6 @@ worktree_for() { # the worktree that has refs/heads/<branch> checked out
 }
 
 gql() { gh api graphql "$@"; }
-
-where() { prc_val "$1" 'this.type == "thread" ? f"{path}:{line}" : this.type == "review" ? "review body" : "PR comment"'; }
 
 report() { # report <plan> <summary>
   echo "$branch: $2"
@@ -371,20 +377,21 @@ address() {
   fi
 
   push_branch "$b" "$remote" || die "not pushed, so nothing posted"
-  local prefix id failed=0 pr_id body=""
+  local prefix id action at reply line failed=0 pr_id body=""
   prefix=$(prc_get settings.replyPrefix "$b" false) || die "pr-config failed"
-  while IFS= read -r item; do
-    id=$(prc_val "$item" id)
+  while IFS= read -r id && IFS= read -r action && IFS= read -r at; do
+    reply=""
+    while IFS= read -r line && [[ $line != $'\x1e' ]]; do reply+=$line$'\n'; done
     gql -f query='mutation($thread: ID!, $body: String!) {
           addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $thread, body: $body}) { comment { id } } }' \
-        -f thread="$id" -f body="$prefix$(prc_val "$item" reply)" >/dev/null \
-      || { echo "pr-act: replying to $(where "$item") failed" >&2; failed=1; continue; }
-    if [[ $(prc_val "$item" action) != pushback ]]; then
+        -f thread="$id" -f body="$prefix${reply%$'\n'}" >/dev/null \
+      || { echo "pr-act: replying to $at failed" >&2; failed=1; continue; }
+    if [[ $action != pushback ]]; then
       gql -f query='mutation($thread: ID!) { resolveReviewThread(input: {threadId: $thread}) { thread { id } } }' \
           -f thread="$id" >/dev/null \
-        || { echo "pr-act: resolving $(where "$item") failed" >&2; failed=1; }
+        || { echo "pr-act: resolving $at failed" >&2; failed=1; }
     fi
-  done < <(printf '%s\n' "$plan" | prc_json 'unnest this | where this.type == "thread" and action != "ask"')
+  done < <(printf '%s\n' "$plan" | prc_line "$REPLIES")
 
   # Review bodies and PR comments can't be replied to or resolved: answer them
   # in one PR comment and remember them in branch.<b>.pr-handled. Link, don't
