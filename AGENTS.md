@@ -21,6 +21,21 @@ pr-tend tends its own PRs, so code changes go through them:
 - `docs/pr-workflow/` is being consumed, not kept: when work from it is built or
   filed as an issue, delete that part of the doc in the same change.
 
+### Or run pr-tend against the sandbox
+
+Dogfooding on this repo's own PRs is the default, not a rule.
+[`chrismo/pr-tend-sandbox`](https://github.com/chrismo/pr-tend-sandbox)
+(checkout `../pr-tend-sandbox`) is a throwaway Go repo with RWX CI that pr-tend
+can run against when running it here isn't advisable:
+
+- a spike that needs real merges, force-pushes or branch-protection changes
+- a CI state on demand: its `ci/mode` makes CI pass, fail, flake, crawl or hang
+- a pr-tend build you don't trust yet near real PRs
+
+Pick whichever fits the task; one piece of work can use both. The sandbox's
+AGENTS.md has its rules and the setup that keeps pr-tend's state there away
+from chrismo's real config, glyphs and launchd job.
+
 ## Development
 
 This is a TDD repo: write a failing bats test first, then make it pass.
