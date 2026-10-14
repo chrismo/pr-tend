@@ -348,6 +348,14 @@ remote_feat() { git -C "$TMP/origin.git" rev-parse feat; }
   [ "$(gh_ops)" = "nodes addPullRequestReviewThreadReply resolveReviewThread" ]
 }
 
+@test "a reply of several lines is posted whole" {
+  agent_edits_nothing
+  agent_result '{outcome: "done", commit_message: null, summary: "", items: [{id: "T1", action: "reply", reply: "First line.\n\nThird line."}]}'
+  run "$PR_ACT" address
+  [ "$status" -eq 0 ]
+  [ "$(gh_call addPullRequestReviewThreadReply | jq -r '.[] | select(startswith("body=")) | ltrimstr("body=")')" = $'🤖 First line.\n\nThird line.' ]
+}
+
 @test "pushback is replied to but left open; ask posts nothing and names chrismo" {
   state_fixture '.threads.owed_bot = 2 | .threads.items += [{id: "T2", type: "thread", kind: "bot", path: "file.txt", line: 1, outdated: false, last: "review-bot"}]'
   agent_edits_nothing
