@@ -10,7 +10,7 @@ Commands:
 | Command     | What it does                                              |
 |-------------|-----------------------------------------------------------|
 | `pr-state`  | Read-only status of a branch's PR, and what to do next    |
-| `pr-act`    | Take the next step on a branch (address, restack, push…)  |
+| `pr-act`    | Start a branch, then take its next step (address, push…)  |
 | `pr-watch`  | Periodic pass over your branches; optional launchd job    |
 | `pr-config` | Show and validate settings                                |
 

@@ -140,13 +140,8 @@ hit, or an escalation → **needs-chrismo** (N2).
 
 ### Steps 1–4, concretely
 
-1. **chrismo** runs `pr-act start "<task>" [--harness pi] [--parent <branch>]`.
-   **Pipeline** creates the worktree (`wt-new`), records `pr-parent` and
-   `pr-task`, pins `base`, enrolls the branch, mints `$U`, stores harness +
-   session in config.
-2. **Pipeline** runs the implement step: `<harness> -p --session-id $U "<task + step contract>"`.
-   Step contract: commit when done; don't push or open a PR. **Agent** writes
-   code and commits. Exit = done.
+1–2. Built 2026-10-14: `pr-act start` and `pr-act implement` (`pr-act
+   --help`; decisions in [#14](https://github.com/chrismo/pr-tend/issues/14)).
 3. **Pipeline** checks: exit 0, tree clean, commits ahead of base? (Dirty → one
    resume: "uncommitted changes left"; otherwise → needs-chrismo.) Runs
    `settings.verify`; failure → autofix, then resume `$U` with the trimmed
@@ -239,7 +234,7 @@ repo-wide, not per-worktree). So `pr-act forget` deletes them (NEXT after a
 merge, built 2026-10-14), and every watcher pass sweeps `refs/pr-tend/<b>/*`
 whose branch no longer exists (abandoned branches).
 
-**Bootstrap:** `pr-act start` records everything at creation (not built). For
+**Bootstrap:** `pr-act start` records everything at creation. For
 a branch made any other way, `pr-act enroll` stores a stacked PR's parent and
 base pin while the PR's base still names the parent; otherwise `pr-state`
 derives what it can (A2 fallback chain) and stays read-only.
@@ -776,7 +771,8 @@ from running them.
     (`.github/workflows/review-bot.yml`) that answers `/review-bot` with a
     review. [#13]
 12. `pr-act start` + implement; `pr-act attach` — last; chrismo starts the work
-    by hand while dogfooding. [#14]
+    by hand while dogfooding. Start and implement done 2026-10-14; attach
+    remains. [#14]
 
 Two decisions that had to come before steps 5 and 6 are settled: the name is
 `pr-tend`, and the pipeline moved out of agent-rig into its own repo

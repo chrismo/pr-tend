@@ -3,6 +3,8 @@
 # pr-act - verbs that change a branch's PR.
 #
 # Usage:
+#   pr-act start    [--parent <branch>] [--harness <h>] [--no-implement] <name> [<task>]
+#   pr-act implement [--harness <h>] [<branch>]
 #   pr-act enroll   [<branch>]
 #   pr-act unenroll [<branch>]
 #   pr-act forget   [<branch>]
@@ -19,6 +21,8 @@
 #   pr-act trigger  [--force] [<branch>]
 #
 # Examples:
+#   cd "$(pr-act start fix-login "Fix the login redirect")"   worktree, then the agent builds it
+#   pr-act start --no-implement --parent fix-login fix-login-tests
 #   pr-act enroll                      pr-watch starts tracking this branch
 #   pr-act address --no-publish        the agent fixes locally; nothing pushed or posted
 #   pr-act address --harness pi
@@ -29,6 +33,17 @@
 #   pr-act ship                        describe, push, open a draft PR, enroll
 #
 # Verbs:
+#   start     a worktree beside this one, on the branch <name> (an existing
+#             local branch; else origin/<name>, tracked; else new, off the
+#             fetched default branch or --parent). Runs the repo's setup hook
+#             there, as wt-new does: $GIT_COMMON_DIR/worktree-setup, else git
+#             config wt.setup. Records the task and parent, pins base at a new
+#             branch's start point, enrolls; then implement unless
+#             --no-implement. stdout is only the worktree's path
+#   implement the agent works the recorded task (J0) in the branch's session,
+#             and may run commands to test; the pipeline commits its edits,
+#             then runs verify. "needs-input" prints the agent's question and
+#             leaves the edits uncommitted. Spends tokens
 #   enroll    mark the branch for pr-watch, and register this repo; for a
 #             stacked PR, store its parent and base before a merge erases them
 #   unenroll  clear the mark
@@ -82,18 +97,24 @@
 #   trigger         even when the local review doesn't cover HEAD
 #   unregister      even with branches still enrolled (the watcher drops them)
 #
+# start options:
+#   --parent <b>    start from <b> (local, else origin/<b>) and stack on it
+#   --no-implement  stop after the setup; the task is then optional
+#
 # restack options:
 #   --resolve       on a conflict, run the agent instead of refusing (tokens)
 #
 # address options:
 #   --no-publish    stop after the local commit (the agent still runs: tokens)
-#   --harness <h>   claude (default) or pi; remembered for the branch
+#   --harness <h>   claude (default) or pi; remembered for the branch (also
+#                   start, implement)
 #
 # Config (pr-config show):
 #   settings  remote, verify, stepTimeout, replyPrefix, botLogin
 #   harness   model, effort, provider (pi), args
 #
-# State (git config): branch.<b>.pr-tend, .pr-session, .pr-harness, .pr-handled;
+# State (git config): branch.<b>.pr-tend, .pr-task, .pr-parent, .pr-session,
+# .pr-harness, .pr-handled;
 # pr-tend.repo (global) lists the enrolled repos.
 #
 # <branch> defaults to the current one. See docs/pr-workflow/design.md, "Act".
@@ -111,23 +132,31 @@ usage() { help >&2; exit 1; }
 verb=$1; shift
 if [[ $verb == -h || $verb == --help ]]; then help; exit 0; fi
 
-force=false no_publish=false resolve=false harness_opt="" branch=""
-ids=()
+force=false no_publish=false resolve=false no_implement=false harness_opt="" parent_opt="" branch=""
+ids=() positionals=()
 while (( $# )); do
   case $1 in
     --force) force=true ;;
     --no-publish) no_publish=true ;;
     --resolve) resolve=true ;;
+    --no-implement) no_implement=true ;;
+    --parent) (( $# > 1 )) || die "--parent needs a value"; parent_opt=$2; shift ;;
     --harness) (( $# > 1 )) || die "--harness needs a value"; harness_opt=$2; shift ;;
     --id) (( $# > 1 )) || die "--id needs a value"; ids+=("$2"); shift ;;
     -*) die "unknown option: $1" ;;
-    *) branch=$1 ;;
+    *) branch=$1; positionals+=("$1") ;;
   esac
   shift
 done
 
 prc_super_init || exit 1
 git rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository"
+task_arg=""
+if [[ $verb == start ]]; then
+  (( ${#positionals[@]} >= 1 && ${#positionals[@]} <= 2 )) \
+    || die "usage: pr-act start [--parent <branch>] [--harness <h>] [--no-implement] <name> [<task>]"
+  branch=${positionals[0]} task_arg=${positionals[1]:-}
+fi
 positional=$branch
 branch=${branch:-$(git branch --show-current)}
 [[ -n $branch ]] || die "detached HEAD; name a branch"
@@ -531,6 +560,161 @@ step_session() {
 step_store() {
   git config "branch.$1.pr-session" "$STEP_SID"
   git config "branch.$1.pr-harness" "$STEP_H"
+}
+
+# ── start: A0 ───────────────────────────────────────────────────────────────
+
+# Duplicates agent-rig's wt-new (#14), hook locations included, so a repo set
+# up for new_wt needs nothing more.
+
+# start_default <remote>
+start_default() {
+  local head br
+  head=$(git symbolic-ref -q --short "refs/remotes/$1/HEAD" 2>/dev/null) && { echo "${head#"$1"/}"; return; }
+  for br in main master; do
+    if git show-ref -q --verify "refs/remotes/$1/$br" || git show-ref -q --verify "refs/heads/$br"; then
+      echo "$br"; return
+    fi
+  done
+  return 1
+}
+
+# start_point <remote> <branch>
+start_point() {
+  if git show-ref -q --verify "refs/remotes/$1/$2"; then echo "refs/remotes/$1/$2"
+  elif git show-ref -q --verify "refs/heads/$2"; then echo "refs/heads/$2"
+  else return 1
+  fi
+}
+
+# start_hook <src> <dst> <branch>: all output on stderr; stdout is start's path.
+start_hook() {
+  local src=$1 dst=$2 b=$3 script cmd rc=0
+  script="$(cd "$(git rev-parse --git-common-dir)" && pwd)/worktree-setup"
+  if [[ -x $script ]]; then
+    echo "pr-act: running $script" >&2
+    (cd "$dst" && WT_SRC=$src WT_DST=$dst WT_BRANCH=$b "$script") >&2 || rc=$?
+  else
+    cmd=$(git config --get wt.setup || true)
+    [[ -n $cmd ]] || return 0
+    echo "pr-act: running wt.setup: $cmd" >&2
+    (cd "$dst" && WT_SRC=$src WT_DST=$dst WT_BRANCH=$b sh -c "$cmd") >&2 || rc=$?
+  fi
+  (( rc == 0 )) || echo "pr-act: the setup hook failed (exit $rc); the worktree is kept at $dst" >&2
+  return $rc
+}
+
+start() {
+  local b=$branch remote src dst from="" base="" default rc=0
+  git check-ref-format --branch "$b" >/dev/null 2>&1 || die "not a valid branch name: $b"
+  $no_implement || [[ -n $task_arg ]] || die "no task: pr-act start $b \"<task>\" (or --no-implement)"
+  src=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a worktree"
+  dst="$(dirname "$src")/$b"
+  [[ ! -e $dst ]] || die "$dst already exists"
+  remote=$(prc_get settings.remote "$b" false) || die "pr-config failed"
+  git fetch --quiet --prune "$remote" || die "fetch from $remote failed"
+
+  if git show-ref -q --verify "refs/heads/$b"; then
+    git worktree add "$dst" "$b" >&2 || die "git worktree add failed"
+  elif git show-ref -q --verify "refs/remotes/$remote/$b"; then
+    echo "pr-act: tracking $remote/$b" >&2
+    git worktree add --track -b "$b" "$dst" "$remote/$b" >&2 || die "git worktree add failed"
+  else
+    if [[ -n $parent_opt ]]; then
+      if git show-ref -q --verify "refs/heads/$parent_opt"; then from=refs/heads/$parent_opt
+      else from=$(start_point "$remote" "$parent_opt") || die "no such parent branch: $parent_opt"
+      fi
+    else
+      default=$(start_default "$remote") || die "can't tell the default branch (no $remote/HEAD, main or master)"
+      from=$(start_point "$remote" "$default") || die "no $remote/$default or $default to start from"
+    fi
+    base=$(git rev-parse "$from^{commit}")
+    echo "pr-act: branching $b off ${from#refs/*/} (${base:0:7})" >&2
+    # From the SHA, not the ref: a remote-tracking start point would become the upstream.
+    git worktree add -b "$b" "$dst" "$base" >&2 || die "git worktree add failed"
+  fi
+
+  if [[ -n $task_arg ]]; then git config "branch.$b.pr-task" "$task_arg"; fi
+  if [[ -n $parent_opt ]]; then git config "branch.$b.pr-parent" "$parent_opt"; fi
+  if [[ -n $base ]]; then git update-ref -m "pr-act start" "refs/pr-tend/$b/base" "$base"; fi
+  enroll_mark "$b" >&2
+
+  if ! start_hook "$src" "$dst" "$b"; then
+    rc=1
+    $no_implement || echo "pr-act: fix it, then: pr-act implement $b" >&2
+  elif ! $no_implement; then
+    (implement_run "$b" "$dst") >&2 || rc=$?
+  fi
+  echo "$dst"
+  return $rc
+}
+
+# ── implement: J0 ────────────────────────────────────────────────────────────
+
+read -r -d '' IMPLEMENT_PROMPT <<'EOF' || true
+Implement the task below in this worktree; its branch is checked out for this
+work. Follow the repo's own instructions (AGENTS.md, CLAUDE.md, README) for how
+to work and test here. Edit files and run what you need to check your work, but
+do not commit, push, or run gh: the pipeline commits your edits with your
+commit_message, runs the repo's checks, and opens the PR later.
+
+Return outcome "done" when the task is implemented, with a one-line
+commit_message; "needs-input" when you need a decision from the task's author
+(put the question in summary and leave your edits in place); or "gave-up" when
+you can't make sense of it (say why in summary).
+EOF
+
+read -r -d '' IMPLEMENT_SCHEMA <<'EOF' || true
+{"type": "object", "required": ["outcome", "commit_message", "summary"],
+ "properties": {"outcome": {"enum": ["done", "needs-input", "gave-up"]},
+                "commit_message": {"type": ["string", "null"]},
+                "summary": {"type": "string"}}}
+EOF
+
+# implement_run <branch> <worktree>
+implement_run() {
+  local b=$1 wt=$2 task verify before prompt result outcome summary msg
+  [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
+  task=$(git config --get "branch.$b.pr-task" || true)
+  [[ -n $task ]] || die "no task recorded for $b: git config branch.$b.pr-task \"<task>\""
+  verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "pr-config failed"
+  step_session "$b" implement
+  before=$(git rev-parse "refs/heads/$b")
+  prompt="$IMPLEMENT_PROMPT"$'\n\nTask:\n'"$task"
+  [[ -z $verify ]] || prompt+=$'\n\nThe repo\'s checks, which the pipeline runs after you: '"$verify"
+  echo "pr-act: $STEP_H ($STEP_MODE session $STEP_SID) is implementing $b…" >&2
+  result=$(cd "$wt" && HARNESS_CLAUDE_ALLOW=$HARNESS_IMPLEMENT_ALLOW \
+             && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" "$prompt" "$IMPLEMENT_SCHEMA" "$STEP_CFG") \
+    || die "the $STEP_H implement step failed or returned no usable result (session $STEP_SID)"
+  step_store "$b"
+
+  outcome=$(prc_val "$result" 'coalesce(outcome, "")')
+  summary=$(prc_val "$result" 'coalesce(summary, "")')
+  case $outcome in
+    done) ;;
+    needs-input) die "the agent needs input on $b: $summary"$'\n'"Edits (if any) are left uncommitted in $wt; answer in session $STEP_SID, then pr-act implement" ;;
+    gave-up) die "the agent gave up on $b: $summary. Edits (if any) are left uncommitted in $wt" ;;
+    *) die "the agent returned outcome \"$outcome\"; edits (if any) are left uncommitted in $wt" ;;
+  esac
+  if [[ -n $(git -C "$wt" status --porcelain) ]]; then
+    msg=$(prc_line 'values {m: coalesce(commit_message, null)}
+      | values case when is(m, <string>) and grep("\\S", m) then m else "" end' "$result")
+    [[ -n $msg ]] || msg=$(head -1 <<<"$task")
+    git -C "$wt" add -A && git -C "$wt" commit -q -m "$msg" || die "commit failed; the edits are left in $wt"
+  elif [[ $(git rev-parse "refs/heads/$b") == "$before" ]]; then
+    die "the agent says done but changed nothing (session $STEP_SID)"
+  fi
+  echo "$b: $summary"
+  git -C "$wt" log --format='  %h %s' "$before..refs/heads/$b"
+  verify_run "$wt" "$b" || die "verify failed ($VERIFY_CMD); the commit is kept in $wt"
+  echo "next: pr-act review"
+}
+
+implement() {
+  local wt
+  wt=$(worktree_for "$branch")
+  [[ -n $wt ]] || die "$branch isn't checked out in any worktree"
+  implement_run "$branch" "$wt"
 }
 
 # ── describe ─────────────────────────────────────────────────────────────────
@@ -987,7 +1171,8 @@ record_lineage() {
   fi
 }
 
-enroll_branch() {
+# enroll_mark <branch>: mark it for pr-watch and register this repo.
+enroll_mark() {
   local b=$1 main_worktree
   git rev-parse -q --verify "refs/heads/$b" >/dev/null || die "no such branch: $b"
   git config "branch.$b.pr-tend" true
@@ -996,7 +1181,11 @@ enroll_branch() {
     git config --global --add pr-tend.repo "$main_worktree"
   fi
   echo "enrolled $b"
-  record_lineage "$b"
+}
+
+enroll_branch() {
+  enroll_mark "$1"
+  record_lineage "$1"
 }
 
 case $verb in
@@ -1020,6 +1209,8 @@ case $verb in
     git config --global --unset-all pr-tend.repo "^$(sed 's/[][\\.*^$]/\\&/g' <<<"$path")\$" || (( $? == 5 ))
     echo "unregistered $path"
     ;;
+  start) start ;;
+  implement) implement ;;
   address) address ;;
   ack) ack ;;
   restack) restack ;;
