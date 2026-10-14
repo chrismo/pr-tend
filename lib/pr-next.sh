@@ -41,7 +41,7 @@ values {...s, remote}
       ? step("stale", "run", "fetch: GitHub is ahead of your remote refs, so the steps below may be wrong",
            f"git fetch --prune {remote}") : null,
     open and foreign
-      ? step("foreign", "you", f"{remote}/{branch} has {plural(push.theirs, "commit")} that {push.theirs == 1 ? "isn'"'"'t" : "aren'"'"'t"} yours",
+      ? step("foreign", "you", f"{remote}/{branch} has {plural(push.theirs, "commit")} this copy has never had",
              f"git log HEAD..{remote}/{branch}") : null,
     open and n(threads.owed_human) > 0
       ? step("human", "you", f"reply to {plural(threads.owed_human, "human item")}", "pr-state --long") : null,

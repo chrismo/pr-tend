@@ -365,7 +365,7 @@ SH
   run notified
   [ "${lines[0]}" = "repo feat|reply to 2 human items" ]
   [ "${lines[1]}" = "repo feat|restack onto main conflicts: resolve it" ]
-  [ "${lines[2]}" = "repo feat|origin/feat has 1 commit that isn't yours" ]
+  [ "${lines[2]}" = "repo feat|origin/feat has 1 commit this copy has never had" ]
   [ "${lines[3]}" = "repo feat|merged: remove this worktree" ]
 }
 

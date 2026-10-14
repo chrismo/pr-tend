@@ -103,12 +103,12 @@ step() { # step <key> <field> <jq-assignment...>
 @test "a push that isn't ours: chrismo looks, and no push is suggested" {
   [ "$(keys '.push.remote_ours = false' '.push.behind = 2' '.push.theirs = 2' '.push.ahead = 1' '.push.diverged = true')" = foreign ]
   [ "$(step foreign cmd '.push.remote_ours = false' '.push.behind = 2' '.push.theirs = 2')" = "git log HEAD..origin/feat" ]
-  [ "$(step foreign say '.push.remote_ours = false' '.push.behind = 2' '.push.theirs = 2')" = "origin/feat has 2 commits that aren't yours" ]
-  [ "$(step foreign say '.push.remote_ours = false' '.push.behind = 1' '.push.theirs = 1')" = "origin/feat has 1 commit that isn't yours" ]
+  [ "$(step foreign say '.push.remote_ours = false' '.push.behind = 2' '.push.theirs = 2')" = "origin/feat has 2 commits this copy has never had" ]
+  [ "$(step foreign say '.push.remote_ours = false' '.push.behind = 1' '.push.theirs = 1')" = "origin/feat has 1 commit this copy has never had" ]
 }
 
 @test "a push that isn't ours: our own pre-amend commits under it aren't counted" {
-  [ "$(step foreign say '.push.remote_ours = false' '.push.behind = 2' '.push.theirs = 1')" = "origin/feat has 1 commit that isn't yours" ]
+  [ "$(step foreign say '.push.remote_ours = false' '.push.behind = 2' '.push.theirs = 1')" = "origin/feat has 1 commit this copy has never had" ]
 }
 
 @test "human items: chrismo replies, via the --long list" {
