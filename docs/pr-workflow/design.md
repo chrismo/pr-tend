@@ -506,7 +506,7 @@ pin (whichever the label requires):
 |---|---|---|
 | pin = HEAD | — | covered |
 | pin is ancestor of HEAD | `rev-list --count pin..HEAD` | N commits uncovered → J5 |
-| rewritten by rebase | `-U0` patch-id of base..pin vs base..HEAD | equal → covered; else `range-diff` → J5. [req-review #2](req-review.md#2-restacking-breaks-o6s-rewritten-by-rebase-check) |
+| rewritten by rebase | `-U0` patch-id of pin-base..pin vs base..HEAD | equal → covered; else `range-diff` → J5. Each pin's `<kind>-base` ref is the base it was taken against (`pin_write`, built 2026-10-14): the one `base` ref moves on restack, and after a squash-merged parent `merge-base` brings the parent's commits in too |
 
 Timestamps only answer "has the bot replied since the trigger" — never
 staleness, because rebase rewrites committer dates.

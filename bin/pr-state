@@ -11,7 +11,9 @@
 #   sync      ahead of / behind the parent? would `rebase --onto` conflict?
 #   push      local vs remote branch; whether the remote SHA is ours (reflog)
 #   ci        checks on the PR head commit
-#   review    coverage of HEAD by refs/pr-tend/<branch>/{local,bot,accepted}
+#   review    coverage of HEAD by refs/pr-tend/<branch>/{local,bot,accepted};
+#             a pin's <kind>-base ref is the base it was taken against, so a
+#             restack doesn't make a reviewed change look changed
 #   threads   what's owed, marked ! (blocks: unresolved threads, reviews
 #             requesting changes) or i (to read: bot review bodies and PR
 #             comments not yet marked handled)
@@ -253,8 +255,9 @@ pin_status() {
     jq -n --arg s "$pin" --argjson n "$(count "$pin..$head")" '{sha: $s, status: "uncovered", uncovered: $n}'
   else
     local against=${target_ref:-$head} status=unknown pin_base head_base
-    pin_base=$(git merge-base "$pin" "$against" || true)
-    head_base=$(git merge-base "$head" "$against" || true)
+    pin_base=$(ref "refs/pr-tend/$branch/$1-base")
+    [[ -n $pin_base ]] || pin_base=$(git merge-base "$pin" "$against" || true)
+    head_base=${old_base:-$(git merge-base "$head" "$against" || true)}
     if [[ -n $pin_base && -n $head_base ]]; then
       status=rewritten-changed
       [[ $(patch_id "$pin_base" "$pin") == "$(patch_id "$head_base" "$head")" ]] && status=rewritten-same

@@ -35,18 +35,6 @@ succeed.
 Fix: apply the post-condition only to a clean rebase. After J1, the branch goes
 through `check` (verify, then local review) instead.
 
-### 2. Restacking breaks O6's "rewritten by rebase" check
-
-*Case: clean restack after the `local` pin was set.* O6 compares `base..pin`
-with `base..HEAD`, but A2 has just overwritten the one `base` ref. The old pin
-was taken against the old base, so `new-base..old-pin` brings in upstream
-commits and the comparison fails → needless J5 after every restack. Using
-`merge-base` instead doesn't help after a squash merge. The Gerrit
-tree-compare candidate needs the old base too.
-
-Fix: record the base each pin was taken against (e.g.
-`refs/pr-tend/<b>/local-base`, `bot-base`, `accepted-base`).
-
 ### 3. Lock / in-flight gates only agent steps, not mechanical ones
 
 *Case: parent merges while a child's agent step runs, or while chrismo is
