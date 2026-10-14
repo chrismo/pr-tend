@@ -35,5 +35,5 @@ by running them, not sourcing, so the shebang picks the bash. agent-rig's
 `install.sh` makes the `~/.local/bin/bash5` link; without it a script fails
 with `env: bash5: No such file or directory`.
 
-The suites have been run with the sandbox disabled; they have not been checked
-inside it.
+The suites pass inside Claude Code's sandbox as well as outside it (424/424 in
+104 s, 2026-10-13).
