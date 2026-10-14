@@ -21,7 +21,6 @@ tasks:
     with:
       repository: https://github.com/chrismo/pr-tend.git
       ref: ${{ init.commit-sha }}
-      github-token: ${{ github.token }}
 
   # Scripts run `#!/usr/bin/env bash5`; Ubuntu's bash 5.2 is new enough.
   # uuid-runtime provides uuidgen.
