@@ -244,15 +244,27 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
 
 @test "no PR: push first, then open one" {
   [ "$(keys '.pr = null' '.push.remote_sha = null' '.push.ahead = 1')" = "push open-pr" ]
-  [ "$(step open-pr cmd '.pr = null')" = "gh pr create" ]
+  [ "$(step open-pr cmd '.pr = null')" = "pr-act ship" ]
 }
 
 @test "no PR because gh failed: don't suggest opening one" {
   [ "$(keys '.pr = null' '.threads.blocking = null' '.errors = ["gh: boom"]')" = errors ]
 }
 
-@test "draft: mark it ready" {
+@test "draft: ready for review once CI is green and the review covers HEAD, and only then" {
+  [ "$(keys '.pr.draft = true' '.pr.merge_state = "DRAFT"')" = draft ]
+  [ "$(step draft who '.pr.draft = true')" = run ]
   [ "$(step draft cmd '.pr.draft = true')" = "gh pr ready" ]
+  [ "$(step draft say '.pr.draft = true')" = "CI green and reviewed: mark the PR ready for review" ]
+  [ "$(keys '.pr.draft = true' '.ci.verdict = "none"')" = draft ]
+  [ "$(keys '.pr.draft = true' '.pr.merge_state = "DRAFT"' '.ci.verdict = "pending"')" = ci-wait ]
+  [ "$(keys '.pr.draft = true' '.pr.merge_state = "DRAFT"' '.review.local = {sha: "x", status: "uncovered", uncovered: 1}')" = review ]
+  [ "$(keys '.pr.draft = true' '.pr.merge_state = "DRAFT"' '.push.ahead = 1')" = push ]
+}
+
+@test "no PR: ship opens one" {
+  [ "$(step open-pr cmd '.pr = null' '.push.remote_sha = null')" = "pr-act ship" ]
+  [ "$(step open-pr who '.pr = null' '.push.remote_sha = null')" = run ]
 }
 
 @test "review behind HEAD: local review by the agent" {
@@ -292,7 +304,7 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(keys '.fresh = false' '.threads.owed_human = 1' "${STACKED[@]}" \
            '.ci.verdict = "red"' '.threads.owed_bot = 1' '.push.ahead = 1' '.pr.draft = true' \
            '.review.local = {sha: "x", status: "uncovered", uncovered: 1}')" \
-    = "stale human behind ci-red bot push draft review" ]
+    = "stale human behind ci-red bot push review" ]
 }
 
 @test "a state that isn't a record fails" {

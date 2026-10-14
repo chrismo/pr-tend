@@ -112,8 +112,6 @@ the release and stalls the branch silently.
 
 ## Smaller items
 
-- **Non-draft PR at ship** triggers CODEOWNERS review requests before CI or the
-  bot have run. Open as draft; `gh pr ready` at ✅.
 - **Human threads have no verb.** "Agent, deal with this human comment" is
   likely the most common request and only works through attach. ✅ also ignores
   "changes requested" and missing required approvals.
@@ -121,8 +119,6 @@ the release and stalls the branch silently.
   needs re-review. Better in the isolated reviewer process, like A8.
 - **A7 resolves pushback threads.** It resolves after any reply; Cursor's rule
   (cited in prior art) is to resolve only when fully addressed.
-- **Describe step has tools and could commit.** Ship doesn't recheck that
-  `local` covers HEAD.
 - **Takeover section contradicts the state machine.** It resumes "at the
   local-review check", but `check` runs verify first. And if chrismo answered a
   question and there are still no commits, it should re-run implement, not check.

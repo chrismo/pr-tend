@@ -14,6 +14,8 @@
 #   pr-act push     [--force] [<branch>]
 #   pr-act verify   [<branch>]
 #   pr-act review   [<branch>]
+#   pr-act describe [<branch>]
+#   pr-act ship     [--force] [<branch>]
 #
 # Examples:
 #   pr-act enroll                      pr-watch starts tracking this branch
@@ -22,6 +24,7 @@
 #   pr-act ack                         after reading pr-state --long: the i items are done
 #   pr-act restack && pr-act push      catch up with the parent, then publish
 #   pr-act review                      verify, then the local reviewer; clean pins local
+#   pr-act ship                        describe, push, open a draft PR, enroll
 #
 # Verbs:
 #   enroll    mark the branch for pr-watch, and register this repo; for a
@@ -52,12 +55,19 @@
 #   review    verify, then the local reviewer (settings.localReview, default
 #             bin/pr-review-local) over the branch's own change, base..HEAD.
 #             Clean: pin local at HEAD. Findings: printed as JSON, nothing
-#             pinned. A failed reviewer is never clean. The one verb that
-#             spends tokens
+#             pinned. A failed reviewer is never clean. Spends tokens
+#   describe  the agent writes the PR title and body (J6) from the task, the
+#             commits and the diff, read-only, in the branch's session; stored
+#             for HEAD. Spends tokens
+#   ship      describe unless a description for HEAD is stored, check HEAD
+#             didn't move, push, then open a draft PR on the parent (pr-parent,
+#             else the default branch) and enroll; with a PR already open, fix
+#             up its title, body and base instead. Warns when the local review
+#             doesn't cover HEAD; the draft stays a draft until it does
 #
 # --force:
 #   address         run even if the branch is unpushed, diverged or taken over
-#   restack, push   run even if taken over
+#   restack, push, ship   run even if taken over
 #   unregister      even with branches still enrolled (the watcher drops them)
 #
 # address options:
@@ -415,6 +425,123 @@ review() {
   fi
 }
 
+# ── describe ─────────────────────────────────────────────────────────────────
+
+read -r -d '' DESCRIBE_PROMPT <<'EOF' || true
+Write the pull request title and description for this branch's change: the
+commits and diff below, made for the task. You are read-only here; look at the
+worktree when the diff needs context.
+
+Title: one line, at most 70 characters, what the change does, imperative, no
+trailing period. Body, in Markdown: what changed and why, in a short paragraph
+or a few bullets; how it was tested, when the diff shows it; what a reviewer
+should look at first or decide. Mention what's out of scope only when the task
+asked for more than the diff does. No "This PR", no file-by-file restatement of
+the diff, no sign-off, no attribution footer.
+EOF
+
+read -r -d '' DESCRIBE_SCHEMA <<'EOF' || true
+{"type": "object", "required": ["title", "body"],
+ "properties": {"title": {"type": "string", "minLength": 1}, "body": {"type": "string"}}}
+EOF
+
+describe_file() { echo "$(cd "$(git rev-parse --git-common-dir)" && pwd)/pr-tend/${1//\//__}.describe.json"; }
+
+# describe_run <branch> <worktree> <state>: the describe step in the branch's
+# session (minted if none), read-only. Stores {head, title, body} where ship
+# finds it, and prints it.
+describe_run() {
+  local b=$1 wt=$2 state=$3 base head task commits diff cfg h stored_h sid mode timeout result f
+  base=$(jq -r '.sync.old_base // empty' <<<"$state")
+  [[ -n $base ]] || die "can't find $b's base: $(jq -r '.errors | join("; ")' <<<"$state")"
+  head=$(git rev-parse "refs/heads/$b")
+  stored_h=$(git config --get "branch.$b.pr-harness" || true)
+  cfg=$(prc_step describe "$b" "${harness_opt:-$stored_h}") || die "pr-config failed"
+  h=$(jq -r .harness <<<"$cfg")
+  sid=$(git config --get "branch.$b.pr-session" || true)
+  if [[ -n $sid ]]; then
+    [[ $h == "${stored_h:-claude}" ]] \
+      || die "branch.$b.pr-session belongs to ${stored_h:-claude}; unset it to start a $h session"
+    mode=resume
+  else
+    sid=$(uuidgen | tr 'A-F' 'a-f') mode=new
+  fi
+  timeout=$(prc_get settings.stepTimeout "$b" false) || die "pr-config failed"
+  [[ $timeout =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $timeout"
+  task=$(git config --get "branch.$b.pr-task" || true)
+  commits=$(git log --format='- %s' "$base..$head")
+  diff=$(git diff "$base" "$head")
+  echo "pr-act: $h ($mode session $sid) is describing $b…" >&2
+  result=$(cd "$wt" && HARNESS_CLAUDE_ALLOW=$HARNESS_READONLY_ALLOW && HARNESS_PI_TOOLS=read \
+             && harness_run "$h" "$sid" "$mode" "$timeout" \
+                  "$DESCRIBE_PROMPT"$'\n\nTask: '"${task:-(none recorded)}"$'\n\nCommits ('"${base:0:7}..${head:0:7}"$'):\n'"$commits"$'\n\nDiff:\n'"$diff" \
+                  "$DESCRIBE_SCHEMA" "$cfg") \
+    || die "the $h describe step failed or returned no usable result (session $sid)"
+  jq -e '.title | strings | test("\\S")' <<<"$result" >/dev/null 2>&1 || die "the $h describe step returned no title"
+  git config "branch.$b.pr-session" "$sid"
+  git config "branch.$b.pr-harness" "$h"
+  f=$(describe_file "$b")
+  mkdir -p "$(dirname "$f")"
+  jq -c --arg head "$head" '{head: $head, title, body: (.body // "")}' <<<"$result" > "$f"
+  cat "$f"
+}
+
+describe() {
+  local b=$branch wt state
+  wt=$(worktree_for "$b")
+  [[ -n $wt ]] || die "$b isn't checked out in any worktree"
+  [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
+  state=$(cd "$wt" && pr-state --json "$b") || die "pr-state failed"
+  describe_run "$b" "$wt" "$state"
+}
+
+# ── ship ─────────────────────────────────────────────────────────────────────
+
+ship() {
+  local b=$branch wt remote state pr_state f head parent number url title body
+  local -a base_arg=()
+  wt=$(worktree_for "$b")
+  [[ -n $wt ]] || die "$b isn't checked out in any worktree"
+  [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
+  if ! $force && [[ -n $(git config --get "branch.$b.pr-lock" || true) ]]; then
+    die "not shipping $b: taken over (branch.$b.pr-lock is set; --force to ship anyway)"
+  fi
+  remote=$(prc_get settings.remote "$b" false) || die "pr-config failed"
+  git -C "$wt" fetch --quiet --prune "$remote" || die "fetch from $remote failed"
+  state=$(cd "$wt" && pr-state --json "$b") || die "pr-state failed"
+  pr_state=$(jq -r '.pr.state // "none"' <<<"$state")
+  case $pr_state in
+    none|OPEN) ;;
+    *) die "PR #$(jq -r .pr.number <<<"$state") is $(tr '[:upper:]' '[:lower:]' <<<"$pr_state"); nothing to ship" ;;
+  esac
+  jq -r 'select((.review.local.status // "none") | IN("covered", "rewritten-same") | not)
+         | "pr-act: warning: the local review doesn'"'"'t cover HEAD (pr-act review); the PR stays a draft until it does"' \
+    <<<"$state" >&2
+  head=$(git rev-parse "refs/heads/$b")
+  f=$(describe_file "$b")
+  if [[ ! -f $f || $(jq -r .head "$f" 2>/dev/null) != "$head" ]]; then
+    describe_run "$b" "$wt" "$state" >/dev/null
+    [[ $(git rev-parse "refs/heads/$b") == "$head" ]] \
+      || die "HEAD moved during the describe step (${head:0:7} → $(git rev-parse --short "refs/heads/$b")); nothing pushed. Look, then ship again"
+  fi
+  title=$(jq -r .title "$f") body=$(jq -r .body "$f")
+  push_branch "$b" "$remote" || exit 1
+  parent=$(git config --get "branch.$b.pr-parent" || true)
+  parent=${parent:-$(jq -r .sync.default <<<"$state")}
+  if [[ $pr_state == none ]]; then
+    url=$(gh pr create --draft --base "$parent" --head "$b" --title "$title" --body "$body") \
+      || die "gh pr create failed; $b is pushed. Fix the cause and ship again"
+    echo "opened a draft PR for $b on $parent: $url"
+    enroll_branch "$b"
+  else
+    number=$(jq -r .pr.number <<<"$state")
+    [[ $(jq -r .pr.base <<<"$state") == "$parent" ]] || base_arg=(--base "$parent")
+    gh pr edit "$number" --title "$title" --body "$body" "${base_arg[@]}" >/dev/null \
+      || die "gh pr edit failed for PR #$number; $b is pushed"
+    echo "shipped $b: PR #$number updated$( (( ${#base_arg[@]} )) && echo ", base now $parent")"
+  fi
+}
+
 # ── push ─────────────────────────────────────────────────────────────────────
 
 plural() { if (( $1 == 1 )); then echo "1 $2"; else echo "$1 $2s"; fi; }
@@ -635,17 +762,20 @@ record_lineage() {
   fi
 }
 
+enroll_branch() {
+  local b=$1 main_worktree
+  git rev-parse -q --verify "refs/heads/$b" >/dev/null || die "no such branch: $b"
+  git config "branch.$b.pr-tend" true
+  main_worktree=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+  if ! grep -qxF "$main_worktree" <<<"$(git config --global --get-all pr-tend.repo || true)"; then
+    git config --global --add pr-tend.repo "$main_worktree"
+  fi
+  echo "enrolled $b"
+  record_lineage "$b"
+}
+
 case $verb in
-  enroll)
-    git rev-parse -q --verify "refs/heads/$branch" >/dev/null || die "no such branch: $branch"
-    git config "branch.$branch.pr-tend" true
-    main_worktree=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-    if ! grep -qxF "$main_worktree" <<<"$(git config --global --get-all pr-tend.repo || true)"; then
-      git config --global --add pr-tend.repo "$main_worktree"
-    fi
-    echo "enrolled $branch"
-    record_lineage "$branch"
-    ;;
+  enroll) enroll_branch "$branch" ;;
   unenroll)
     git config --unset "branch.$branch.pr-tend" || (( $? == 5 ))  # 5: wasn't set
     ;;
@@ -672,5 +802,7 @@ case $verb in
   push) push ;;
   verify) verify ;;
   review) review ;;
+  describe) describe ;;
+  ship) ship ;;
   *) die "unknown verb: $verb" ;;
 esac
