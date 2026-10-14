@@ -418,6 +418,11 @@ SH
 
 # ── launchd ──────────────────────────────────────────────────────────────────
 
+# Not in setup_launchd: tests refused before plutil runs should still run on Linux.
+needs_plutil() {
+  command -v plutil >/dev/null || skip "needs plutil (macOS)"
+}
+
 setup_launchd() {
   export PR_WATCH_LAUNCH_AGENTS="$TMP/LaunchAgents"
   cat > "$TMP/fakebin/launchctl" <<'EOF'
@@ -429,6 +434,7 @@ EOF
 }
 
 @test "install: writes a valid plist and bootstraps it" {
+  needs_plutil
   setup_launchd
   run "$PR_WATCH" install
   [ "$status" -eq 0 ]
@@ -439,6 +445,7 @@ EOF
 }
 
 @test "uninstall: boots out and removes the plist" {
+  needs_plutil
   setup_launchd
   "$PR_WATCH" install
   run "$PR_WATCH" uninstall
@@ -448,6 +455,7 @@ EOF
 }
 
 @test "install: a non-numeric interval is refused and the old job is kept" {
+  needs_plutil
   setup_launchd
   "$PR_WATCH" install
   : > "$PS_FIXTURES/launchctl"
@@ -459,6 +467,7 @@ EOF
 }
 
 @test "install: paths are XML-escaped" {
+  needs_plutil
   setup_launchd
   export PR_TEND_STATE_DIR="$TMP/a&b"
   "$PR_WATCH" install
@@ -497,6 +506,7 @@ write_cfg() {
 }
 
 @test "config: install reads interval from the file" {
+  needs_plutil
   setup_launchd
   write_cfg '{"settings":{"interval":120}}'
   "$PR_WATCH" install

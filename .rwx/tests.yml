@@ -1,0 +1,72 @@
+on:
+  cli:
+    init:
+      commit-sha: ${{ event.git.sha }}
+  github:
+    pull_request:
+      init:
+        commit-sha: ${{ event.git.sha }}
+    push:
+      if: ${{ event.git.branch == 'main' }}
+      init:
+        commit-sha: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.2.0
+
+tasks:
+  - key: code
+    call: git/clone 2.2.0
+    with:
+      repository: https://github.com/chrismo/pr-tend.git
+      ref: ${{ init.commit-sha }}
+
+  # Scripts run `#!/usr/bin/env bash5`; Ubuntu's bash 5.2 is new enough.
+  # uuid-runtime provides uuidgen.
+  - key: system-packages
+    run: |
+      sudo apt-get update
+      sudo apt-get install -y git jq parallel uuid-runtime
+      sudo apt-get clean
+      sudo ln -sfn /bin/bash /usr/local/bin/bash5
+      bash5 --version | head -1
+
+  # Pinned to what dev runs; apt's bats is 1.10.
+  - key: bats
+    run: |
+      git clone --depth 1 --branch v1.13.0 https://github.com/bats-core/bats-core.git
+      sudo ./bats-core/install.sh /usr/local
+      rm -rf bats-core
+      bats --version
+
+  # pr-config needs exactly 0.3.0, and pr-config.bats skips its super tests
+  # unless a real binary is at the asdf install path.
+  - key: superdb
+    run: |
+      dir="$HOME/.asdf/installs/superdb/0.3.0/bin"
+      mkdir -p "$dir"
+      curl -fsSL https://github.com/brimdata/super/releases/download/v0.3.0/super-v0.3.0.linux-amd64.tar.gz \
+        | tar -xz -C "$dir" super
+      "$dir/super" -version
+      echo "$dir:$PATH" > "$RWX_ENV/PATH"
+      echo 'superdb 0.3.0' > "$HOME/.tool-versions"
+
+  - key: captain
+    call: rwx/install-captain 1.2.0
+
+  - key: test
+    use: [code, system-packages, bats, superdb, captain]
+    runner:
+      cpus: 16
+    run: |
+      git config --global user.name ci
+      git config --global user.email ci@example.com
+      git config --global init.defaultBranch main
+      captain run pr-tend
+    filter:
+      - "!docs/**"
+      - "!README.md"
+    outputs:
+      test-results:
+        - path: test-results/captain-results.json
