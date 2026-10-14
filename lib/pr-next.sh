@@ -18,7 +18,7 @@ fn plural(k, w): f"{k} {w}{k == 1 ? "" : "s"}"
 fn step(key, who, say, cmd): {key: key, who: who, say: say, cmd: cmd}
 fn covers(p): on(p.status in ["covered", "rewritten-same"])
 fn trails(p): on(p.status in ["uncovered", "rewritten-changed", "unknown"])
-fn why_blocked(m): m == "BLOCKED" ? "the merge is blocked" : m == "BEHIND" ? "the branch is behind"
+fn why_blocked(m): m == "BLOCKED" ? "the merge is blocked"
                    : m == "DIRTY" ? "there are conflicts" : m == "DRAFT" ? "it'"'"'s a draft" : lower(m)
 values {...s, remote}
 | put open:=(pr is null or on(pr.state == "OPEN")), has_pr:=on(pr.state == "OPEN"),
@@ -27,6 +27,7 @@ values {...s, remote}
       to_push:=(push.remote_sha is null or n(push.ahead) > 0),
       chase:=(on(sync.target != sync.default) or on(parent.merged)),
       merge_state:=coalesce(pr.merge_state, "UNKNOWN"),
+      gh_behind:=on(pr.merge_state == "BEHIND"),
       review_required:=on(pr.review_decision == "REVIEW_REQUIRED"),
       stacked:=(on(pr.base != sync.default) and (on(parent.pr.state == "OPEN") or on(parent.merged))),
       parent_closed:=(on(pr.base != sync.default) and on(parent.pr.state == "CLOSED")),
@@ -51,7 +52,10 @@ values {...s, remote}
       ? step("conflict", "agent", f"restack onto {sync.target} conflicts: resolve it", restack) : null,
     open and not parent_closed and on(sync.up_to_date == false) and not on(sync.conflict) and chase
       ? step("behind", "run", f"restack onto {sync.target} ({sync.behind} behind)",
-             sync.old_base is null ? restack : "pr-act restack") : null,
+             sync.old_base is null ? restack : "pr-act restack")
+      : has_pr and not parent_closed and not on(sync.conflict) and gh_behind
+      ? step("behind", "run", f"restack onto {sync.default} ({n(sync.behind)} behind): GitHub requires branches to be up to date",
+             "pr-act restack") : null,
     has_pr and on(ci.verdict == "red")
       ? step("ci-red", "agent", f"fix CI: {join(ci.failing, ", ")}", "gh pr checks") : null,
     open and bot_blocking > 0
@@ -78,7 +82,7 @@ values {...s, remote}
     has_pr and review_required
       ? step("review-wait", "wait", len(coalesce(pr.review_requests, [])) > 0
              ? f"waiting on review from {join(pr.review_requests, ", ")}" : "waiting on a required review", null) : null,
-    has_pr and not review_required and not stacked and not parent_closed
+    has_pr and not review_required and not stacked and not parent_closed and not gh_behind
       ? (merge_state in ["CLEAN", "UNSTABLE", "HAS_HOOKS"] ? step("ready", "you", "ready to merge", "gh pr merge")
          : merge_state == "UNKNOWN" ? step("merge-wait", "wait", "GitHub hasn'"'"'t decided whether it can merge yet", null)
          : step("blocked", "you", f"GitHub says {why_blocked(merge_state)}: see why", "gh pr view --web")) : null

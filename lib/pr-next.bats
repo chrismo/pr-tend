@@ -96,10 +96,23 @@ step() { # step <key> <field> <jq-assignment...>
   [ "$(keys '.pr.base = "release"' '.sync.target = "release"' '.parent = {"name": "release", "source": "pr", "merged": false, "pr": null}')" = ready ]
 }
 
+@test "GitHub's BEHIND (required up-to-date branches): restack onto the default branch, a real step" {
+  # Observed in pr-tend-sandbox 2026-10-14 (findings/6-behind.md): BEHIND needs a
+  # required status check plus "require branches to be up to date", and then
+  # wins over a required review. So it is a restack to run, not a blocked state.
+  [ "$(keys '.pr.merge_state = "BEHIND"' '.sync.up_to_date = false' '.sync.behind = 3')" = behind ]
+  [ "$(step behind who '.pr.merge_state = "BEHIND"' '.sync.up_to_date = false' '.sync.behind = 3')" = run ]
+  [ "$(step behind say '.pr.merge_state = "BEHIND"' '.sync.up_to_date = false' '.sync.behind = 3')" \
+    = "restack onto main (3 behind): GitHub requires branches to be up to date" ]
+  [ "$(step behind cmd '.pr.merge_state = "BEHIND"' '.sync.up_to_date = false' '.sync.behind = 3')" = "pr-act restack" ]
+  # a required review on top still waits behind the restack
+  [ "$(keys '.pr.merge_state = "BEHIND"' '.sync.up_to_date = false' '.sync.behind = 3' '.pr.review_decision = "REVIEW_REQUIRED"')" = "behind review-wait" ]
+}
+
 @test "blocked for another reason: chrismo looks on GitHub" {
   [ "$(step blocked who '.pr.merge_state = "BLOCKED"' '.pr.review_decision = "APPROVED"')" = you ]
   [ "$(step blocked say '.pr.merge_state = "BLOCKED"')" = "GitHub says the merge is blocked: see why" ]
-  [ "$(step blocked say '.pr.merge_state = "BEHIND"')" = "GitHub says the branch is behind: see why" ]
+  [ "$(keys '.pr.merge_state = "BEHIND"')" = behind ]
   [ "$(step blocked cmd '.pr.merge_state = "BLOCKED"')" = "gh pr view --web" ]
 }
 
