@@ -34,7 +34,7 @@ values {...s, remote}
       need_review:=((trails(review.local) or trails(review.bot) or trails(review.accepted))
                     and not (covers(review.local) or covers(review.bot) or covers(review.accepted)))
 | unnest [
-    on(pr.state == "MERGED") ? step("merged", "you", "merged: remove this worktree", null) : null,
+    on(pr.state == "MERGED") ? step("merged", "run", "merged: drop the branch'"'"'s pins and enrollment, then remove this worktree", "pr-act forget") : null,
     on(pr.state == "CLOSED") ? step("closed", "you", "PR closed without merging", null) : null,
     open and len(errors) > 0
       ? step("errors", "you", f"{plural(len(errors), "error")}: the steps below may be wrong", "pr-state --json") : null,

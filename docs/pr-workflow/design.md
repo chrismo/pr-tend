@@ -235,9 +235,9 @@ repeat offender means the step-contract prompt needs tightening.
 | `git branch -D` | **removed by git** | kept |
 
 Config cleans itself up when the branch is deleted; refs never do (they're
-repo-wide, not per-worktree). So: step 10 deletes the refs on merge, and every
-watcher pass also sweeps `refs/pr-tend/<b>/*` whose branch no longer exists
-(abandoned branches).
+repo-wide, not per-worktree). So `pr-act forget` deletes them (NEXT after a
+merge, built 2026-10-14), and every watcher pass sweeps `refs/pr-tend/<b>/*`
+whose branch no longer exists (abandoned branches).
 
 **Bootstrap:** `pr-act start` records everything at creation (not built). For
 a branch made any other way, `pr-act enroll` stores a stacked PR's parent and

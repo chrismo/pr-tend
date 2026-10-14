@@ -87,6 +87,33 @@ repos() { git config --global --get-all pr-tend.repo || true; }
   [ "$status" -eq 0 ]
 }
 
+@test "forget: unenrolls and deletes refs/pr-tend/<branch>/*" {
+  "$PR_ACT" enroll
+  git update-ref refs/pr-tend/feat/base HEAD
+  git update-ref refs/pr-tend/feat/local HEAD
+  run "$PR_ACT" forget
+  [ "$status" -eq 0 ]
+  [ -z "$(git config branch.feat.pr-tend || true)" ]
+  [ -z "$(git for-each-ref refs/pr-tend/feat/)" ]
+}
+
+@test "forget: a named branch; other branches' pins stay" {
+  git switch -qc other
+  git update-ref refs/pr-tend/feat/base HEAD
+  git update-ref refs/pr-tend/other/base HEAD
+  run "$PR_ACT" forget feat
+  [ "$status" -eq 0 ]
+  [ -z "$(git for-each-ref refs/pr-tend/feat/)" ]
+  [ -n "$(git for-each-ref refs/pr-tend/other/)" ]
+}
+
+@test "forget: a branch with nothing stored, even one already deleted, is fine" {
+  run "$PR_ACT" forget
+  [ "$status" -eq 0 ]
+  run "$PR_ACT" forget gone
+  [ "$status" -eq 0 ]
+}
+
 @test "--help: every verb has a usage line" {
   run "$PR_ACT" --help
   [ "$status" -eq 0 ]

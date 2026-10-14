@@ -158,6 +158,26 @@ notified() { cat "$PS_FIXTURES/notified" 2>/dev/null || true; }
   [ ! -e "$STATUS_DIR/repo.pr" ]
 }
 
+@test "a pass sweeps refs/pr-tend/<b>/* whose branch no longer exists" {
+  git update-ref refs/pr-tend/feat/base HEAD
+  git update-ref refs/pr-tend/gone/base HEAD
+  git update-ref refs/pr-tend/gone/local HEAD
+  git update-ref refs/pr-tend/also/gone/accepted HEAD
+  ps_fixture feat
+  pass
+  [ -n "$(git for-each-ref refs/pr-tend/feat/)" ]
+  [ -z "$(git for-each-ref refs/pr-tend/gone/)" ]
+  [ -z "$(git for-each-ref refs/pr-tend/also/)" ]
+}
+
+@test "the sweep keeps the pins of a branch that exists but isn't enrolled" {
+  git switch -qc parked && git switch -q feat
+  git update-ref refs/pr-tend/parked/base HEAD
+  ps_fixture feat
+  pass
+  [ -n "$(git for-each-ref refs/pr-tend/parked/)" ]
+}
+
 @test "glyph: CI red, conflict, human items, foreign push are ❌" {
   local a
   for a in '.ci.verdict = "red"' '.sync.up_to_date = false | .sync.conflict = true' \
@@ -366,7 +386,7 @@ SH
   [ "${lines[0]}" = "repo feat|reply to 2 human items" ]
   [ "${lines[1]}" = "repo feat|restack onto main conflicts: resolve it" ]
   [ "${lines[2]}" = "repo feat|origin/feat has 1 commit this copy has never had" ]
-  [ "${lines[3]}" = "repo feat|merged: remove this worktree" ]
+  [ "${lines[3]}" = "repo feat|merged: drop the branch's pins and enrollment, then remove this worktree" ]
 }
 
 @test "notify: a notifier that reads stdin doesn't swallow later reasons" {

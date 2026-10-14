@@ -5,6 +5,7 @@
 # Usage:
 #   pr-act enroll   [<branch>]
 #   pr-act unenroll [<branch>]
+#   pr-act forget   [<branch>]
 #   pr-act address  [--force] [--no-publish] [--harness <h>] [<branch>]
 #   pr-act ack      [--id <id>]... [<branch>]
 #   pr-act restack  [--force] [<branch>]
@@ -21,6 +22,8 @@
 #   enroll    mark the branch for pr-watch, and register this repo; for a
 #             stacked PR, store its parent and base before a merge erases them
 #   unenroll  clear the mark
+#   forget    the branch is done (merged, abandoned): unenroll it and delete
+#             its refs/pr-tend/<branch>/* pins, which outlive a branch -D
 #   address   hand owed bot feedback to an agent, then commit, verify, push,
 #             reply and resolve; items the agent marks "ask" are left for chrismo
 #   ack       mark owed bot review bodies and comments read, with no reply:
@@ -507,6 +510,11 @@ case $verb in
     ;;
   unenroll)
     git config --unset "branch.$branch.pr-tend" || (( $? == 5 ))  # 5: wasn't set
+    ;;
+  forget)
+    git config --unset "branch.$branch.pr-tend" || (( $? == 5 ))
+    git for-each-ref --format='delete %(refname)' "refs/pr-tend/$branch/" | git update-ref --stdin
+    echo "forgot $branch"
     ;;
   address) address ;;
   ack) ack ;;
