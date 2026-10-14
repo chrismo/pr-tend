@@ -15,7 +15,7 @@ This is a TDD repo: write a failing bats test first, then make it pass.
 under 2 minutes on a 10-core machine (424/424 in 107 s, 2026-10-13):
 
 ```bash
-bats --jobs 10 lib/pr-next.bats bin/pr-*.bats
+bats --jobs 10 lib/pr-next.bats bin/pr-*.bats ci/*.bats
 bats install.bats
 ```
 
@@ -37,3 +37,20 @@ with `env: bash5: No such file or directory`.
 
 The suites pass inside Claude Code's sandbox as well as outside it (424/424 in
 104 s, 2026-10-13).
+
+## CI (RWX)
+
+`.rwx/tests.yml` runs every suite on Ubuntu for PRs and pushes to `main`, through
+Captain (`.captain/config.yml`) via `ci/test`. Run it without pushing; `rwx run`
+sends local edits as a patch:
+
+```bash
+rwx run .rwx/tests.yml --wait
+rwx logs --task test <run-id>
+```
+
+One 16-CPU task, not Captain shards: `bats --jobs` balances tests across CPUs
+better than Captain balances 11 files across runners (37 s vs 77 s, 2026-10-14).
+
+Linux has no `plutil`, so the five pr-watch tests that validate the launchd
+plist skip there (`needs_plutil`). They still run on macOS.
