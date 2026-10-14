@@ -8,7 +8,8 @@
 #              pr-state every branch with branch.<name>.pr-tend=true. Writes a
 #              glyph for the branch's worktree (shown by tab-status), notifies
 #              on reasons chrismo is needed that are new since the last pass,
-#              and records the pass.
+#              and records the pass. Also deletes refs/pr-tend/<b>/* whose
+#              branch no longer exists (pins outlive a branch -D).
 #   status     print the last pass
 #   install    launchd job: a pass every settings.interval seconds (default 300)
 #   uninstall  remove the job
@@ -104,6 +105,18 @@ check() {
   printf '%s\t%s\t%s\t%s\n' "$name" "$b" "$glyph" "$(jq -r '[.reasons[].msg, (.note // empty)] | join("; ")' <<<"$cls")"
 }
 
+# sweep_pins <repo>: delete refs/pr-tend/<b>/* whose branch no longer exists.
+# Refs outlive `git branch -D` (config doesn't); the pin's last path component
+# is its kind (base, local, bot, accepted), the rest is the branch name.
+sweep_pins() {
+  local ref b
+  while read -r ref; do
+    b=${ref#refs/pr-tend/}; b=${b%/*}
+    git -C "$1" rev-parse -q --verify "refs/heads/$b" >/dev/null 2>&1 || echo "delete $ref"
+  done < <(git -C "$1" for-each-ref --format='%(refname)' refs/pr-tend/) \
+    | git -C "$1" update-ref --stdin
+}
+
 run_pass() {
   mkdir -p "$STATE_DIR" "$STATUS_DIR"
   WRITTEN=$(mktemp)
@@ -117,6 +130,7 @@ run_pass() {
     name=$(basename "$repo")
     mapfile -t branches < <(git -C "$repo" config --get-regexp '^branch\..*\.pr-tend$' 2>/dev/null \
       | awk '$2 == "true" { sub(/^branch\./, "", $1); sub(/\.pr-tend$/, "", $1); print $1 }')
+    sweep_pins "$repo"
     (( ${#branches[@]} )) || continue
 
     if ! remote=$(cd "$repo" && prc_get settings.remote "" true); then

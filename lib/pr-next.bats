@@ -103,6 +103,8 @@ step() { # step <key> <field> <jq-assignment...>
 
 @test "merged: only the cleanup step, whatever else is true" {
   [ "$(keys '.pr.state = "MERGED"' '.push.ahead = 3' '.ci.verdict = "red"' '.errors = ["x"]')" = merged ]
+  [ "$(step merged cmd '.pr.state = "MERGED"')" = "pr-act forget" ]
+  [ "$(step merged say '.pr.state = "MERGED"')" = "merged: drop the branch's pins and enrollment, then remove this worktree" ]
 }
 
 @test "closed: only the closed step" {
@@ -295,8 +297,8 @@ lines_for() { # lines_for <one|all> <jq-assignment...>
 }
 
 @test "lines: a step with no command has no arrow" {
-  run lines_for one '.pr.state = "MERGED"'
-  [ "$output" = "NEXT  you    merged: remove this worktree" ]
+  run lines_for one '.pr.state = "CLOSED"'
+  [ "$output" = "NEXT  you    PR closed without merging" ]
 }
 
 @test "lines: all lists every step, the rest as then" {
