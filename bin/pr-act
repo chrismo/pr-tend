@@ -239,8 +239,17 @@ values {held, f, ctx: {changed, items: kind(coalesce(r.items, null)) == "array" 
   ], []), ...held]
 EOF
 
-WHERE_FN='fn where(it): it.type == "thread" ? f"{it.path}:{it.line}" : it.type == "review" ? "review body" : "PR comment"'
-PAD_FN='fn pad(s, n): len(s) >= n ? s : s || "                    "[0:n-len(s)]'
+# The plan, as printed: the agent's answers, then the ask items under
+# "needs chrismo:" when there are any.
+read -r -d '' REPORT <<'EOF' || true
+fn where(it): it.type == "thread" ? f"{it.path}:{it.line}" : it.type == "review" ? "review body" : "PR comment"
+fn pad(s, n): len(s) >= n ? s : s || "                    "[0:n-len(s)]
+values [
+  ...coalesce([unnest this | where action != "ask" | values f"  {pad(action, 9)} {pad(where(this), 20)} {reply}"], []),
+  ...(len(coalesce([unnest this | where action == "ask"], [])) > 0 ? ["needs chrismo:"] : []),
+  ...coalesce([unnest this | where action == "ask" | values f"  {pad(where(this), 20)} {reply}"], [])
+] | unnest this
+EOF
 
 # A gate is a list of {hard}, {soft}, {warn} and {done} records (address,
 # restack) or one such record (trigger, retarget). gate_get <gate> <key>
@@ -268,19 +277,11 @@ worktree_for() { # the worktree that has refs/heads/<branch> checked out
 
 gql() { gh api graphql "$@"; }
 
-where() { printf '%s\n' "$1" | prc_line "$WHERE_FN"$'\n''values where(this)'; }
+where() { prc_val "$1" 'this.type == "thread" ? f"{path}:{line}" : this.type == "review" ? "review body" : "PR comment"'; }
 
 report() { # report <plan> <summary>
-  local asks
   echo "$branch: $2"
-  printf '%s\n' "$1" | prc_line "$WHERE_FN"$'\n'"$PAD_FN"'
-    unnest this | where action != "ask" | values f"  {pad(action, 9)} {pad(where(this), 20)} {reply}"'
-  asks=$(printf '%s\n' "$1" | prc_line "$WHERE_FN"$'\n'"$PAD_FN"'
-    unnest this | where action == "ask" | values f"  {pad(where(this), 20)} {reply}"')
-  if [[ -n $asks ]]; then
-    echo "needs chrismo:"
-    printf '%s\n' "$asks"
-  fi
+  printf '%s\n' "$1" | prc_line "$REPORT"
 }
 
 address() {
