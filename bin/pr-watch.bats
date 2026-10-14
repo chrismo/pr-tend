@@ -450,7 +450,8 @@ setup_launchd() {
 echo "$*" >> "$PS_FIXTURES/launchctl"
 EOF
   chmod +x "$TMP/fakebin/launchctl"
-  PLIST="$PR_WATCH_LAUNCH_AGENTS/com.agent-rig.pr-watch.plist"
+  PLIST="$PR_WATCH_LAUNCH_AGENTS/com.pr-tend.pr-watch.plist"
+  OLD_PLIST="$PR_WATCH_LAUNCH_AGENTS/com.agent-rig.pr-watch.plist"
 }
 
 @test "install: writes a valid plist and bootstraps it" {
@@ -471,7 +472,28 @@ EOF
   run "$PR_WATCH" uninstall
   [ "$status" -eq 0 ]
   [ ! -e "$PLIST" ]
+  grep -q "bootout gui/$(id -u)/com.pr-tend.pr-watch" "$PS_FIXTURES/launchctl"
+}
+
+@test "install: boots out the job under the old agent-rig label and removes its plist" {
+  needs_plutil
+  setup_launchd
+  mkdir -p "$PR_WATCH_LAUNCH_AGENTS" && echo old > "$OLD_PLIST"
+  run "$PR_WATCH" install
+  [ "$status" -eq 0 ]
   grep -q "bootout gui/$(id -u)/com.agent-rig.pr-watch" "$PS_FIXTURES/launchctl"
+  [ ! -e "$OLD_PLIST" ]
+  [ -e "$PLIST" ]
+}
+
+@test "uninstall: also boots out the old agent-rig label" {
+  needs_plutil
+  setup_launchd
+  mkdir -p "$PR_WATCH_LAUNCH_AGENTS" && echo old > "$OLD_PLIST"
+  run "$PR_WATCH" uninstall
+  [ "$status" -eq 0 ]
+  grep -q "bootout gui/$(id -u)/com.agent-rig.pr-watch" "$PS_FIXTURES/launchctl"
+  [ ! -e "$OLD_PLIST" ]
 }
 
 @test "install: a non-numeric interval is refused and the old job is kept" {
