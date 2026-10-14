@@ -6,6 +6,19 @@ agent-rig commits filtered down to these paths.
 
 Edit this repo, never `~/.local/bin/` — those are symlinks made by `./install.sh`.
 
+## Workflow
+
+pr-tend tends its own PRs, so code changes go through them:
+
+- Branch, then `pr-act push`, `gh pr create`, `pr-act enroll`. Follow
+  `pr-state`'s NEXT from there.
+- Dependent work stacks on the parent's branch (`gh pr create --base
+  <parent>`). Enroll while the PR still targets the parent: enroll records
+  the lineage that GitHub's retarget on merge erases. Keep it current with
+  `pr-act restack && pr-act push`.
+- chrismo merges: squash, delete the branch.
+- Docs-only and issue-tracking edits may go straight to `main`.
+
 ## Development
 
 This is a TDD repo: write a failing bats test first, then make it pass.

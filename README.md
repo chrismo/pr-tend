@@ -35,5 +35,5 @@ exactly. `claude` and/or `pi` for the agent steps.
 
 ## Tests
 
-[bats](https://github.com/bats-core/bats-core). See `CLAUDE.md` for how to run
+[bats](https://github.com/bats-core/bats-core). See `AGENTS.md` for how to run
 them and the bash-version caveat.
