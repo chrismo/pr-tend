@@ -6,6 +6,7 @@
 #   pr-act enroll   [<branch>]
 #   pr-act unenroll [<branch>]
 #   pr-act forget   [<branch>]
+#   pr-act unregister [--force] [<path>]
 #   pr-act address  [--force] [--no-publish] [--harness <h>] [<branch>]
 #   pr-act ack      [--id <id>]... [<branch>]
 #   pr-act restack  [--force] [<branch>]
@@ -24,6 +25,8 @@
 #   unenroll  clear the mark
 #   forget    the branch is done (merged, abandoned): unenroll it and delete
 #             its refs/pr-tend/<branch>/* pins, which outlive a branch -D
+#   unregister  take this repo (or <path>, e.g. one that's gone) off the
+#             watcher's list; refuses while any branch is still enrolled
 #   address   hand owed bot feedback to an agent, then commit, verify, push,
 #             reply and resolve; items the agent marks "ask" are left for chrismo
 #   ack       mark owed bot review bodies and comments read, with no reply:
@@ -38,6 +41,7 @@
 # --force:
 #   address         run even if the branch is unpushed, diverged or taken over
 #   restack, push   run even if taken over
+#   unregister      even with branches still enrolled (the watcher drops them)
 #
 # address options:
 #   --no-publish    stop after the local commit (the agent still runs: tokens)
@@ -81,6 +85,7 @@ done
 
 prc_super_init || exit 1
 git rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository"
+positional=$branch
 branch=${branch:-$(git branch --show-current)}
 [[ -n $branch ]] || die "detached HEAD; name a branch"
 
@@ -515,6 +520,17 @@ case $verb in
     git config --unset "branch.$branch.pr-tend" || (( $? == 5 ))
     git for-each-ref --format='delete %(refname)' "refs/pr-tend/$branch/" | git update-ref --stdin
     echo "forgot $branch"
+    ;;
+  unregister)
+    path=${positional:-$(git worktree list --porcelain | sed -n '1s/^worktree //p')}
+    if ! $force && [[ -d $path ]]; then
+      mapfile -t enrolled < <(git -C "$path" config --get-regexp '^branch\..*\.pr-tend$' 2>/dev/null \
+        | awk '$2 == "true" { sub(/^branch\./, "", $1); sub(/\.pr-tend$/, "", $1); print $1 }')
+      (( ${#enrolled[@]} == 0 )) \
+        || die "not unregistering $path: still enrolled: ${enrolled[*]} (pr-act unenroll them, or --force)"
+    fi
+    git config --global --unset-all pr-tend.repo "^$(sed 's/[][\\.*^$]/\\&/g' <<<"$path")\$" || (( $? == 5 ))
+    echo "unregistered $path"
     ;;
   address) address ;;
   ack) ack ;;
