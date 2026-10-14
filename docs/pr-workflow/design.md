@@ -913,8 +913,12 @@ short-lived, so it can't own children like their daemons do. Plan:
       behind other steps. A "nudge them" step after N hours could come later.
     - `UNKNOWN` (or missing) → `wait  GitHub hasn't decided whether it can
       merge yet`
-    - anything else (`BLOCKED`, `BEHIND`, `DIRTY`, …) → `you  GitHub says …:
-      see why → gh pr view --web`
+    - `BEHIND` → `run  restack onto main (N behind): GitHub requires branches
+      to be up to date → pr-act restack` (sandbox spike 2026-10-14: `BEHIND`
+      needs "require up to date" plus a required check, and wins over
+      `BLOCKED`)
+    - anything else (`BLOCKED`, `DIRTY`, …) → `you  GitHub says …: see why →
+      gh pr view --web`
     The last two, like `ready`, only show when nothing else does: a pending or
     red CI already explains a `BLOCKED`.
   - Stacked PRs (base isn't the default branch, 2026-10-14): never `ready`
@@ -925,9 +929,6 @@ short-lived, so it can't own children like their daemons do. Plan:
     unaffected.
   - pr-watch: ⏳ when every step is a wait; `blocked` is 🔧. Checked read-only
     on cli/cli#14640 (`REVIEW_REQUIRED` / `BLOCKED`, two users requested).
-
-  Still untested: whether `mergeStateStatus: BEHIND` makes "behind the default
-  branch" a real step ([#6]).
 
 Open bugs are [issues labeled `bug`](https://github.com/chrismo/pr-tend/issues?q=is%3Aissue+is%3Aopen+label%3Abug);
 all work is on the [pr-tend project board](https://github.com/users/chrismo/projects/6).
