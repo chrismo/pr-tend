@@ -9,7 +9,7 @@
 #   pr-act unregister [--force] [<path>]
 #   pr-act address  [--force] [--no-publish] [--harness <h>] [<branch>]
 #   pr-act ack      [--id <id>]... [<branch>]
-#   pr-act restack  [--force] [<branch>]
+#   pr-act restack  [--force] [--resolve] [<branch>]
 #   pr-act retarget [<branch>]
 #   pr-act push     [--force] [<branch>]
 #   pr-act verify   [<branch>]
@@ -23,6 +23,7 @@
 #   pr-act address --harness pi
 #   pr-act ack                         after reading pr-state --long: the i items are done
 #   pr-act restack && pr-act push      catch up with the parent, then publish
+#   pr-act restack --resolve           the same, with the agent resolving conflicts
 #   pr-act review                      verify, then the local reviewer; clean pins local
 #   pr-act ship                        describe, push, open a draft PR, enroll
 #
@@ -41,7 +42,12 @@
 #   restack   rebase --onto the parent (the default branch once the parent
 #             merged), check the branch's own change came through unchanged,
 #             else roll back; never pushes. Once the branch lands on the
-#             default branch, pr-parent is rewritten to it
+#             default branch, pr-parent is rewritten to it. A conflict is
+#             refused, or with --resolve handed to the agent (J1): it edits
+#             the conflicting files in the branch's session, the pipeline
+#             adds and continues, up to 3 stops. A resolved rebase skips the
+#             unchanged-change check (a resolution changes the diff), so its
+#             result is unreviewed: verify runs, then pr-act review is next
 #   retarget  after the parent merged: point the PR at the default branch
 #             (gh pr edit --base; GitHub usually did it already when the
 #             parent's branch was deleted) and rewrite pr-parent to it
@@ -70,6 +76,9 @@
 #   restack, push, ship   run even if taken over
 #   unregister      even with branches still enrolled (the watcher drops them)
 #
+# restack options:
+#   --resolve       on a conflict, run the agent instead of refusing (tokens)
+#
 # address options:
 #   --no-publish    stop after the local commit (the agent still runs: tokens)
 #   --harness <h>   claude (default) or pi; remembered for the branch
@@ -96,12 +105,13 @@ usage() { help >&2; exit 1; }
 verb=$1; shift
 if [[ $verb == -h || $verb == --help ]]; then help; exit 0; fi
 
-force=false no_publish=false harness_opt="" branch=""
+force=false no_publish=false resolve=false harness_opt="" branch=""
 ids=()
 while (( $# )); do
   case $1 in
     --force) force=true ;;
     --no-publish) no_publish=true ;;
+    --resolve) resolve=true ;;
     --harness) (( $# > 1 )) || die "--harness needs a value"; harness_opt=$2; shift ;;
     --id) (( $# > 1 )) || die "--id needs a value"; ids+=("$2"); shift ;;
     -*) die "unknown option: $1" ;;
@@ -425,6 +435,34 @@ review() {
   fi
 }
 
+# ── agent sessions ───────────────────────────────────────────────────────────
+
+# step_session <branch> <step>: the harness and session a step runs in: the
+# branch's session (branch.<b>.pr-session) resumed, else a new one. Sets
+# STEP_CFG, STEP_H, STEP_SID, STEP_MODE, STEP_TIMEOUT.
+step_session() {
+  local b=$1 step=$2 stored_h
+  stored_h=$(git config --get "branch.$b.pr-harness" || true)
+  STEP_CFG=$(prc_step "$step" "$b" "${harness_opt:-$stored_h}") || die "pr-config failed"
+  STEP_H=$(jq -r .harness <<<"$STEP_CFG")
+  STEP_SID=$(git config --get "branch.$b.pr-session" || true)
+  if [[ -n $STEP_SID ]]; then
+    [[ $STEP_H == "${stored_h:-claude}" ]] \
+      || die "branch.$b.pr-session belongs to ${stored_h:-claude}; unset it to start a $STEP_H session"
+    STEP_MODE=resume
+  else
+    STEP_SID=$(uuidgen | tr 'A-F' 'a-f') STEP_MODE=new
+  fi
+  STEP_TIMEOUT=$(prc_get settings.stepTimeout "$b" false) || die "pr-config failed"
+  [[ $STEP_TIMEOUT =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $STEP_TIMEOUT"
+}
+
+# step_store <branch>: after a step ran, remember its session and harness.
+step_store() {
+  git config "branch.$1.pr-session" "$STEP_SID"
+  git config "branch.$1.pr-harness" "$STEP_H"
+}
+
 # ── describe ─────────────────────────────────────────────────────────────────
 
 read -r -d '' DESCRIBE_PROMPT <<'EOF' || true
@@ -451,35 +489,22 @@ describe_file() { echo "$(cd "$(git rev-parse --git-common-dir)" && pwd)/pr-tend
 # session (minted if none), read-only. Stores {head, title, body} where ship
 # finds it, and prints it.
 describe_run() {
-  local b=$1 wt=$2 state=$3 base head task commits diff cfg h stored_h sid mode timeout result f
+  local b=$1 wt=$2 state=$3 base head task commits diff result f
   base=$(jq -r '.sync.old_base // empty' <<<"$state")
   [[ -n $base ]] || die "can't find $b's base: $(jq -r '.errors | join("; ")' <<<"$state")"
   head=$(git rev-parse "refs/heads/$b")
-  stored_h=$(git config --get "branch.$b.pr-harness" || true)
-  cfg=$(prc_step describe "$b" "${harness_opt:-$stored_h}") || die "pr-config failed"
-  h=$(jq -r .harness <<<"$cfg")
-  sid=$(git config --get "branch.$b.pr-session" || true)
-  if [[ -n $sid ]]; then
-    [[ $h == "${stored_h:-claude}" ]] \
-      || die "branch.$b.pr-session belongs to ${stored_h:-claude}; unset it to start a $h session"
-    mode=resume
-  else
-    sid=$(uuidgen | tr 'A-F' 'a-f') mode=new
-  fi
-  timeout=$(prc_get settings.stepTimeout "$b" false) || die "pr-config failed"
-  [[ $timeout =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $timeout"
+  step_session "$b" describe
   task=$(git config --get "branch.$b.pr-task" || true)
   commits=$(git log --format='- %s' "$base..$head")
   diff=$(git diff "$base" "$head")
-  echo "pr-act: $h ($mode session $sid) is describing $b…" >&2
+  echo "pr-act: $STEP_H ($STEP_MODE session $STEP_SID) is describing $b…" >&2
   result=$(cd "$wt" && HARNESS_CLAUDE_ALLOW=$HARNESS_READONLY_ALLOW && HARNESS_PI_TOOLS=read \
-             && harness_run "$h" "$sid" "$mode" "$timeout" \
+             && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" \
                   "$DESCRIBE_PROMPT"$'\n\nTask: '"${task:-(none recorded)}"$'\n\nCommits ('"${base:0:7}..${head:0:7}"$'):\n'"$commits"$'\n\nDiff:\n'"$diff" \
-                  "$DESCRIBE_SCHEMA" "$cfg") \
-    || die "the $h describe step failed or returned no usable result (session $sid)"
-  jq -e '.title | strings | test("\\S")' <<<"$result" >/dev/null 2>&1 || die "the $h describe step returned no title"
-  git config "branch.$b.pr-session" "$sid"
-  git config "branch.$b.pr-harness" "$h"
+                  "$DESCRIBE_SCHEMA" "$STEP_CFG") \
+    || die "the $STEP_H describe step failed or returned no usable result (session $STEP_SID)"
+  jq -e '.title | strings | test("\\S")' <<<"$result" >/dev/null 2>&1 || die "the $STEP_H describe step returned no title"
+  step_store "$b"
   f=$(describe_file "$b")
   mkdir -p "$(dirname "$f")"
   jq -c --arg head "$head" '{head: $head, title, body: (.body // "")}' <<<"$result" > "$f"
@@ -623,8 +648,8 @@ read -r -d '' RESTACK_GATE <<'EOF' || true
       then {hard: "can't restack \(.branch): \($why)"}
     elif .sync.up_to_date then {done: "\(.branch) is already on \($onto)"}
     elif .sync.conflict == null then {hard: "can't tell whether restacking \(.branch) would conflict: \($why)"}
-    elif .sync.conflict
-      then {hard: "restacking \(.branch) onto \($onto) would conflict; resolve it by hand: git rebase --onto \($onto) \(.sync.old_base[0:12])"}
+    elif .sync.conflict and ($resolve | not)
+      then {hard: "restacking \(.branch) onto \($onto) would conflict; resolve it by hand: git rebase --onto \($onto) \(.sync.old_base[0:12]), or let the agent: pr-act restack --resolve"}
     else empty end,
     if .session.locked then {soft: "taken over (branch.\(.branch).pr-lock is set)"} else empty end ]
 EOF
@@ -638,7 +663,7 @@ restack() {
   git -C "$wt" fetch --quiet --prune "$remote" || die "fetch from $remote failed"
   state=$(cd "$wt" && pr-state --json "$b") || die "pr-state failed"
 
-  gate=$(jq -c --arg remote "$remote" "$RESTACK_GATE" <<<"$state")
+  gate=$(jq -c --arg remote "$remote" --argjson resolve "$resolve" "$RESTACK_GATE" <<<"$state")
   line=$(jq -r '.[] | .hard // empty' <<<"$gate" | head -1)
   [[ -z $line ]] || die "$line"
   line=$(jq -r '.[] | .done // empty' <<<"$gate")
@@ -650,14 +675,20 @@ restack() {
   new_base=$(git rev-parse "refs/remotes/$remote/$target^{commit}")
   old_head=$(git rev-parse "refs/heads/$b")
   before=$(patch_id "$old_base" "$old_head")
+  local resolved=false
   if ! git -C "$wt" rebase --quiet --onto "$new_base" "$old_base" "$b" >/dev/null 2>&1; then
-    git -C "$wt" rebase --abort 2>/dev/null || true
-    [[ $(git rev-parse "refs/heads/$b") == "$old_head" ]] || git -C "$wt" reset --quiet --hard "$old_head"
-    die "the rebase onto $remote/$target stopped on a conflict partway through; rolled back to ${old_head:0:7}." \
-        "Resolve it by hand: git rebase --onto $remote/$target ${old_base:0:12}"
+    if ! $resolve; then
+      restack_rollback "$wt" "$b" "$old_head"
+      die "the rebase onto $remote/$target stopped on a conflict partway through; rolled back to ${old_head:0:7}." \
+          "Resolve it by hand: git rebase --onto $remote/$target ${old_base:0:12}, or let the agent: pr-act restack --resolve"
+    fi
+    resolve_conflicts "$b" "$wt" "$old_head" "$remote/$target" || exit 1
+    resolved=true
   fi
   new_head=$(git rev-parse "refs/heads/$b")
-  if [[ $(patch_id "$new_base" "$new_head") != "$before" ]]; then
+  # A resolution changes the branch's diff by definition, so the check only
+  # applies to a clean rebase; a resolved one goes through verify and review.
+  if ! $resolved && [[ $(patch_id "$new_base" "$new_head") != "$before" ]]; then
     git -C "$wt" reset --quiet --hard "$old_head"
     die "$b's change came out different on $remote/$target (part of it may be there already); rolled back to ${old_head:0:7}." \
         "Compare: git range-diff ${old_base:0:12}..${old_head:0:12} ${new_base:0:12}..${new_head:0:12}"
@@ -665,6 +696,85 @@ restack() {
   git update-ref -m "pr-act restack" "refs/pr-tend/$b/base" "$new_base"
   echo "restacked $b onto $remote/$target ($(plural "$(git rev-list --count "$new_base..$new_head")" commit)); not pushed: pr-act push"
   parent_to_default "$b" "$state"
+  if $resolved; then
+    echo "conflicts resolved by the agent, so $b's change is unreviewed: pr-act review next"
+    verify_run "$wt" "$b" || die "verify failed ($VERIFY_CMD) on the resolved branch; it is kept at ${new_head:0:7}, unpushed. Fix, then pr-act verify"
+  fi
+}
+
+restack_rollback() { # <worktree> <branch> <old-head>
+  git -C "$1" rebase --abort 2>/dev/null || true
+  [[ $(git rev-parse "refs/heads/$2") == "$3" ]] || git -C "$1" reset --quiet --hard "$3"
+}
+
+# ── --resolve: J1 ────────────────────────────────────────────────────────────
+
+RESOLVE_CAP=3
+
+read -r -d '' RESOLVE_PROMPT <<'EOF' || true
+pr-act restack is rebasing this branch and the rebase stopped on conflicts.
+Resolve them in the worktree: edit each conflicting file so it keeps this
+branch's intent on top of what came in from the target, remove every conflict
+marker, and save. Do not run git add, git rebase --continue, or commit: the
+pipeline does that after you, and it will stop again if another commit
+conflicts. If no sensible resolution exists, answer with outcome "gave-up" and
+say why; nothing you changed will be kept.
+EOF
+
+read -r -d '' RESOLVE_SCHEMA <<'EOF' || true
+{"type": "object", "required": ["outcome", "summary"],
+ "properties": {"outcome": {"enum": ["done", "gave-up"]}, "summary": {"type": "string"}}}
+EOF
+
+# resolve_conflicts <branch> <worktree> <old-head> <onto>: a rebase has
+# stopped; the agent resolves each stop in the branch's session, the pipeline
+# adds and continues. Any failure rolls the branch back and returns 1.
+resolve_conflicts() {
+  local b=$1 wt=$2 old_head=$3 onto=$4 stops=0 files hunks task result outcome
+  task=$(git config --get "branch.$b.pr-task" || true)
+  step_session "$b" implement
+  while :; do
+    if (( ++stops > RESOLVE_CAP )); then
+      restack_rollback "$wt" "$b" "$old_head"
+      echo "pr-act: the rebase onto $onto stopped $stops times (cap $RESOLVE_CAP); rolled back to ${old_head:0:7}" >&2
+      return 1
+    fi
+    files=$(git -C "$wt" diff --name-only --diff-filter=U)
+    if [[ -z $files ]]; then
+      restack_rollback "$wt" "$b" "$old_head"
+      echo "pr-act: the rebase stopped without conflicting files; rolled back to ${old_head:0:7}" >&2
+      return 1
+    fi
+    hunks=$(git -C "$wt" diff)
+    echo "pr-act: $STEP_H ($STEP_MODE session $STEP_SID) is resolving conflicts in: ${files//$'\n'/, } (stop $stops)…" >&2
+    if ! result=$(cd "$wt" && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" \
+                    "$RESOLVE_PROMPT"$'\n\nBranch: '"$b"$', rebasing onto '"$onto"$'\nTask: '"${task:-(none recorded)}"$'\nConflicting files:\n'"$files"$'\n\nConflict hunks:\n'"$hunks" \
+                    "$RESOLVE_SCHEMA" "$STEP_CFG"); then
+      restack_rollback "$wt" "$b" "$old_head"
+      echo "pr-act: the $STEP_H step failed or returned no usable result (session $STEP_SID); rolled back to ${old_head:0:7}" >&2
+      return 1
+    fi
+    step_store "$b"
+    STEP_MODE=resume
+    outcome=$(jq -r .outcome <<<"$result")
+    if [[ $outcome != done ]]; then
+      restack_rollback "$wt" "$b" "$old_head"
+      echo "pr-act: the agent gave up: $(jq -r .summary <<<"$result"); rolled back to ${old_head:0:7}" >&2
+      return 1
+    fi
+    if (cd "$wt" && grep -lE '^(<<<<<<< |>>>>>>> )' $files 2>/dev/null | grep -q .); then
+      restack_rollback "$wt" "$b" "$old_head"
+      echo "pr-act: conflict markers left in: $(cd "$wt" && grep -lE '^(<<<<<<< |>>>>>>> )' $files | tr '\n' ' '); rolled back to ${old_head:0:7}" >&2
+      return 1
+    fi
+    git -C "$wt" add -A
+    if GIT_EDITOR=true git -C "$wt" rebase --continue >/dev/null 2>&1; then return 0; fi
+    if [[ ! -e $(git -C "$wt" rev-parse --git-path rebase-merge) && ! -e $(git -C "$wt" rev-parse --git-path rebase-apply) ]]; then
+      restack_rollback "$wt" "$b" "$old_head"
+      echo "pr-act: git rebase --continue failed; rolled back to ${old_head:0:7}" >&2
+      return 1
+    fi
+  done
 }
 
 # parent_to_default <branch> <state>: once the branch is on the default branch,

@@ -172,8 +172,9 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(step behind cmd "${STACKED[@]}")" = "pr-act restack" ]
 }
 
-@test "a conflicting restack shows the rebase to resolve by hand" {
-  [ "$(step conflict cmd "${STACKED[@]}" '.sync.conflict = true')" = "git rebase --onto origin/base b0b0b0b0b0b0" ]
+@test "a conflicting restack hands the agent the resolution" {
+  [ "$(step conflict cmd "${STACKED[@]}" '.sync.conflict = true')" = "pr-act restack --resolve" ]
+  [ "$(step conflict who "${STACKED[@]}" '.sync.conflict = true')" = agent ]
 }
 
 @test "behind with no old base: a plain rebase, which pr-act restack refuses" {
@@ -186,6 +187,7 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
 
 @test "behind the default branch with a conflict: the agent resolves it" {
   [ "$(keys '.sync.up_to_date = false' '.sync.behind = 40' '.sync.conflict = true')" = conflict ]
+  [ "$(step conflict cmd '.sync.up_to_date = false' '.sync.conflict = true')" = "pr-act restack --resolve" ]
 }
 
 @test "parent merged, retargeted to the default branch: restack" {
