@@ -305,7 +305,7 @@ through the merge. Then:
   A `null` in a file removes the key from the files, so the default applies.
   - **Defaults:** `harness: claude`; settings `remote: origin`,
     `stepTimeout: 1800`, `interval: 300`, `replyPrefix: "🤖 "`, and `verify`,
-    `notify`, `botLogin`, `botIgnore`, `botIgnoreBody` empty.
+    `notify`, `botLogin`, `botIgnore`, `botIgnoreBody`, `implementAllow` empty.
   - **Output:** a string prints raw, a list one element per line, an object as
     JSON; `--json` prints JSON for all of them.
   - **Exit codes:** 3 means no value and no default; 1 is always an error.
