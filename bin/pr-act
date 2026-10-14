@@ -11,6 +11,7 @@
 #   pr-act ack      [--id <id>]... [<branch>]
 #   pr-act restack  [--force] [<branch>]
 #   pr-act push     [--force] [<branch>]
+#   pr-act verify   [<branch>]
 #
 # Examples:
 #   pr-act enroll                      pr-watch starts tracking this branch
@@ -18,6 +19,7 @@
 #   pr-act address --harness pi
 #   pr-act ack                         after reading pr-state --long: the i items are done
 #   pr-act restack && pr-act push      catch up with the parent, then publish
+#   pr-act verify && pr-review-local   the zero-token gate before a review
 #
 # Verbs:
 #   enroll    mark the branch for pr-watch, and register this repo; for a
@@ -37,6 +39,10 @@
 #   push      publish: a plain push for new commits; rewritten history is
 #             force-pushed with a lease, only over a remote head of our own.
 #             Never over commits this copy has never had, --force or not
+#   verify    run settings.verify in the branch's worktree, zero tokens. Pass:
+#             one line. Fail: nonzero, the output trimmed to its last 40 lines
+#             for the fix step. A command that changes the tree fails too.
+#             Gates local review and everything after it
 #
 # --force:
 #   address         run even if the branch is unpushed, diverged or taken over
@@ -278,11 +284,7 @@ address() {
     msg=$(jq -r '(.commit_message // "") | if test("\\S") then . else "Address review feedback" end' <<<"$result")
     git -C "$wt" add -A && git -C "$wt" commit -q -m "$msg" || die "commit failed; the edits are left in $wt"
   fi
-  if [[ -n $verify ]]; then
-    (cd "$wt" && sh -c "$verify") || die "verify failed ($verify); the commit is kept in $wt, nothing pushed or posted"
-    [[ -z $(git -C "$wt" status --porcelain) ]] \
-      || die "verify changed files in $wt (a formatter?); commit them and rerun. Nothing pushed or posted"
-  fi
+  verify_run "$wt" "$b" || die "verify failed ($verify); the commit is kept in $wt, nothing pushed or posted"
 
   report "$plan" "$(jq -r .summary <<<"$result")"
   if $no_publish; then
@@ -327,6 +329,49 @@ address() {
     fi
   fi
   return "$failed"
+}
+
+# ── verify ───────────────────────────────────────────────────────────────────
+
+VERIFY_TAIL=40
+VERIFY_CMD=""
+
+# verify_run <worktree> <branch>: settings.verify there, under
+# settings.stepTimeout, output captured. 0: passed, or nothing configured
+# (VERIFY_CMD is then empty). Otherwise the command's status, with its output
+# trimmed to the last $VERIFY_TAIL lines on stdout for the fix step that
+# follows. A command that exits 0 but changes the tree (a formatter) fails too.
+verify_run() {
+  local wt=$1 b=$2 timeout out rc=0 n before
+  VERIFY_CMD=$(cd "$wt" && prc_get settings.verify "$b" false) || die "pr-config failed"
+  [[ $VERIFY_CMD != *$'\n'* ]] || die "verify must be a single command, not a list"
+  [[ -n $VERIFY_CMD ]] || return 0
+  timeout=$(prc_get settings.stepTimeout "$b" false) || die "pr-config failed"
+  [[ $timeout =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $timeout"
+  out=$(mktemp)
+  before=$(git -C "$wt" status --porcelain)
+  (cd "$wt" && with_timeout "$timeout" sh -c "$VERIFY_CMD" </dev/null >"$out" 2>&1) || rc=$?
+  if (( rc == 0 )) && [[ $(git -C "$wt" status --porcelain) != "$before" ]]; then
+    echo "verify changed files in $wt (a formatter?); commit them and rerun"
+    rc=1
+  elif (( rc != 0 )); then
+    n=$(wc -l < "$out" | tr -d " ")
+    (( n <= VERIFY_TAIL )) || echo "… (last $VERIFY_TAIL of $n lines)"
+    tail -n "$VERIFY_TAIL" "$out"
+  fi
+  rm -f "$out"
+  return $rc
+}
+
+verify() {
+  local b=$branch wt rc=0
+  wt=$(worktree_for "$b")
+  [[ -n $wt ]] || die "$b is not checked out in any worktree"
+  verify_run "$wt" "$b" || rc=$?
+  if (( rc != 0 )); then die "verify failed ($VERIFY_CMD)"
+  elif [[ -z $VERIFY_CMD ]]; then echo "no settings.verify configured; nothing to run"
+  else echo "verify passed ($VERIFY_CMD)"
+  fi
 }
 
 # ── push ─────────────────────────────────────────────────────────────────────
@@ -536,5 +581,6 @@ case $verb in
   ack) ack ;;
   restack) restack ;;
   push) push ;;
+  verify) verify ;;
   *) die "unknown verb: $verb" ;;
 esac
