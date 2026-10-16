@@ -56,6 +56,8 @@ EOF
 HARNESS_CLAUDE_ALLOW=$HARNESS_READONLY_ALLOW
 HARNESS_PI_TOOLS="read"
 sid=$(uuidgen | tr 'A-F' 'a-f')
+range="${SHEEPDOG_BASE:0:7}..${SHEEPDOG_HEAD:0:7}"
+echo "sd review-local: $h (new session $sid) is reviewing ${branch:+$branch (}$range${branch:+)}…" >&2
 result=$(harness_run "$h" "$sid" new "$timeout" "$prompt" "$SCHEMA" "$cfg") \
   || die "the $h review failed or returned no usable result"
 findings=$(prc_json 'values findings | where kind(this) == "array"' "$result" 2>/dev/null) \

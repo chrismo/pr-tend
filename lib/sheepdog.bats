@@ -1,9 +1,12 @@
 #!/usr/bin/env bats
 
+bats_require_minimum_version 1.5.0
+
 # Test suite for lib/sheepdog.sh, the helpers shared by sd state, sd act and
 # sd watch. Needs bash 5 first on PATH (the lib is sourced).
 
 setup() {
+  source "$BATS_TEST_DIRNAME/config.sh"
   source "$BATS_TEST_DIRNAME/sheepdog.sh"
   TMP="$(cd "$BATS_TEST_TMPDIR" && pwd -P)"
   export GIT_CONFIG_GLOBAL="$TMP/gitconfig-global"
@@ -32,4 +35,59 @@ setup() {
   run pin_write feat nope HEAD main
   [ "$status" -ne 0 ]
   [[ "$output" == *"unknown pin"* ]]
+}
+
+# harness_run's tests: claude and pi are stubs that put protocol noise on
+# stderr and print $FX/out on stdout, exiting $FX/status.
+harness_stubs() {
+  export FX="$TMP/fx"
+  mkdir -p "$FX" "$TMP/fakebin"
+  for h in claude pi; do
+    cat > "$TMP/fakebin/$h" <<'EOF'
+#!/usr/bin/env bash
+echo '{"type":"system","subtype":"init","session_id":"x"}' >&2
+cat "$FX/out"
+exit "$(cat "$FX/status" 2>/dev/null || echo 0)"
+EOF
+    chmod +x "$TMP/fakebin/$h"
+  done
+  export PATH="$TMP/fakebin:$PATH"
+  echo '{"type": "result", "is_error": false, "structured_output": {"ok": true}}' > "$FX/out"
+}
+
+@test "harness_run: a successful run keeps the harness's stderr off the terminal" {
+  harness_stubs
+  run --separate-stderr harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -eq 0 ]
+  [ "$(jq -c . <<<"$output")" = '{"ok":true}' ]
+  [ -z "$stderr" ]
+}
+
+@test "harness_run: a failed run shows the harness's stderr" {
+  harness_stubs
+  echo 1 > "$FX/status"
+  run --separate-stderr harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *'"subtype":"init"'* ]]
+}
+
+@test "harness_run: an error result is a failure, so the stderr shows" {
+  harness_stubs
+  echo '{"type": "result", "is_error": true, "result": "out of turns"}' > "$FX/out"
+  run --separate-stderr harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *'"subtype":"init"'* ]]
+}
+
+@test "harness_run: pi's stderr follows the same rule" {
+  harness_stubs
+  printf 'Done.\n\n```json\n{"ok": true}\n```\n' > "$FX/out"
+  run --separate-stderr harness_run pi sid1 new 30 "do it" '{}'
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  echo 1 > "$FX/status"
+  run --separate-stderr harness_run pi sid1 new 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *'"subtype":"init"'* ]]
 }

@@ -71,13 +71,13 @@ EOF
 
 @test "prints the reviewer's findings as a JSON list" {
   echo '{"findings": [{"file": "file.txt", "line": 3, "severity": "warning", "body": "no newline"}]}' > "$FX/result.json"
-  run "$REVIEW"
+  run --separate-stderr "$REVIEW"
   [ "$status" -eq 0 ]
   [ "$(jq -c . <<<"$output")" = '[{"file":"file.txt","line":3,"severity":"warning","body":"no newline"}]' ]
 }
 
 @test "no findings: an empty list, exit 0" {
-  run "$REVIEW"
+  run --separate-stderr "$REVIEW"
   [ "$status" -eq 0 ]
   [ "$(jq -c . <<<"$output")" = '[]' ]
 }
@@ -116,9 +116,16 @@ EOF
 @test "steps.review picks the harness: pi, with read-only tools" {
   "$SD_CONFIG" set --global steps.review.harness pi
   echo '{"findings": [{"file": "file.txt", "line": 3, "severity": "nit", "body": "x"}]}' > "$FX/result.json"
-  run "$REVIEW"
+  run --separate-stderr "$REVIEW"
   [ "$status" -eq 0 ]
   [ "$(jq length <<<"$output")" = 1 ]
   tools=$(grep -A1 -x -- --tools "$FX/pi.args" | tail -1)
   [ "$tools" = read ]
+}
+
+@test "says when the reviewer starts: which harness, which session, what range" {
+  run --separate-stderr "$REVIEW"
+  [ "$status" -eq 0 ]
+  sid=$(grep -A1 -x -- --session-id "$FX/claude.args" | tail -1)
+  [[ "$stderr" == *"claude (new session $sid) is reviewing main (${BASE:0:7}..${HEAD_SHA:0:7})"* ]]
 }
