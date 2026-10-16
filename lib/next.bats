@@ -548,14 +548,20 @@ NATIVE=('.pr.stack = {number: 29, position: 2, size: 2}')
   [ "$(keys "${NATIVE[@]}" "${after[@]}" '.pr.merge_state = "BEHIND"')" = stack-sync ]
 }
 
-@test "native stack: GitHub's rewrite on the remote is stack-rewritten, not a foreign push" {
-  local rewritten=('.push.remote_sha = "h2"' '.push.behind = 2' '.push.diverged = true' '.push.remote_ours = false' '.push.theirs = 2')
-  [ "$(keys "${rewritten[@]}")" = foreign ]
+@test "native stack: GitHub's rewrite on the remote after the parent merged is stack-rewritten, not a foreign push" {
+  local rewritten=('.push.remote_sha = "h2"' '.push.behind = 2' '.push.diverged = true' '.push.remote_ours = false' '.push.theirs = 2'
+                   '.parent.name = "base"' '.parent.merged = true' '.parent.pr = {number: 3, state: "MERGED"}')
   [ "$(keys "${NATIVE[@]}" "${rewritten[@]}")" = "stack-rewritten" ]
   [ "$(step stack-rewritten say "${NATIVE[@]}" "${rewritten[@]}")" \
     = "origin/feat has 2 commits this copy has never had, GitHub's rewrite of stack #29 (2 of 2) most likely: pull it (git log HEAD..origin/feat to look first)" ]
   [ "$(step stack-rewritten cmd "${NATIVE[@]}" "${rewritten[@]}")" = "gh stack sync" ]
   [ "$(step stack-rewritten who "${NATIVE[@]}" "${rewritten[@]}")" = you ]
+}
+
+@test "native stack: a foreign push with the parent unmerged is a plain foreign push: GitHub had no reason to rewrite" {
+  local pushed=('.push.remote_sha = "h2"' '.push.behind = 2' '.push.diverged = true' '.push.remote_ours = false' '.push.theirs = 2')
+  [ "$(keys "${NATIVE[@]}" "${pushed[@]}")" = foreign ]
+  [ "$(step foreign cmd "${NATIVE[@]}" "${pushed[@]}")" = "git log HEAD..origin/feat" ]
 }
 
 @test "native stack: our own unpushed commits still push" {

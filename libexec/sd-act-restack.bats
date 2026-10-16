@@ -697,7 +697,7 @@ github_rewrites_child() {
   open_pr child main 2 && in_stack child
   run "$SD_ACT" retarget
   [ "$status" -ne 0 ]
-  [[ "$output" == *"GitHub stack #29"* ]]
+  [[ "$output" == *"GitHub stack #29"*"hasn't rewritten child yet"* ]]
   [[ "$output" == *"gh stack sync"* ]]
   [ ! -e "$GH/calls" ]
   [ "$(git config branch.child.sd-parent)" = A ]
@@ -705,11 +705,12 @@ github_rewrites_child() {
 
 @test "retarget: a PR in a gh stack still on its merged parent: the base edit is GitHub's, refused" {
   stacked_child
+  github_rewrites_child
   merged_pr A "$a_head"
   open_pr child A 2 && in_stack child
   run "$SD_ACT" retarget
   [ "$status" -ne 0 ]
-  [[ "$output" == *"GitHub stack #29"* ]]
+  [[ "$output" == *"GitHub stack #29"*"restacks and retargets it itself"* ]]
   [ ! -e "$GH/calls" ]
   [ "$(git config branch.child.sd-parent)" = A ]
 }

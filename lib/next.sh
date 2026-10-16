@@ -16,9 +16,11 @@
 # here: GitHub does that itself when the PR below merges (and rewrites the
 # branch), and refuses base edits and plain merges. The same cases get one
 # stack step instead: stack-rewritten pulls GitHub's rewrite with gh stack sync
-# (notified, like foreign); stack-conflict is chrismo's, through gh stack
-# (notified, like conflict); stack-sync, also gh stack sync, rebases a stack
-# behind its open parent or GitHub's BEHIND (mechanical, like behind);
+# (notified, like foreign; only once the parent merged, GitHub's reason to
+# rewrite: before that a foreign push is plain foreign); stack-conflict is
+# chrismo's, through gh stack (notified, like conflict); stack-sync, also gh
+# stack sync, rebases a stack behind its open parent or GitHub's BEHIND
+# (mechanical, like behind);
 # stack-wait is GitHub's turn, with no command: the parent merged and the PR
 # still targets it or still carries its commits. A merged parent is never
 # chased, and sd-parent may still name it after GitHub retargeted the PR.
@@ -67,11 +69,11 @@ values {...s, remote}
            f"git fetch --prune {remote}") : null,
     open and on(session.locked)
       ? step("attached", "wait", "attached: the branch'"'"'s session is open interactively; agent steps wait until it exits", null) : null,
-    open and native and foreign
+    open and native and foreign and on(parent.merged)
       ? step("stack-rewritten", "you",
              f"{remote}/{branch} has {plural(push.theirs, "commit")} this copy has never had, GitHub'"'"'s rewrite of stack #{pr.stack.number} ({pr.stack.position} of {pr.stack.size}) most likely: pull it (git log HEAD..{remote}/{branch} to look first)",
              "gh stack sync") : null,
-    open and foreign and not native
+    open and foreign and not (native and on(parent.merged))
       ? step("foreign", "you", f"{remote}/{branch} has {plural(push.theirs, "commit")} this copy has never had",
              f"git log HEAD..{remote}/{branch}") : null,
     open and n(threads.owed_human) > 0

@@ -23,7 +23,7 @@ setup() {
   cat > "$TMP/fakebin/gh" <<'EOF'
 #!/usr/bin/env bash
 if [[ -n ${GH_FAKE_FAIL:-} ]]; then echo "$GH_FAKE_FAIL" >&2; exit 1; fi
-b="" c="" prev=""
+b="" c="" q="" prev=""
 for a; do
   case $a in
     branch=*)
@@ -33,11 +33,16 @@ for a; do
         echo "gh: Variable \$branch of type String! was provided invalid value" >&2; exit 1
       fi ;;
     commits=*) c=$a ;;
+    query=*) q=$a ;;
   esac
   prev=$a
 done
 [[ -n $b ]] || { echo "fake gh: no branch= field in: $*" >&2; exit 2; }
 if [[ ${GH_FAKE_FAIL_FOR:-} == "$b" ]]; then echo "gh: boom for $b" >&2; exit 1; fi
+# A schema without native stacks (GHES): GitHub's answer to an unknown field.
+if [[ -n ${GH_FAKE_NO_STACK:-} && $q == *"stack {"* ]]; then
+  echo "gh: Field 'stack' doesn't exist on type 'PullRequest'" >&2; exit 1
+fi
 echo "$b" >> "$GH_FIXTURES/calls"
 echo "$b ${c:-}" >> "$GH_FIXTURES/commits"
 f="$GH_FIXTURES/${b//\//__}.json"
@@ -1323,4 +1328,13 @@ review() {
   [ "$(field .sync.old_base)" = "$a_head" ]
   [ "$(field .sync.conflict)" = false ]
   [ "$(field .sync.parent_in_history)" = true ]
+}
+
+@test "pr.stack: a schema without native stacks (GHES) retries without them: the PR is still read, stack null" {
+  git switch -qc feat && commit b.txt b
+  pr_fixture feat
+  GH_FAKE_NO_STACK=1 state
+  [ "$(field .pr.number)" = 7 ]
+  [ "$(field .pr.stack)" = null ]
+  [ "$(field '.errors | length')" = 0 ]
 }

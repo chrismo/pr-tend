@@ -1205,7 +1205,8 @@ write_cfg() {
 }
 
 @test "policy: GitHub's rewrite of a PR in a native stack is ❌ and notifies; behind its open parent is 🔧 and quiet" {
-  ps_fixture feat '.pr.stack = {number: 29, position: 2, size: 2} | .push = {remote_sha: "def", ahead: 0, behind: 2, diverged: true, remote_ours: false, theirs: 2}'
+  ps_fixture feat '.pr.stack = {number: 29, position: 2, size: 2} | .push = {remote_sha: "def", ahead: 0, behind: 2, diverged: true, remote_ours: false, theirs: 2}
+    | .parent = {name: "par", merged: true, pr: {number: 5, state: "MERGED"}}'
   pass
   [ "$(glyph repo)" = "❌" ]
   [[ "$(notified)" == "repo feat|origin/feat has 2 commits this copy has never had, GitHub's rewrite of stack #29"* ]]

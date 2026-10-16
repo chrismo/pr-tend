@@ -64,8 +64,8 @@ query($owner: String!, $repo: String!, $branch: String!, $commits: Boolean!) {
         number url state isDraft isCrossRepository headRepositoryOwner { login } baseRefName headRefOid mergeable mergedAt
         mergeStateStatus reviewDecision
         # A native GitHub stack (gh stack): null outside one. In github.com's public schema with no
-        # preview header (checked 2026-10-16); a GitHub Enterprise Server schema was not checked, and
-        # one without these fields fails the whole query (gh_ok false for every branch).
+        # preview header (checked 2026-10-16); a schema without them (GHES, say) gets the query
+        # again without this line (gh_query).
         stack { number size } stackEntry { position }
         reviewRequests(first: 20) { nodes { requestedReviewer {
           ... on User { login } ... on Bot { login } ... on Mannequin { login } ... on Team { slug } } } }
@@ -135,13 +135,20 @@ review_rounds=$(prc_get settings.reviewRounds "$branch" false) || die "sd config
 RESP=""
 GH_ERR=$(mktemp)
 trap 'rm -f "$GH_ERR"' EXIT
+# A schema that doesn't know the stack fields rejects the whole query, so it
+# is asked again, and from then on, without them: pr.stack is then null.
 gh_query() {
-  if ! RESP=$(gh api graphql -F owner='{owner}' -F repo='{repo}' -f branch="$1" -F commits="${2:-false}" \
-                -f query="$QUERY" 2>"$GH_ERR"); then
+  local tries=2
+  while ! RESP=$(gh api graphql -F owner='{owner}' -F repo='{repo}' -f branch="$1" -F commits="${2:-false}" \
+                   -f query="$QUERY" 2>"$GH_ERR"); do
+    if (( --tries > 0 )) && grep -qE "Field '(stack|stackEntry)' doesn't exist" "$GH_ERR"; then
+      QUERY=${QUERY//"stack { number size } stackEntry { position }"/}
+      continue
+    fi
     errors+=("gh ($1): $(tr '\n' ' ' <"$GH_ERR")")
     RESP=""
     return 1
-  fi
+  done
 }
 # headRefName also matches strangers' fork PRs from a same-named branch; keep
 # same-repo PRs and PRs from the viewer's own fork.
