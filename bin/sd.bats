@@ -43,7 +43,7 @@ EOF
   for h in help -h --help; do
     run --separate-stderr "$SD" "$h"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Usage: sd <verb>"* ]]
+    [[ "$output" == *"Usage: sd <verb>"* ]] || false
   done
 }
 
@@ -51,8 +51,8 @@ EOF
   run "$SD" --help
   local f
   for f in "$LIBEXEC"/sd-*; do
-    [[ $f == *.bats ]] && continue
-    [[ "$output" == *"  ${f##*/sd-} "* ]]
+    [[ $f != *.bats ]] || continue
+    [[ "$output" == *"  ${f##*/sd-} "* ]] || false
   done
 }
 
