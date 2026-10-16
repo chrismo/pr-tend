@@ -72,7 +72,9 @@
 #             read. A conflict is
 #             refused, or with --resolve handed to the agent (J1): it edits
 #             the conflicting files in the branch's session, the pipeline
-#             adds and continues, up to 3 stops. A resolved rebase skips the
+#             adds and continues, up to 3 stops; an agent that finds the
+#             replayed commit already on the target rolls it back as a wrong
+#             base. A resolved rebase skips the
 #             unchanged-change check (a resolution changes the diff), so its
 #             result is unreviewed: verify runs, then sd act review is next
 #   retarget  after the parent merged: point the PR at the default branch
@@ -1340,7 +1342,7 @@ say why; nothing you changed will be kept.
 
 Before resolving, judge whether the commit being replayed (named below, among
 all the commits this rebase replays) is this branch's work, from its subject,
-its change and the task. If it isn't, and its change is already on the target
+the files it changes and the task. If it isn't, and its change is already on the target
 (e.g. a merged parent's commit, which the target holds as a squash), the replay
 itself is wrong: don't resolve it, answer with outcome "already-on-target" and
 say why. The pipeline rolls back and refuses; it never drops a commit on your
@@ -1356,9 +1358,9 @@ EOF
 # has stopped; the agent resolves each stop in the branch's session, the
 # pipeline adds and continues. Any failure rolls the branch back and returns 1.
 resolve_conflicts() {
-  local b=$1 wt=$2 old_base=$3 old_head=$4 onto=$5 stops=0 files hunks task result outcome replayed replaying
+  local b=$1 wt=$2 old_base=$3 old_head=$4 onto=$5 stops=0 files hunks task result outcome replayed replaying replaying_stat
   task=$(git config --get "branch.$b.sd-task" || true)
-  replayed=$(git log --reverse --format='%h %s' "$old_base..$old_head")
+  replayed=$(git log --reverse --no-merges --topo-order --format='%h %s' "$old_base..$old_head")
   step_session "$b" implement
   while :; do
     if (( ++stops > RESOLVE_CAP )); then
@@ -1374,9 +1376,10 @@ resolve_conflicts() {
     fi
     hunks=$(git -C "$wt" diff)
     replaying=$(git -C "$wt" log -1 --format='%h %s' REBASE_HEAD)
+    replaying_stat=$(git -C "$wt" show --stat --format= REBASE_HEAD)
     echo "sd act: $STEP_H ($STEP_MODE session $STEP_SID) is resolving conflicts in: ${files//$'\n'/, } (stop $stops)…" >&2
     if ! result=$(cd "$wt" && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" \
-                    "$RESOLVE_PROMPT"$'\n\nBranch: '"$b"$', rebasing onto '"$onto"$'\nTask: '"${task:-(none recorded)}"$'\nReplaying: '"$replaying"$'\n'"Commits being replayed, oldest first:"$'\n'"$replayed"$'\n\nConflicting files:\n'"$files"$'\n\nConflict hunks:\n'"$hunks" \
+                    "$RESOLVE_PROMPT"$'\n\nBranch: '"$b"$', rebasing onto '"$onto"$'\nTask: '"${task:-(none recorded)}"$'\nReplaying: '"$replaying"$'\n'"$replaying_stat"$'\n\n'"Commits being replayed, oldest first:"$'\n'"$replayed"$'\n\nConflicting files:\n'"$files"$'\n\nConflict hunks:\n'"$hunks" \
                     "$RESOLVE_SCHEMA" "$STEP_CFG"); then
       restack_rollback "$wt" "$b" "$old_head"
       echo "sd act: the $STEP_H step failed or returned no usable result (session $STEP_SID); rolled back to ${old_head:0:7}" >&2
@@ -1387,7 +1390,9 @@ resolve_conflicts() {
     outcome=$(prc_val "$result" 'coalesce(outcome, "")')
     if [[ $outcome == already-on-target ]]; then
       restack_rollback "$wt" "$b" "$old_head"
-      echo "sd act: wrong base: the agent says $replaying is already on $onto ($(prc_val "$result" 'coalesce(summary, "")')); rolled back to ${old_head:0:7}" >&2
+      echo "sd act: wrong base: the agent says $replaying is already on $onto ($(prc_val "$result" 'coalesce(summary, "")')); rolled back to ${old_head:0:7}." \
+           "If it's a merged parent's and the stack is linear, rebase past it by hand: git rebase --onto $onto ${replaying%% *} $b," \
+           "then git update-ref refs/sheepdog/$b/base \$(git merge-base $onto $b)" >&2
       return 1
     fi
     if [[ $outcome != done ]]; then

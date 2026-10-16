@@ -524,8 +524,8 @@ rebase_in_progress() { [[ -e $(git rev-parse --git-path rebase-merge) || -e $(gi
   own1=$(git rev-parse --short feat~1) own2=$(git rev-parse --short feat)
   "$SD_ACT" restack --resolve >/dev/null
   grep -qx "Replaying: $own1 feat" "$FX/claude.prompt"
-  grep -A2 -x "Commits being replayed, oldest first:" "$FX/claude.prompt" > "$TMP/own"
-  [ "$(cat "$TMP/own")" = "Commits being replayed, oldest first:
+  grep -qx " file.txt | 2 +-" "$FX/claude.prompt"
+  [ "$(sed -n '/^Commits being replayed, oldest first:$/,/^$/p' "$FX/claude.prompt")" = "Commits being replayed, oldest first:
 $own1 feat
 $own2 feat two" ]
 }
@@ -537,6 +537,7 @@ $own2 feat two" ]
   run "$SD_ACT" restack --resolve
   [ "$status" -eq 1 ]
   [[ "$output" == *"wrong base: the agent says $replayed feat is already on origin/main (main already has this)"* ]]
+  [[ "$output" == *"rebase past it by hand: git rebase --onto origin/main $replayed feat"* ]]
   [ "$(git rev-parse HEAD)" = "$before" ]
   ! rebase_in_progress
   [ -z "$(base_pin)" ]
