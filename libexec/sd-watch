@@ -2,7 +2,7 @@
 #
 # sd watch - observe-only pass over every enrolled branch.
 #
-# Usage: sd watch [status | install | uninstall]
+# Usage: sd watch [refresh [<branch>] | status | install | uninstall]
 #
 #   (none)     for each repo in global git config sheepdog.repo: fetch, then
 #              sd state every branch with branch.<name>.sheepdog=true. Writes a
@@ -10,6 +10,10 @@
 #              on reasons chrismo is needed that are new since the last pass,
 #              and records the pass. Also deletes refs/sheepdog/<b>/* whose
 #              branch no longer exists (pins outlive a branch -D).
+#   refresh    the same check for one branch (default: the current one), now:
+#              fetch its repo, glyph, notify, cache its state. Not a pass: other
+#              branches and glyphs are left alone and status still shows the
+#              last pass. Exits non-zero when sd state fails.
 #   status     print the last pass
 #   install    launchd job: a pass every settings.interval seconds (default 300)
 #   uninstall  remove the job
@@ -83,13 +87,13 @@ check() {
     write_glyph "$wt" "$b" ⚠️
     printf '%s\t%s\t⚠️\tsd state failed: %s\n' "$name" "$b" "$(head -1 "$errf")"
     rm -f "$errf"
-    return
+    return 1
   fi
   rm -f "$errf"
   if ! cls=$(prc_json "$CLASSIFY" "$json" 2>/dev/null) || [[ -z $cls ]]; then
     write_glyph "$wt" "$b" ⚠️
     printf '%s\t%s\t⚠️\tunparseable sd state output\n' "$name" "$b"
-    return
+    return 1
   fi
   glyph=$(prc_line 'values glyph' "$cls")
 
@@ -101,8 +105,9 @@ check() {
   while IFS= read -r line; do
     [[ -n $line ]] && notify "$name $b" "$line"
   done < <(prc_line 'unnest {prev, r: c.reasons} | where not (r.key in prev) | values r.msg' "{\"prev\": $prev, \"c\": $cls}")
-  prc_json 'values {...c, state: s}' "{\"c\": $cls, \"s\": $json}" > "$state_file.tmp" \
-    && mv "$state_file.tmp" "$state_file"
+  # A refresh can run alongside a pass: each writes its own temp file.
+  prc_json 'values {...c, state: s}' "{\"c\": $cls, \"s\": $json}" > "$state_file.$$.tmp" \
+    && mv "$state_file.$$.tmp" "$state_file"
 
   write_glyph "$wt" "$b" "$glyph"
   printf '%s\t%s\t%s\t%s\n' "$name" "$b" "$glyph" \
@@ -121,12 +126,37 @@ sweep_pins() {
     | git -C "$1" update-ref --stdin
 }
 
+# fetch <repo> <name>: fetch settings.remote, printing a pass line for a
+# failure. Returns 1 when the remote can't be read, so nothing should be checked.
+fetch() {
+  local remote err
+  if ! remote=$(cd "$1" && prc_get settings.remote "" true); then
+    printf '%s\t-\t⚠️\tsd config failed\n' "$2"
+    return 1
+  fi
+  if ! err=$(with_timeout "$TIMEOUT" git -C "$1" fetch --prune --quiet "$remote" 2>&1 </dev/null); then
+    printf '%s\t-\t⚠️\tfetch from %s failed: %s\n' "$2" "$remote" "${err%%$'\n'*}"
+  fi
+}
+
+# load_worktrees <repo>: worktree_of[<branch>] is the worktree it's checked out in.
+load_worktrees() {
+  local key val wt_path
+  declare -gA worktree_of=()
+  while read -r key val; do
+    case $key in
+      worktree) wt_path=$val ;;
+      branch) worktree_of[${val#refs/heads/}]=$wt_path ;;
+    esac
+  done < <(git -C "$1" worktree list --porcelain)
+}
+
 run_pass() {
   mkdir -p "$STATE_DIR" "$STATUS_DIR"
   WRITTEN=$(mktemp)
   trap 'rm -f "$WRITTEN"' EXIT
   local -a repos branches
-  local repo name remote b lines="" key val wt_path fetch_err
+  local repo name b lines="" out
   mapfile -t repos < <(git config --global --get-all sheepdog.repo || true)
 
   for repo in "${repos[@]}"; do
@@ -137,26 +167,13 @@ run_pass() {
     sweep_pins "$repo"
     (( ${#branches[@]} )) || continue
 
-    if ! remote=$(cd "$repo" && prc_get settings.remote "" true); then
-      lines+="$name"$'\t-\t⚠️\t'"sd config failed"$'\n'
-      continue
-    fi
-    if ! fetch_err=$(with_timeout "$TIMEOUT" git -C "$repo" fetch --prune --quiet "$remote" 2>&1 </dev/null); then
-      lines+="$name"$'\t-\t⚠️\t'"fetch from $remote failed: ${fetch_err%%$'\n'*}"$'\n'
-    fi
+    out=$(fetch "$repo" "$name") || { lines+=$out$'\n'; continue; }
+    [[ -z $out ]] || lines+=$out$'\n'
 
-    local -A worktree_of=()
-    while read -r key val; do
-      case $key in
-        worktree) wt_path=$val ;;
-        branch) worktree_of[${val#refs/heads/}]=$wt_path ;;
-      esac
-    done < <(git -C "$repo" worktree list --porcelain)
-
+    load_worktrees "$repo"
     for b in "${branches[@]}"; do
-      lines+=$(check "$repo" "$name" "$b" "${worktree_of[$b]:-}")$'\n'
+      lines+=$(check "$repo" "$name" "$b" "${worktree_of[$b]:-}")$'\n' || true
     done
-    unset worktree_of
   done
 
   local f
@@ -165,6 +182,31 @@ run_pass() {
     grep -qxF "$f" "$WRITTEN" || rm -f "$f"
   done
   { date '+last pass: %Y-%m-%d %H:%M:%S'; printf '%s' "$lines"; } > "$STATE_DIR/last-pass"
+}
+
+die() { echo "sd watch: $*" >&2; exit 1; }
+
+show() { sed "s/$(printf '\t')/  /g"; }
+
+refresh() {
+  local b=${1:-} repo name out line rc=0
+  git rev-parse --git-dir >/dev/null 2>&1 || die "not in a git repository"
+  if [[ -z $b ]]; then
+    b=$(git symbolic-ref -q --short HEAD) || die "not on a branch: name one (sd watch refresh <branch>)"
+  fi
+  git rev-parse -q --verify "refs/heads/$b" >/dev/null || die "no such branch: $b"
+  [[ $(git config "branch.$b.sheepdog") == true ]] || die "$b isn't enrolled (sd act enroll $b)"
+  # The repo as enroll registered it, so a pass and a refresh share the branch's state.
+  repo=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+  name=$(basename "$repo")
+  mkdir -p "$STATE_DIR" "$STATUS_DIR"
+  WRITTEN=/dev/null
+  out=$(fetch "$repo" "$name") || { show <<<"$out"; exit 1; }
+  [[ -z $out ]] || show <<<"$out"
+  load_worktrees "$repo"
+  line=$(check "$repo" "$name" "$b" "${worktree_of[$b]:-}") || rc=1
+  show <<<"$line"
+  return $rc
 }
 
 plist_path() { echo "$LAUNCH_AGENTS/$LABEL.plist"; }
@@ -223,8 +265,9 @@ uninstall_job() {
 
 case ${1:-} in
   "") prc_super_init || exit 1; run_pass ;;
+  refresh) prc_super_init || exit 1; refresh "${2:-}" ;;
   status)
-    if [[ -f $STATE_DIR/last-pass ]]; then sed "s/$(printf '\t')/  /g" "$STATE_DIR/last-pass"; else echo "no pass yet"; fi ;;
+    if [[ -f $STATE_DIR/last-pass ]]; then show < "$STATE_DIR/last-pass"; else echo "no pass yet"; fi ;;
   install) prc_super_init || exit 1; install_job ;;
   uninstall) uninstall_job ;;
   -h|--help) sed -n '3,/^$/s/^# \{0,1\}//p' "$0" ;;

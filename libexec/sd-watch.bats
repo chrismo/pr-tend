@@ -436,6 +436,127 @@ SH
   [[ "$output" == *"no pass yet"* ]]
 }
 
+# ── refresh ──────────────────────────────────────────────────────────────────
+
+refresh() { "$SD_WATCH" refresh "$@"; }
+
+@test "refresh: checks only the current branch, from the main worktree" {
+  git branch other && enroll other
+  ps_fixture feat
+  ps_fixture other
+  run refresh
+  [ "$status" -eq 0 ]
+  [ "$(cat "$PS_FIXTURES/calls")" = "$TMP/repo feat" ]
+  [[ "$output" == *"repo  feat  ✅  ready to merge"* ]]
+}
+
+@test "refresh <branch>: checks that branch" {
+  git branch other && enroll other
+  ps_fixture other '.ci.verdict = "red" | .ci.failing = ["lint"]'
+  refresh other
+  [ "$(cat "$PS_FIXTURES/calls")" = "$TMP/repo other" ]
+  [ "$(notified)" = "repo other|fix CI: lint" ]
+}
+
+@test "refresh: writes the glyph and notifies, and a later pass doesn't notify again" {
+  ps_fixture feat '.ci.verdict = "red" | .ci.failing = ["lint"]'
+  refresh
+  [ "$(glyph repo)" = "❌" ]
+  pass
+  refresh
+  [ "$(notified)" = "repo feat|fix CI: lint" ]
+}
+
+@test "refresh: after a pass, doesn't notify what the pass did" {
+  ps_fixture feat
+  pass
+  refresh
+  [ "$(notified)" = "repo feat|ready to merge" ]
+}
+
+@test "refresh: from a linked worktree, its branch and the pass's state" {
+  git switch -q main
+  git worktree add -q "$TMP/feat-wt" feat
+  ps_fixture feat
+  (cd "$TMP/feat-wt" && "$SD_WATCH" refresh)
+  [ "$(glyph feat-wt)" = "✅" ]
+  [ "$(cat "$PS_FIXTURES/calls")" = "$TMP/repo feat" ]
+  pass
+  [ "$(notified)" = "repo feat|ready to merge" ]
+}
+
+@test "refresh: fetches the configured remote" {
+  git clone -q "$TMP/origin.git" "$TMP/other" 2>/dev/null
+  git -C "$TMP/other" commit -q --allow-empty -m moved && git -C "$TMP/other" push -q origin main 2>/dev/null
+  git remote add up "$TMP/origin.git"
+  write_cfg '{"settings":{"remote":"up"}}'
+  ps_fixture feat
+  refresh
+  [ "$(git rev-parse up/main)" = "$(git -C "$TMP/other" rev-parse main)" ]
+}
+
+@test "refresh: a failed fetch is reported and the branch still checked" {
+  git remote set-url origin "$TMP/nowhere.git"
+  ps_fixture feat
+  run refresh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"fetch from origin failed: "*"nowhere"* ]]
+  [ "$(glyph repo)" = "✅" ]
+}
+
+@test "refresh: isn't recorded as a pass, and leaves other glyphs alone" {
+  git branch other && enroll other
+  git worktree add -q "$TMP/other-wt" other
+  ps_fixture feat '.ci.verdict = "red" | .ci.failing = ["lint"]'
+  ps_fixture other
+  pass
+  local before; before=$(cat "$SHEEPDOG_STATE_DIR/last-pass")
+  ps_fixture feat
+  refresh
+  [ "$(cat "$SHEEPDOG_STATE_DIR/last-pass")" = "$before" ]
+  [ "$(glyph other-wt)" = "✅" ]
+  [ "$(glyph repo)" = "✅" ]
+}
+
+@test "refresh: before any pass, status still says so" {
+  ps_fixture feat
+  refresh
+  run "$SD_WATCH" status
+  [[ "$output" == *"no pass yet"* ]]
+}
+
+@test "refresh: sd state failing is ⚠️ and exits non-zero" {
+  run refresh
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"feat  ⚠️  sd state failed"* ]]
+  [ "$(glyph repo)" = "⚠️" ]
+}
+
+@test "refresh: refuses a branch that isn't enrolled, or doesn't exist" {
+  git branch other
+  run refresh other
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"other isn't enrolled"*"sd act enroll"* ]]
+  run refresh nope
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no such branch: nope"* ]]
+  [ ! -e "$PS_FIXTURES/calls" ]
+}
+
+@test "refresh: refuses a detached HEAD with no branch named" {
+  git switch -q --detach
+  run refresh
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not on a branch"* ]]
+}
+
+@test "refresh: outside a git repo, refuses" {
+  cd "$TMP"
+  run refresh
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not in a git repository"* ]]
+}
+
 # ── launchd ──────────────────────────────────────────────────────────────────
 
 # Not in setup_launchd: tests refused before plutil runs should still run on Linux.
