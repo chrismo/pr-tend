@@ -288,6 +288,15 @@ child" ]
   [ ! -e "$FX/claude.calls" ]
 }
 
+@test "a tree restack's commit is the branch's own in its reflog, not a reset (stacked_on, #94)" {
+  orphaned_pin
+  merged_pr A "$a_head" "$a1" "$a_head"
+  run "$SD_ACT" restack --resolve
+  [ "$status" -eq 0 ]
+  [ "$(git reflog -1 --format=%H refs/heads/child)" = "$(git rev-parse child)" ]
+  [[ "$(git reflog -1 --format=%gs refs/heads/child)" != "reset: moving to "* ]]
+}
+
 @test "orphaned pin, a tree restack that would conflict: refused even with --resolve" {
   orphaned_pin
   upstream main 's/^f$/X/'

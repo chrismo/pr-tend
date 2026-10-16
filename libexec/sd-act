@@ -1728,7 +1728,8 @@ restack_by_tree() {
     || die "restacking $2 onto $6 by tree hit a conflict; nothing moved"
   new=$(printf '%s (restacked by tree onto %s)\n\nReplaces:\n%s\n' "$2" "$6" "$(git log --reverse --format=%s --right-only --cherry-pick "$3...$4")" \
           | git commit-tree "$tree" -p "$5") || die "git commit-tree failed; nothing moved"
-  git -C "$1" reset --quiet --hard "$new"
+  # Not "reset: moving to" in the reflog: stacked_on counts this commit as the branch's own.
+  GIT_REFLOG_ACTION="sd act restack by tree" git -C "$1" reset --quiet --hard "$new"
 }
 
 restack_rollback() { # <worktree> <branch> <old-head>
