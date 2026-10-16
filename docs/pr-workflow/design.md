@@ -4,7 +4,7 @@
 > soon as it has a home, and is deleted here when it does: built behavior into
 > the code and its tests (the README where users need it); unbuilt work, bugs,
 > spikes and open decisions into GitHub issues on the
-> [pr-tend project board](https://github.com/users/chrismo/projects/6). No
+> [sheepdog project board](https://github.com/users/chrismo/projects/6). No
 > duplicate docs: don't add anything here that the code or an issue already
 > says; link the issue instead. When nothing is left, delete the file. Don't
 > treat it as current documentation of anything that exists.
@@ -131,7 +131,7 @@ hit, or an escalation → **needs-chrismo** (N2).
 ### Steps 1–4, concretely
 
 1–2. Built 2026-10-14: `sd act start` and `sd act implement` (`sd act
-   --help`; decisions in [#14](https://github.com/chrismo/pr-tend/issues/14)).
+   --help`; decisions in [#14](https://github.com/chrismo/sheepdog/issues/14)).
 3. **Pipeline** checks: exit 0, tree clean, commits ahead of base? (Dirty → one
    resume: "uncommitted changes left"; otherwise → needs-chrismo.) Runs
    `settings.verify`; failure → autofix, then resume `$U` with the trimmed
@@ -969,8 +969,8 @@ short-lived, so it can't own children like their daemons do. Plan:
   - sd watch: ⏳ when every step is a wait; `blocked` is 🔧. Checked read-only
     on cli/cli#14640 (`REVIEW_REQUIRED` / `BLOCKED`, two users requested).
 
-Open bugs are [issues labeled `bug`](https://github.com/chrismo/pr-tend/issues?q=is%3Aissue+is%3Aopen+label%3Abug);
-all work is on the [pr-tend project board](https://github.com/users/chrismo/projects/6).
+Open bugs are [issues labeled `bug`](https://github.com/chrismo/sheepdog/issues?q=is%3Aissue+is%3Aopen+label%3Abug);
+all work is on the [sheepdog project board](https://github.com/users/chrismo/projects/6).
 
 ## Open
 
@@ -1016,20 +1016,20 @@ clones in `~/modev/pr-workflow-prior-art/` (sortie, av, gh-stack, attractor, sym
 - **Still distinctive:** stack-aware restack with a post-condition, local review
   before the bot, git-native state.
 
-[#6]: https://github.com/chrismo/pr-tend/issues/6
-[#7]: https://github.com/chrismo/pr-tend/issues/7
-[#8]: https://github.com/chrismo/pr-tend/issues/8
-[#9]: https://github.com/chrismo/pr-tend/issues/9
-[#10]: https://github.com/chrismo/pr-tend/issues/10
-[#11]: https://github.com/chrismo/pr-tend/issues/11
-[#12]: https://github.com/chrismo/pr-tend/issues/12
-[#13]: https://github.com/chrismo/pr-tend/issues/13
-[#14]: https://github.com/chrismo/pr-tend/issues/14
-[#15]: https://github.com/chrismo/pr-tend/issues/15
-[#16]: https://github.com/chrismo/pr-tend/issues/16
-[#17]: https://github.com/chrismo/pr-tend/issues/17
-[#18]: https://github.com/chrismo/pr-tend/issues/18
-[#20]: https://github.com/chrismo/pr-tend/issues/20
-[#21]: https://github.com/chrismo/pr-tend/issues/21
-[#22]: https://github.com/chrismo/pr-tend/issues/22
-[#23]: https://github.com/chrismo/pr-tend/issues/23
+[#6]: https://github.com/chrismo/sheepdog/issues/6
+[#7]: https://github.com/chrismo/sheepdog/issues/7
+[#8]: https://github.com/chrismo/sheepdog/issues/8
+[#9]: https://github.com/chrismo/sheepdog/issues/9
+[#10]: https://github.com/chrismo/sheepdog/issues/10
+[#11]: https://github.com/chrismo/sheepdog/issues/11
+[#12]: https://github.com/chrismo/sheepdog/issues/12
+[#13]: https://github.com/chrismo/sheepdog/issues/13
+[#14]: https://github.com/chrismo/sheepdog/issues/14
+[#15]: https://github.com/chrismo/sheepdog/issues/15
+[#16]: https://github.com/chrismo/sheepdog/issues/16
+[#17]: https://github.com/chrismo/sheepdog/issues/17
+[#18]: https://github.com/chrismo/sheepdog/issues/18
+[#20]: https://github.com/chrismo/sheepdog/issues/20
+[#21]: https://github.com/chrismo/sheepdog/issues/21
+[#22]: https://github.com/chrismo/sheepdog/issues/22
+[#23]: https://github.com/chrismo/sheepdog/issues/23

@@ -25,8 +25,8 @@ sheepdog tends its own PRs, so code changes go through them:
 ### Or run sheepdog against the sandbox
 
 Dogfooding on this repo's own PRs is the default, not a rule.
-[`chrismo/pr-tend-sandbox`](https://github.com/chrismo/pr-tend-sandbox)
-(checkout `../pr-tend-sandbox`) is a throwaway Go repo with RWX CI that sheepdog
+[`chrismo/sheepdog-sandbox`](https://github.com/chrismo/sheepdog-sandbox)
+(checkout `../sheepdog-sandbox`) is a throwaway Go repo with RWX CI that sheepdog
 can run against when running it here isn't advisable:
 
 - a spike that needs real merges, force-pushes or branch-protection changes

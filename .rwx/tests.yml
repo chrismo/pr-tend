@@ -19,7 +19,7 @@ tasks:
   - key: code
     call: git/clone 2.2.0
     with:
-      repository: https://github.com/chrismo/pr-tend.git
+      repository: https://github.com/chrismo/sheepdog.git
       ref: ${{ init.commit-sha }}
 
   # Scripts run `#!/usr/bin/env bash5`; Ubuntu's bash 5.2 is new enough.

@@ -97,7 +97,7 @@ step() { # step <key> <field> <jq-assignment...>
 }
 
 @test "GitHub's BEHIND (required up-to-date branches): restack onto the default branch, a real step" {
-  # Observed in pr-tend-sandbox 2026-10-14 (findings/6-behind.md): BEHIND needs a
+  # Observed in sheepdog-sandbox 2026-10-14 (findings/6-behind.md): BEHIND needs a
   # required status check plus "require branches to be up to date", and then
   # wins over a required review. So it is a restack to run, not a blocked state.
   [ "$(keys '.pr.merge_state = "BEHIND"' '.sync.up_to_date = false' '.sync.behind = 3')" = behind ]
