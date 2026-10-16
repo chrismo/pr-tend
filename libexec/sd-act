@@ -183,7 +183,9 @@
 #
 # Config (sd config show):
 #   settings  remote, verify, autofix, stepTimeout, stepBudget, replyPrefix, botLogin, implementAllow,
-#             ciFixPrompt (a file; the shipped lib/ci-fix-prompt.md by default)
+#             <step>Prompt for implement, reviewFix, review, describe, address,
+#             resolve, ciFix (a file; else .sheepdog/<step>.md in the base
+#             commit, kebab-cased, else the shipped lib/prompts/<step>.md)
 #   harness   model, effort, provider (pi), args
 #
 # State (git config): branch.<b>.sheepdog, .sd-task, .sd-parent, .sd-session,
@@ -481,7 +483,7 @@ address() {
   [[ $timeout =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $timeout"
   verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "sd config failed"
   [[ $verify != *$'\n'* ]] || die "verify must be a single command, not a list"
-  guidance=$(cd "$wt" && step_guidance addressPrompt "$b" "$(guidance_base "$b")" "$LIB/prompts/address.md") \
+  guidance=$(cd "$wt" && step_guidance addressPrompt "$b" "$(guidance_base "$b")" "$SD_LIB/prompts/address.md") \
     || die "can't read the address guidance"
   echo "sd act: $h ($mode session $sid) is addressing $(prc_val "$findings" 'len(this)') item(s) on $b…" >&2
   result=$(cd "$wt" && HARNESS_STEP=address HARNESS_BRANCH=$b harness_run "$h" "$sid" "$mode" "$timeout" \
@@ -1254,7 +1256,7 @@ ci_fix() {
   s=$(agent_rules "$wt" "$b") || die "sd config failed"
   rules=(); [[ -z $s ]] || mapfile -t rules <<<"$s"
   verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "sd config failed"
-  prompt=$(cd "$wt" && step_guidance ciFixPrompt "$b" "$base" "$SD_LIB/ci-fix-prompt.md") || die "can't read the ci-fix guidance"
+  prompt=$(cd "$wt" && step_guidance ciFixPrompt "$b" "$base" "$SD_LIB/prompts/ci-fix.md") || die "can't read the ci-fix guidance"
   prompt+=$'\n\nTask: '"${task:-(none recorded)}"
   prompt+=$'\n\nFailing checks on '"${sha:0:7}: $failing"
   [[ -z $logs ]] || prompt+=$'\n\n'"$logs"
@@ -1355,7 +1357,7 @@ describe_run() {
   commits=$(git log --format='- %s' "$base..$head")
   diff=$(git diff "$base" "$head")
   local where; where=$(describe_base "$state")
-  guidance=$(cd "$wt" && step_guidance describePrompt "$b" "$base" "$LIB/prompts/describe.md") \
+  guidance=$(cd "$wt" && step_guidance describePrompt "$b" "$base" "$SD_LIB/prompts/describe.md") \
     || die "can't read the describe guidance"
   echo "sd act: $STEP_H ($STEP_MODE session $STEP_SID) is describing $b…" >&2
   result=$(cd "$wt" && HARNESS_CLAUDE_ALLOW=$HARNESS_READONLY_ALLOW && HARNESS_PI_TOOLS=read \
@@ -1758,7 +1760,7 @@ resolve_conflicts() {
   task=$(git config --get "branch.$b.sd-task" || true)
   replayed=$(git log --reverse --no-merges --topo-order --format='%h %s' "$old_base..$old_head")
   step_session "$b" implement
-  if ! guidance=$(cd "$wt" && step_guidance resolvePrompt "$b" "$old_base" "$LIB/prompts/resolve.md"); then
+  if ! guidance=$(cd "$wt" && step_guidance resolvePrompt "$b" "$old_base" "$SD_LIB/prompts/resolve.md"); then
     restack_rollback "$wt" "$b" "$old_head"
     die "can't read the resolve guidance; rolled back to ${old_head:0:7}"
   fi

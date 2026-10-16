@@ -369,7 +369,7 @@ recorded() { git config --get branch.feat.sd-ci-fix; }
 @test "the shipped prompt is used by default" {
   run "$SD_ACT" ci-fix
   [ "$status" -eq 0 ]
-  [[ "$(prompt)" == *"$(head -1 "$BATS_TEST_DIRNAME/../lib/ci-fix-prompt.md")"* ]]
+  [[ "$(prompt)" == *"$(head -1 "$BATS_TEST_DIRNAME/../lib/prompts/ci-fix.md")"* ]]
 }
 
 @test "settings.ciFixPrompt names a file in the repo, read from the base commit" {
@@ -382,7 +382,7 @@ recorded() { git config --get branch.feat.sd-ci-fix; }
   run "$SD_ACT" ci-fix
   [ "$status" -eq 0 ]
   [[ "$(prompt)" == *"OUR CI RULES: run rwx run first"* ]]
-  [[ "$(prompt)" != *"$(head -1 "$BATS_TEST_DIRNAME/../lib/ci-fix-prompt.md")"* ]]
+  [[ "$(prompt)" != *"$(head -1 "$BATS_TEST_DIRNAME/../lib/prompts/ci-fix.md")"* ]]
 }
 
 @test "settings.ciFixPrompt: an absolute path is read from disk; a missing file is an error" {
