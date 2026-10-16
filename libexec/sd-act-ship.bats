@@ -248,6 +248,31 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   grep -q 'Base: A has merged into main, so this PR targets main' "$FX/claude.prompt"
 }
 
+@test "ship: a description written while stacked is written again once the parent merged, HEAD unchanged (#105)" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
+  a_head=$(git rev-parse A)
+  git switch -q feat && git rebase -q A && git config branch.feat.sd-parent A
+  "$SD_ACT" describe >/dev/null
+  grep -q 'Base: this PR is stacked on A' "$FX/claude.prompt"
+  (cd "$TMP/other" && git fetch -q origin && git checkout -q main && git merge -q --ff-only origin/A \
+     && git push -q origin main 2>/dev/null && git push -q origin :A 2>/dev/null)
+  jq -n --arg h "$a_head" '{data: {viewer: {login: "me"}, repository: {defaultBranchRef: {name: "main"},
+    pullRequests: {nodes: [{number: 1, state: "MERGED", baseRefName: "main", headRefName: "A", headRefOid: $h, isCrossRepository: false}]}}}}' > "$GH/A.json"
+  echo '{"title": "Add c on main", "body": "A has landed."}' > "$FX/result.json"
+  run "$SD_ACT" ship
+  [ "$status" -eq 0 ]
+  grep -q 'Base: A has merged into main' "$FX/claude.prompt"
+  [[ "$(calls)" == "pr create --draft --base main --head feat --title Add c on main "* ]]
+}
+
+@test "describe: a parent only here says to ship it first, not an empty reason (#105)" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A
+  git switch -q feat && git rebase -q A && git config branch.feat.sd-parent A
+  run "$SD_ACT" describe
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"A isn't on origin yet: ship it first (sd act ship A)"* ]]
+}
+
 @test "ship: a parent whose PR can't be looked up is refused, never shipped onto" {
   git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
   git switch -q feat && git config branch.feat.sd-parent A

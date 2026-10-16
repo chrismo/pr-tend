@@ -705,6 +705,15 @@ squash_parent_away() {
   [ "$(field '.next[0].key')" = errors ]
 }
 
+@test "parent: a parent only here whose PR lookup fails keeps the error, not ship-parent (#105)" {
+  git switch -qc parent && commit p.txt p
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  GH_FAKE_FAIL_FOR=parent state
+  [[ "$(field '.errors | join(" ")')" == *"no origin/parent ref"* ]]
+  [ "$(field '[.next[].key] | index("ship-parent")')" = null ]
+}
+
 @test "parent: a parent that exists nowhere is still an error" {
   git switch -qc feat && commit c.txt c
   git config branch.feat.sd-parent nosuch
