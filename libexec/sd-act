@@ -15,6 +15,7 @@
 #   sd act retarget [<branch>]
 #   sd act push     [--force] [<branch>]
 #   sd act verify   [<branch>]
+#   sd act autofix  [<branch>]
 #   sd act review   [<branch>]
 #   sd act describe [<branch>]
 #   sd act ship     [--force] [<branch>]
@@ -83,6 +84,12 @@
 #             one line. Fail: nonzero, the output trimmed to its last 40 lines
 #             for the fix step. A command that changes the tree fails too.
 #             Gates local review and everything after it
+#   autofix   run settings.autofix (formatters, lint --fix) in the branch's
+#             worktree, zero tokens, and commit what it changed ("autofix:
+#             <command>"). Nothing to commit: says so. A failing command is
+#             nonzero with its output's tail, its changes left uncommitted.
+#             implement and address run it when verify fails, then verify
+#             again (A11); the loop will run it before ci-fix (#49)
 #   review    verify, then the local reviewer (settings.localReview, default
 #             libexec/sd-review-local) over the branch's own change, base..HEAD.
 #             Clean: pin local at HEAD. Findings: printed as JSON, nothing
@@ -137,7 +144,7 @@
 #                   start, implement)
 #
 # Config (sd config show):
-#   settings  remote, verify, stepTimeout, stepBudget, replyPrefix, botLogin, implementAllow
+#   settings  remote, verify, autofix, stepTimeout, stepBudget, replyPrefix, botLogin, implementAllow
 #   harness   model, effort, provider (pi), args
 #
 # State (git config): branch.<b>.sheepdog, .sd-task, .sd-parent, .sd-session,
@@ -436,7 +443,7 @@ address() {
       | values case when is(m, <string>) and grep("\\S", m) then m else "Address review feedback" end' "$result")
     git -C "$wt" add -A && git -C "$wt" commit -q -m "$msg" || die "commit failed; the edits are left in $wt"
   fi
-  verify_run "$wt" "$b" || die "verify failed ($verify); the commit is kept in $wt, nothing pushed or posted"
+  verify_autofix "$wt" "$b" || die "verify failed ($verify); the commit is kept in $wt, nothing pushed or posted"
 
   report "$plan" "$(prc_val "$result" 'coalesce(summary, "")')"
   if $no_publish; then
@@ -528,6 +535,58 @@ verify() {
   elif [[ -z $VERIFY_CMD ]]; then echo "no settings.verify configured; nothing to run"
   else echo "verify passed ($VERIFY_CMD)"
   fi
+}
+
+# ── autofix: A11 ─────────────────────────────────────────────────────────────
+
+# autofix_run <worktree> <branch>: settings.autofix in the worktree under
+# settings.stepTimeout, from a clean tree, and a commit of what it changed:
+# AUTOFIX_COMMIT is its short sha, else empty. A failing command leaves its
+# changes uncommitted and prints its output's tail, as verify_run does.
+autofix_run() {
+  local wt=$1 b=$2 timeout out rc=0 n changed
+  AUTOFIX_COMMIT=""
+  AUTOFIX_CMD=$(cd "$wt" && prc_get settings.autofix "$b" false) || die "sd config failed"
+  [[ $AUTOFIX_CMD != *$'\n'* ]] || die "autofix must be a single command, not a list"
+  [[ -n $AUTOFIX_CMD ]] || return 0
+  [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes; autofix needs a clean tree to commit from"
+  timeout=$(prc_get settings.stepTimeout "$b" false) || die "sd config failed"
+  [[ $timeout =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $timeout"
+  out=$(mktemp)
+  (cd "$wt" && with_timeout "$timeout" sh -c "$AUTOFIX_CMD" </dev/null >"$out" 2>&1) || rc=$?
+  changed=$(git -C "$wt" status --porcelain | wc -l | tr -d " ")
+  if (( rc != 0 )); then
+    n=$(wc -l < "$out" | tr -d " ")
+    (( n <= VERIFY_TAIL )) || echo "… (last $VERIFY_TAIL of $n lines)"
+    tail -n "$VERIFY_TAIL" "$out"
+    (( changed == 0 )) || echo "autofix changed $(plural "$changed" file) in $wt before failing; left uncommitted"
+  elif (( changed > 0 )); then
+    git -C "$wt" add -A && git -C "$wt" commit -q -m "autofix: $AUTOFIX_CMD" || die "commit failed; autofix's changes are left in $wt"
+    AUTOFIX_COMMIT=$(git -C "$wt" rev-parse --short HEAD)
+    echo "autofix committed $AUTOFIX_COMMIT: $(plural "$changed" file) ($AUTOFIX_CMD)"
+  else
+    echo "autofix changed nothing ($AUTOFIX_CMD)"
+  fi
+  rm -f "$out"
+  return $rc
+}
+
+# verify_autofix <worktree> <branch>: verify; when it fails, autofix, and when
+# that committed something, verify again. The zero-token pass before a fix step.
+verify_autofix() {
+  verify_run "$1" "$2" && return 0
+  autofix_run "$1" "$2" || return 1
+  [[ -n $AUTOFIX_COMMIT ]] || return 1
+  verify_run "$1" "$2" || return 1
+  echo "verify passed after autofix ($VERIFY_CMD)"
+}
+
+autofix() {
+  local b=$branch wt
+  wt=$(worktree_for "$b")
+  [[ -n $wt ]] || die "$b is not checked out in any worktree"
+  autofix_run "$wt" "$b" || die "autofix failed ($AUTOFIX_CMD)"
+  [[ -n $AUTOFIX_CMD ]] || echo "no settings.autofix configured; nothing to run"
 }
 
 # ── review ───────────────────────────────────────────────────────────────────
@@ -882,7 +941,7 @@ implement_run() {
   fi
   echo "$b: $summary"
   git -C "$wt" log --format='  %h %s' "$before..refs/heads/$b"
-  verify_run "$wt" "$b" || die "verify failed ($VERIFY_CMD); the commit is kept in $wt"
+  verify_autofix "$wt" "$b" || die "verify failed ($VERIFY_CMD); the commit is kept in $wt"
   echo "next: sd act review"
 }
 
@@ -1445,6 +1504,7 @@ case $verb in
   retarget) retarget ;;
   push) push ;;
   verify) verify ;;
+  autofix) autofix ;;
   review) review ;;
   describe) describe ;;
   ship) ship ;;

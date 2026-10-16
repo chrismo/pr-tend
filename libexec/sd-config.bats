@@ -1043,6 +1043,14 @@ old_super() {
   [ "$("$SD_CONFIG" get settings.botCommand)" = /review-bot ]
 }
 
+@test "settings.autofix: a typed string setting, empty by default" {
+  run "$SD_CONFIG" get settings.autofix
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  write_global '{"settings":{"autofix":"make fmt"}}'
+  [ "$("$SD_CONFIG" get settings.autofix)" = "make fmt" ]
+}
+
 @test "settings.localReview: a typed string setting, empty by default" {
   run "$SD_CONFIG" get settings.localReview
   [ "$status" -eq 0 ]
