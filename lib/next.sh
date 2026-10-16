@@ -51,7 +51,7 @@ values {...s, remote}
       fixing:=(on(review.findings.at_head) and not (covers(review.local) or covers(review.bot) or covers(review.accepted))),
       bot_due:=(coalesce(bot.command, null) is not null and covers(review.local)
                 and not covers(review.bot) and not covers(review.accepted)),
-      bot_waiting:=(covers(review.bot) and on(review.bot.replied == false))
+      bot_waiting:=(covers(review.bot) and on(review.bot.replied == false) and not covers(review.accepted))
 | unnest [
     on(pr.state == "MERGED") ? step("merged", "run", "merged: drop the branch'"'"'s pins and enrollment, then remove this worktree", "sd act forget") : null,
     on(pr.state == "CLOSED") ? step("closed", "you", "PR closed without merging", null) : null,

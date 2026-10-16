@@ -452,9 +452,11 @@ fn cnt(a, t): len(coalesce([unnest {t, x: a} | where x.type == t], []))
 fn matches(b, res): len(coalesce([unnest {b, re: res} | where len(regexp(re, b)) > 0], [])) > 0
 -- The bot pin, plus whether the bot has said anything since trigger posted
 -- its comment (br: the ids of its reviews and comments created after that,
--- by GitHub's clock on both sides) and how long that has been, up to s.now
--- (passed in: now() would make the output differ between runs). null when
--- there is no pin or no trigger time (a pin from before #63, or by hand).
+-- by GitHub's clock on both sides, minus botIgnoreBody placeholders; a blank
+-- body counts, as a review of only inline comments has one) and how long
+-- that has been, up to s.now (passed in: now() would make the output differ
+-- between runs). null when there is no pin or no trigger time (a pin from
+-- before #63, or by hand).
 fn bot_pin(s, br): nul(s.r_bot) ? null : {...s.r_bot,
     triggered: s.bot_triggered,
     replied: on(s.r_bot.status == "none") or s.bot_triggered is null ? null : len(br) > 0,
@@ -468,7 +470,7 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
       unnest {g: {...g, t: coalesce(a.bot_triggered, "~")},
               x: [...coalesce(a.pr.reviews.nodes, []), ...coalesce(a.pr.comments.nodes, [])]}
       | where is_bot(coalesce(x.author, {}), g.bots) and not ignored(coalesce(x.author, {}), g.ign)
-            and coalesce(x.createdAt, "") > g.t
+            and coalesce(x.createdAt, "") > g.t and not matches(coalesce(x.body, ""), g.ignore_body)
       | values x.id
     ], []),
     ctx: coalesce([

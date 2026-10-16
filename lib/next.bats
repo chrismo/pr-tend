@@ -428,6 +428,11 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(step bot-silent cmd "${st[@]}")" = "sd act trigger --force" ]
 }
 
+@test "bot silent, but HEAD accepted: no wait on the bot; ready" {
+  [ "$(keys '.bot = {command: "/review-bot", timeout: 3600}' '.review.bot = {sha: "h1", status: "covered", triggered: "t", replied: false, waited: 4000}' \
+            '.review.accepted = {sha: "h1", status: "covered"}')" = ready ]
+}
+
 @test "a bot pin without a trigger time counts as reviewed, as before" {
   [ "$(keys '.bot = {command: "/review-bot", timeout: 3600}' '.review.bot = {sha: "h1", status: "covered", triggered: null, replied: null, waited: null}')" = ready ]
 }

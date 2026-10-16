@@ -1186,6 +1186,18 @@ trigger_pin() { # bot pinned at HEAD, triggered at <time>
   [ "$(field .review.bot.replied)" = false ]
 }
 
+@test "review.bot: a placeholder matching botIgnoreBody isn't the reply; an inline-only review (blank body) is" {
+  git switch -qc feat && commit a.txt a
+  trigger_pin 2026-10-15T12:00:00Z
+  echo '{"settings": {"botIgnoreBody": ["is on the job\\."]}}' > "$SHEEPDOG_CONFIG"
+  pr_fixture feat ".comments.nodes = [$(note C1 Bot marge 'Marge is on the job.' 2026-10-15T12:00:05Z)]"
+  state
+  [ "$(field .review.bot.replied)" = false ]
+  pr_fixture feat ".reviews.nodes = [$(note R1 Bot marge '' 2026-10-15T12:05:00Z)]"
+  state
+  [ "$(field .review.bot.replied)" = true ]
+}
+
 @test "review.bot: no trigger time (a pin from before, or by hand), or no pin: replied null" {
   git switch -qc feat && commit a.txt a
   pr_fixture feat

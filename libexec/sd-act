@@ -1487,9 +1487,10 @@ EOF
 # The comment goes over REST, which answers with its created_at: the trigger
 # time by GitHub's clock, which sd state compares with the bot's replies
 # (also GitHub's clock), so a skewed laptop can't make a reply look older
-# than the trigger (#63).
+# than the trigger (#63). The repo comes from the PR's URL, not
+# {owner}/{repo}: gh's default repo may be a fork.
 trigger() {
-  local b=$branch state command gate line head base number at
+  local b=$branch state command gate line head base number url at
   command=$(prc_get settings.botCommand "$b" false) || die "sd config failed"
   [[ -n $command ]] || die "no settings.botCommand configured: the comment that makes the review bot run"
   state=$(sd-state --json "$b") || die "sd state failed"
@@ -1503,7 +1504,10 @@ trigger() {
   base=$(prc_val "$state" 'coalesce(sync.old_base, "")')
   [[ -n $base ]] || die "can't find $b's base: $(no_base_why "$b" "$state")"
   number=$(prc_val "$state" pr.number)
-  at=$(gh api "repos/{owner}/{repo}/issues/$number/comments" -f body="$command" --jq '.created_at // ""') \
+  url=$(prc_val "$state" pr.url)
+  [[ $url =~ ^https://([^/]+)/([^/]+/[^/]+)/pull/[0-9]+$ ]] || die "can't tell PR #$number's repo from its URL: $url"
+  at=$(gh api "repos/${BASH_REMATCH[2]}/issues/$number/comments" --hostname "${BASH_REMATCH[1]}" \
+         -f body="$command" --jq '.created_at // ""') \
     || die "posting the trigger comment failed; nothing pinned"
   if [[ ! $at =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]]; then
     at=$(date -u +%FT%TZ)
