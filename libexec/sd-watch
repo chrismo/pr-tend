@@ -108,7 +108,7 @@ check() {
   # A refresh can overlap a pass: unlocked, so both may notify a new reason
   # and the slower may write the older state. Only the temp file is per-process.
   prc_json 'values {...c, state: s}' "{\"c\": $cls, \"s\": $json}" > "$state_file.$$.tmp" \
-    && mv "$state_file.$$.tmp" "$state_file"
+    && mv "$state_file.$$.tmp" "$state_file" || rm -f "$state_file.$$.tmp"
 
   write_glyph "$wt" "$b" "$glyph"
   printf '%s\t%s\t%s\t%s\n' "$name" "$b" "$glyph" \
