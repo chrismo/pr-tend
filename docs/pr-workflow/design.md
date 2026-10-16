@@ -672,13 +672,6 @@ not built; a pass only observes and reports:
 - Notifications (N2, macOS by default, `settings.notify` overrides) only for a
   step that wasn't there last pass (N3), keyed by step and worded by its `say`:
   the ❌ steps, merged, ready to merge.
-- `sd watch refresh [<branch>]` (2026-10-15, #48) runs a pass's check on one
-  branch now, the current one by default: fetch, glyph, notify, cached state,
-  shared with the pass so neither re-notifies the other when they don't
-  overlap. There's no lock: overlapping, both can notify a new reason, and the
-  slower can leave older state that makes the next pass notify one again. It
-  isn't a pass, so `status` still shows the last one and other branches'
-  glyphs stay.
 - `sd watch status` prints the last pass. `sd watch install` / `uninstall`
   manage the launchd job, opt-in per machine; interval `settings.interval`,
   default 300 s.

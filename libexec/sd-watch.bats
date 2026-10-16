@@ -348,7 +348,7 @@ EOF
   export ASDF_DATA_DIR="$TMP/no-asdf"
   ps_fixture feat
   run --separate-stderr pass
-  [[ "$stderr" == *"couldn't save"*"feat.json"* ]]
+  [[ "$stderr" == *"couldn't save"*"feat.json"* ]] || false
   [ -d "$SHEEPDOG_STATE_DIR/branches" ]
   [ -z "$(find "$SHEEPDOG_STATE_DIR/branches" -name '*.tmp')" ]
   [ -z "$(find "$SHEEPDOG_STATE_DIR/branches" -name 'feat.json')" ]
