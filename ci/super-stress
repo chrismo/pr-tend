@@ -72,6 +72,7 @@ builtin_list() {
   add sd-act:PLAN_Q "$(heredoc "$act" PLAN_Q)" "$FIX/plan.json"
   add sd-act:REPORT "$(heredoc "$act" REPORT)" "$FIX/report.json" line
   add sd-act:REPLIES "$(heredoc "$act" REPLIES)" "$FIX/report.json" line
+  add sd-act:SCRUB_Q "$(heredoc "$act" SCRUB_Q)" "$FIX/scrub.json"
   printf '%s\n' "$PRN_QUERY" > "$WORK/next.PRN_QUERY.spq"
   add next:PRN_QUERY "$WORK/next.PRN_QUERY.spq" "$FIX/next.json"
 }
