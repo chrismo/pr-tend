@@ -1160,7 +1160,7 @@ trigger_pin() { # bot pinned at HEAD, triggered at <time>
   [ "$(field .review.bot.status)" = covered ]
   [ "$(field .review.bot.replied)" = false ]
   [ "$(field .review.bot.triggered)" = 2026-10-15T12:00:00Z ]
-  [ "$(field .review.bot.waited)" -ge 0 ]
+  [ "$(field .review.bot.waited)" -ge 3600 ]   # seconds since a past trigger, not 0 or nanoseconds
 }
 
 @test "review.bot: a bot review or comment after the trigger means replied; a human's doesn't" {
