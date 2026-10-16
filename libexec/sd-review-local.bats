@@ -129,3 +129,36 @@ EOF
   sid=$(grep -A1 -x -- --session-id "$FX/claude.args" | tail -1)
   [[ "$stderr" == *"claude (new session $sid) is reviewing main (${BASE:0:7}..${HEAD_SHA:0:7})"* ]]
 }
+
+@test "settings.reviewPrompt empty: the shipped guidance and the reporting rules" {
+  "$REVIEW" >/dev/null
+  grep -q 'Find what a careful reviewer would flag' "$FX/claude.prompt"
+  grep -q 'No findings is a valid' "$FX/claude.prompt"
+}
+
+@test "settings.reviewPrompt: a custom file replaces the guidance, the reporting rules stay" {
+  printf 'Look only for off-by-one errors.\n' > "$TMP/guide.md"
+  "$SD_CONFIG" set --global settings.reviewPrompt "$TMP/guide.md"
+  "$REVIEW" >/dev/null
+  grep -q 'Look only for off-by-one errors.' "$FX/claude.prompt"
+  ! grep -q 'Find what a careful reviewer would flag' "$FX/claude.prompt"
+  grep -q 'No findings is a valid' "$FX/claude.prompt"
+  grep -q '^+three added' "$FX/claude.prompt"
+}
+
+@test "settings.reviewPrompt: a relative path resolves against the worktree, not the cwd" {
+  mkdir -p .sheepdog sub
+  printf 'Repo guidance.\n' > .sheepdog/review-prompt.md
+  "$SD_CONFIG" set --global settings.reviewPrompt .sheepdog/review-prompt.md
+  (cd sub && "$REVIEW" >/dev/null)
+  grep -q 'Repo guidance.' "$FX/claude.prompt"
+}
+
+@test "settings.reviewPrompt: a missing file fails, nothing on stdout, no review run" {
+  "$SD_CONFIG" set --global settings.reviewPrompt nope.md
+  run --separate-stderr "$REVIEW"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *nope.md* ]]
+  [ ! -e "$FX/claude.args" ]
+}

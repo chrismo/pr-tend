@@ -1003,6 +1003,18 @@ old_super() {
   [ "$("$SD_CONFIG" get settings.localReview)" = ./review ]
 }
 
+@test "settings.reviewPrompt: a typed string setting, empty by default" {
+  run "$SD_CONFIG" get settings.reviewPrompt
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  write_global '{"settings":{"reviewPrompt":"/opt/prompt.md"}}'
+  run "$SD_CONFIG" get settings.reviewPrompt
+  [ "$status" -eq 0 ]
+  [ "$output" = /opt/prompt.md ]
+  write_branch feat '{"settings":{"reviewPrompt":".sheepdog/review-prompt.md"}}'
+  [ "$("$SD_CONFIG" get settings.reviewPrompt)" = .sheepdog/review-prompt.md ]
+}
+
 @test "settings.implementAllow: a typed list setting, empty by default" {
   run "$SD_CONFIG" get settings.implementAllow
   [ "$status" -eq 0 ]
