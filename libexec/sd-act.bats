@@ -91,6 +91,30 @@ SH
   [ -z "$(git config branch.kid.sd-parent || true)" ]
 }
 
+@test "enroll: a PR on the default branch, or gh failing, records no git-inferred parent" {
+  git switch -q main && no_prs
+  git switch -qc par && git commit -q --allow-empty -m p1
+  git switch -qc kid && git commit -q --allow-empty -m k1
+  cat > "$TMP/fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+echo "gh: API rate limit exceeded" >&2; exit 1
+SH
+  run "$SD_ACT" enroll kid
+  [ "$status" -eq 0 ]
+  [ -z "$(git config branch.kid.sd-parent || true)" ]
+  cat > "$TMP/fakebin/gh" <<SH
+#!/usr/bin/env bash
+cat <<'JSON'
+{"data":{"viewer":{"login":"me"},"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"nodes":[
+ {"number":3,"url":"u","state":"OPEN","isDraft":false,"baseRefName":"main","headRefName":"kid","headRefOid":"$(git rev-parse kid)",
+  "mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"mergedAt":null}]}}}}
+JSON
+SH
+  run "$SD_ACT" enroll kid
+  [ "$status" -eq 0 ]
+  [ -z "$(git config branch.kid.sd-parent || true)" ]
+}
+
 @test "enroll: a branch made from main alone records no parent" {
   git switch -q main && no_prs
   git switch -qc solo && git commit -q --allow-empty -m s1

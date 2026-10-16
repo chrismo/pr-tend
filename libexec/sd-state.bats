@@ -208,6 +208,22 @@ field() { jq -r "$@" <<<"$output"; }
   [[ "$(field '.errors | join(" ")')" == *"stacked on par or twin without sheepdog knowing"* ]]
 }
 
+@test "an unrecorded stack isn't flagged when gh failed, since a PR may name the parent" {
+  git switch -qc par && commit a.txt a
+  git switch -qc kid && commit b.txt b
+  GH_FAKE_FAIL="gh: down" state kid
+  [[ "$(field '.errors | join(" ")')" != *"without sheepdog knowing"* ]]
+}
+
+@test "an unrecorded stack's tie lists each name once, pushed or not" {
+  git switch -qc par && commit a.txt a
+  git branch twin
+  git push -q origin par twin 2>/dev/null
+  git switch -qc kid && commit b.txt b
+  state kid
+  [[ "$(field '.errors | join(" ")')" == *"stacked on par or twin without sheepdog knowing: record one with git config branch.kid.sd-parent <name>"* ]]
+}
+
 @test "a recorded parent, or a PR, means no unrecorded-stack flag" {
   git switch -qc par && commit a.txt a
   git switch -qc kid && commit b.txt b

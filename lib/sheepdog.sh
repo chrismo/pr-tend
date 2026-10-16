@@ -232,9 +232,9 @@ harness_run() {
 # its parent.
 stacked_on() {
   local b=$1 remote=$2 def="refs/remotes/$2/$3" oldest total ref name own shared
-  local best="" best_ref="" best_n=0 tie=""
-  local -A local_branch=()
-  oldest=$(git rev-list --reverse "$def..refs/heads/$b" 2>/dev/null) || return 1
+  local best="" best_ref="" best_n=0
+  local -A local_branch=() tie=()
+  oldest=$(git rev-list --topo-order --reverse "$def..refs/heads/$b" 2>/dev/null) || return 1
   oldest=${oldest%%$'\n'*}
   [[ -n $oldest ]] || return 1
   total=$(git rev-list --count "$def..refs/heads/$b")
@@ -246,12 +246,12 @@ stacked_on() {
     (( own > 0 )) || continue
     shared=$(( total - own ))
     if (( shared > best_n )); then
-      best=$name best_ref=$ref best_n=$shared tie=""
+      best=$name best_ref=$ref best_n=$shared tie=()
     elif (( shared == best_n )) && [[ $name != "$best" ]]; then
-      tie+=" $name"
+      tie[$name]=1
     fi
   done < <(git for-each-ref --contains "$oldest" --format='%(refname)' refs/heads "refs/remotes/$remote")
   [[ -n $best ]] || return 1
-  if [[ -n $tie ]]; then echo "$best$tie"; return 2; fi
+  if (( ${#tie[@]} )); then printf '%s\n' "$best" "${!tie[@]}" | sort | paste -sd' ' -; return 2; fi
   echo "$best $(git merge-base "refs/heads/$b" "$best_ref")"
 }
