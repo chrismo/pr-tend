@@ -65,7 +65,7 @@ ps_fixture() {
     push: {remote_sha: "abc", ahead: 0, behind: 0, diverged: false, remote_ours: true},
     fresh: true, stale: [],
     ci: {verdict: "green", failing: [], pending: [], for_head: true},
-    review: {local: {status: "none"}, bot: {status: "none"}, accepted: {status: "none"}},
+    review: {local: {status: "covered"}, bot: {status: "none"}, accepted: {status: "none"}},
     threads: {owed_bot: 0, owed_human: 0, outdated: 0, blocking: 0, info: 0, items: []},
     session: {enrolled: true, locked: false}, errors: []}')
   local a

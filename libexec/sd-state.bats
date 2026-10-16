@@ -879,6 +879,7 @@ review() {
 
 @test "--long: one line per item with its mark, type, author, excerpt and url" {
   git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
+  git update-ref refs/sheepdog/feat/local HEAD
   pr_fixture feat ".reviewThreads.nodes = [$(thread Bot copilot Bot copilot)]" \
     '.reviewThreads.nodes[0].first.nodes[0] += {url: "https://example/pr/7#t1", body: "Rename it"}' \
     ".reviews.nodes = [$(review R1 Bot claude COMMENTED 'Looks fine')]"
@@ -893,6 +894,7 @@ review() {
 
 @test "--long: nothing owed is the one-liner and the next steps" {
   git switch -qc feat && commit a.txt a
+  git update-ref refs/sheepdog/feat/local HEAD
   pr_fixture feat
   run "$SD_STATE" --long
   [ "$status" -eq 0 ]
@@ -949,6 +951,7 @@ review() {
   git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
   pr_fixture feat ".reviewThreads.nodes = [$(thread Bot copilot Bot copilot)]"
   commit b.txt b
+  git update-ref refs/sheepdog/feat/local HEAD
   state
   [ "$(field '[.next[].key] | join(" ")')" = "bot push" ]  # no ci-wait: CI can't run before the push
   [ "$(field '.next[1].cmd')" = "sd act push" ]
@@ -956,6 +959,7 @@ review() {
 
 @test "next: a pushed branch with an open PR and nothing owed is ready to merge" {
   git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
+  git update-ref refs/sheepdog/feat/local HEAD
   pr_fixture feat
   run "$SD_STATE"
   [ "$status" -eq 0 ]

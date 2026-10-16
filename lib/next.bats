@@ -299,6 +299,56 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(keys '.review.bot = {sha: "x", status: "uncovered", uncovered: 2}')" = ready ]
 }
 
+# ── reviews before the parent ───────────────────────────────────────────────
+
+UNREVIEWED='.review.local = {sha: null, status: "none"}'
+ON_OPEN_PARENT=('.pr.base = "p"' '.sync.target = "p"'
+                '.parent = {"name": "p", "source": "pr", "merged": false, "pr": {"number": 25, "state": "OPEN", "head_sha": "x"}}')
+
+@test "never reviewed: an open PR gets the review step, drafts too" {
+  [ "$(keys "$UNREVIEWED")" = review ]
+  [ "$(step review cmd "$UNREVIEWED")" = "sd act review" ]
+  [ "$(keys "$UNREVIEWED" '.pr.draft = true' '.pr.merge_state = "DRAFT"')" = review ]
+}
+
+@test "never reviewed with no PR yet: ship first, no review step" {
+  [ "$(keys "$UNREVIEWED" '.pr = null')" = open-pr ]
+}
+
+@test "never reviewed, but accepted or bot coverage counts" {
+  [ "$(keys "$UNREVIEWED" '.review.accepted = {sha: "h1", status: "covered"}')" = ready ]
+  [ "$(keys "$UNREVIEWED" '.review.bot = {sha: "h1", status: "covered"}')" = ready ]
+}
+
+@test "unreviewed stacked PR: review before waiting on the parent" {
+  [ "$(keys "$UNREVIEWED" "${ON_OPEN_PARENT[@]}")" = "review parent-wait" ]
+  # no bot trigger until the local review covers HEAD
+  [ "$(keys "$UNREVIEWED" "${ON_OPEN_PARENT[@]}" '.bot = {command: "/review-bot"}')" = "review parent-wait" ]
+}
+
+@test "stacked, locally reviewed, bot configured but not run: trigger it before waiting on the parent" {
+  [ "$(keys "${ON_OPEN_PARENT[@]}" '.bot = {command: "/review-bot"}')" = "bot-trigger parent-wait" ]
+  # no bot configured: none required
+  [ "$(keys "${ON_OPEN_PARENT[@]}")" = parent-wait ]
+}
+
+@test "stacked with outstanding feedback: address it before waiting on the parent" {
+  [ "$(keys "${ON_OPEN_PARENT[@]}" '.threads.owed_bot = 1')" = "bot parent-wait" ]
+  [ "$(keys "${ON_OPEN_PARENT[@]}" '.threads.owed_bot = 1' '.threads.info = 1')" = "read parent-wait" ]
+  [ "$(keys "${ON_OPEN_PARENT[@]}" '.threads.owed_human = 1')" = "human parent-wait" ]
+}
+
+@test "stacked with a required human review: wait on the review before the parent" {
+  [ "$(keys "${ON_OPEN_PARENT[@]}" '.pr.merge_state = "BLOCKED"' '.pr.review_decision = "REVIEW_REQUIRED"')" \
+    = "review-wait parent-wait" ]
+}
+
+@test "stacked and fully reviewed: the open parent is all that's left" {
+  [ "$(keys "${ON_OPEN_PARENT[@]}" '.bot = {command: "/review-bot"}' '.review.bot = {sha: "h1", status: "covered"}')" \
+    = parent-wait ]
+  [ "$(keys "$UNREVIEWED" "${ON_OPEN_PARENT[@]}" '.review.accepted = {sha: "h1", status: "covered"}')" = parent-wait ]
+}
+
 @test "inconclusive CI: rerun it" {
   [ "$(step ci-rerun who '.ci.verdict = "inconclusive"')" = run ]
 }

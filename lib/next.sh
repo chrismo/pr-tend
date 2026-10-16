@@ -35,7 +35,7 @@ values {...s, remote}
       parent_closed:=(on(pr.base != sync.default) and on(parent.pr.state == "CLOSED")),
       restack:=(sync.old_base is null ? f"git rebase {remote}/{sync.target}"
                 : f"git rebase --onto {remote}/{sync.target} {sync.old_base[0:12]}"),
-      need_review:=((trails(review.local) or trails(review.bot) or trails(review.accepted))
+      need_review:=((on(pr.state == "OPEN") or trails(review.local) or trails(review.bot) or trails(review.accepted))
                     and not (covers(review.local) or covers(review.bot) or covers(review.accepted))),
       bot_due:=(coalesce(bot.command, null) is not null and covers(review.local)
                 and not covers(review.bot) and not covers(review.accepted))
@@ -84,11 +84,11 @@ values {...s, remote}
       ? step("parent-closed", "you", f"{parent.name} (#{parent.pr.number}) was closed without merging: decide what this PR targets", null) : null,
     has_pr and stacked and on(parent.merged)
       ? step("retarget", "run", f"{pr.base} already merged: point this PR at {sync.default}", "sd act retarget") : null,
-    has_pr and stacked and not on(parent.merged)
-      ? step("parent-wait", "wait", f"waiting on {parent.name} (#{parent.pr.number}) to merge first", null) : null,
     has_pr and review_required
       ? step("review-wait", "wait", len(coalesce(pr.review_requests, [])) > 0
              ? f"waiting on review from {join(pr.review_requests, ", ")}" : "waiting on a required review", null) : null,
+    has_pr and stacked and not on(parent.merged)
+      ? step("parent-wait", "wait", f"waiting on {parent.name} (#{parent.pr.number}) to merge first", null) : null,
     has_pr and not review_required and not stacked and not parent_closed and not gh_behind and not on(pr.draft)
       ? (merge_state in ["CLEAN", "UNSTABLE", "HAS_HOOKS"] ? step("ready", "you", "ready to merge", "gh pr merge")
          : merge_state == "UNKNOWN" ? step("merge-wait", "wait", "GitHub hasn'"'"'t decided whether it can merge yet", null)
