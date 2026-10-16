@@ -982,8 +982,9 @@ implement_run() {
   # sd act review's blocking findings on HEAD, unless the agent already declined
   # them: then this run fixes those, with the task as context.
   rec=$(git cat-file blob "refs/sheepdog/$b/findings" 2>/dev/null || true)
+  # sd state decides whether they're about HEAD, so NEXT and this agree.
   if [[ -n $rec ]] \
-     && findings_at_head "$rec" "$before" "$(git rev-parse -q --verify "refs/sheepdog/$b/base" || true)"; then
+     && [[ $(cd "$wt" && sd-state --json "$b" | prc_line 'values on(review.findings.at_head)') == true ]]; then
     listed=$(prc_line 'where not on(declined) | unnest findings | where coalesce(severity, "") != "nit"
       | values f"- {file}:{line} ({severity}) {body}"' "$rec" 2>/dev/null || true)
   fi

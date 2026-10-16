@@ -18,6 +18,7 @@ bats_require_minimum_version 1.5.0
 # prints $FX/result.json as structured output.
 
 SD_ACT="$BATS_TEST_DIRNAME/sd-act"
+SD_STATE="$BATS_TEST_DIRNAME/sd-state"
 
 setup() {
   TMP="$(cd "$BATS_TEST_TMPDIR" && pwd -P)"
@@ -465,6 +466,20 @@ findings_at() {
   run "$SD_ACT" implement
   [ "$status" -ne 0 ]
   [[ "$output" == *"no task recorded"* ]]
+}
+
+@test "implement: findings on a rebased HEAD count when sd state says they're about it" {
+  started
+  git update-ref -d refs/sheepdog/feat-x/base
+  echo c >> file.txt && git commit -qam "add c"
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" --arg b "$(git rev-parse HEAD~1)" '{head: $h, base: $b, round: 1,
+          findings: [{file: "file.txt", line: 3, severity: "error", body: "c should be C"}]}')
+  git update-ref refs/sheepdog/feat-x/findings "$(git hash-object -w --stdin <<<"$rec")"
+  other_push main "main moves"
+  git fetch -q && git rebase -q origin/main
+  [ "$("$SD_STATE" --json | jq .review.findings.at_head)" = true ]
+  "$SD_ACT" implement >/dev/null
+  grep -q 'c should be C' "$FX/claude.prompt"
 }
 
 @test "implement: findings on an older head stay out of the prompt" {
