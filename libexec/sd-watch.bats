@@ -1106,6 +1106,65 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   [ "$output" = "nothing stale" ]
 }
 
+# ── glyph lookup (#3) ────────────────────────────────────────────────────────
+
+@test "glyph: prints the current worktree's glyph, from a subdirectory too" {
+  ps_fixture feat
+  pass
+  run "$SD_WATCH" glyph
+  [ "$status" -eq 0 ]
+  [ "$output" = "✅" ]
+  mkdir -p sub
+  [ "$(cd sub && "$SD_WATCH" glyph)" = "✅" ]
+}
+
+@test "glyph: takes a path" {
+  git switch -q main
+  git worktree add -q "$TMP/feat-wt" feat
+  ps_fixture feat '.ci.verdict = "red" | .ci.failing = ["lint"]'
+  pass
+  [ "$(cd "$TMP" && "$SD_WATCH" glyph "$TMP/feat-wt")" = "❌" ]
+  [ -z "$("$SD_WATCH" glyph)" ]
+}
+
+@test "glyph: nothing when the worktree has moved to another branch, or no pass saw it" {
+  ps_fixture feat
+  pass
+  git switch -q main
+  run "$SD_WATCH" glyph
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run "$SD_WATCH" glyph "$TMP"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "glyph: before any pass, nothing" {
+  run "$SD_WATCH" glyph
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "glyph: a refresh updates it, keeping other worktrees'" {
+  git branch other && enroll other
+  git worktree add -q "$TMP/other-wt" other
+  ps_fixture feat
+  ps_fixture other
+  pass
+  ps_fixture feat '.ci.verdict = "pending"'
+  "$SD_WATCH" refresh
+  [ "$("$SD_WATCH" glyph)" = "⏳" ]
+  [ "$("$SD_WATCH" glyph "$TMP/other-wt")" = "✅" ]
+}
+
+@test "glyph: gone after a pass once the branch isn't enrolled" {
+  ps_fixture feat
+  pass
+  git config --unset branch.feat.sheepdog
+  pass
+  [ -z "$("$SD_WATCH" glyph)" ]
+}
+
 # ── status ───────────────────────────────────────────────────────────────────
 
 @test "status: prints the last pass" {
