@@ -246,15 +246,27 @@ sha() { git rev-parse "$1"; }
   [ ! -e "$FX/claude.args" ]
 }
 
-@test "start: from a linked worktree, the new one goes beside it and the hook is still found" {
+@test "start: from a linked worktree, the new one goes beside the main worktree, not beside the linked one (#85)" {
   printf '#!/usr/bin/env bash\necho "$WT_SRC" > "%s/src.out"\n' "$TMP" > .git/worktree-setup
   chmod +x .git/worktree-setup
   mkdir "$TMP/wts" && git worktree add -q -b one "$TMP/wts/one" 2>/dev/null
   cd "$TMP/wts/one"
   run --separate-stderr "$SD_ACT" start --no-implement feat-x
   [ "$status" -eq 0 ]
-  [ "$output" = "$TMP/wts/feat-x" ]
+  [ "$output" = "$TMP/feat-x" ]
   [ "$(cat "$TMP/src.out")" = "$TMP/wts/one" ]
+}
+
+@test "start: a slash in the branch name becomes a dash in the directory name, every generation (#85)" {
+  run --separate-stderr "$SD_ACT" start --no-implement 12/stack-parent
+  [ "$status" -eq 0 ]
+  [ "$output" = "$TMP/12-stack-parent" ]
+  [ "$(git -C "$TMP/12-stack-parent" branch --show-current)" = 12/stack-parent ]
+  cd "$TMP/12-stack-parent"
+  run --separate-stderr "$SD_ACT" start --no-implement --parent 12/stack-parent 12/stack-child
+  [ "$status" -eq 0 ]
+  [ "$output" = "$TMP/12-stack-child" ]
+  [ ! -e "$TMP/12" ]
 }
 
 # ── start, then implement ────────────────────────────────────────────────────
