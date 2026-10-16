@@ -180,7 +180,7 @@ if [[ -z $parent ]]; then
     case $rc in
       0) errors+=("stacked on ${stacked%% *} without sheepdog knowing: sd act enroll records it") ;;
       2) errors+=("stacked on ${stacked// / or } without sheepdog knowing: record one with git config branch.$branch.sd-parent <name>") ;;
-      3) errors+=("shares commits with ${stacked%% *}, and each has its own since, so either may be stacked on the other: git config branch.$branch.sd-parent ${stacked%% *} if $branch is, or git config branch.$branch.sd-parent $default_branch if not") ;;
+      3) errors+=("shares commits with ${stacked%% *}, and each has its own since, so git can't tell which, if either, was made from the other: git config branch.$branch.sd-parent ${stacked%% *} if $branch was, or git config branch.$branch.sd-parent $default_branch if not") ;;
     esac
   fi
 fi

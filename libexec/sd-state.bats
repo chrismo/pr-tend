@@ -213,12 +213,21 @@ field() { jq -r "$@" <<<"$output"; }
   git switch -qc kid && commit b.txt b
   git switch -q par && commit c.txt c
   state par
-  [[ "$(field '.errors | join(" ")')" == *"shares commits with kid, and each has its own since, so either may be stacked on the other: git config branch.par.sd-parent kid if par is, or git config branch.par.sd-parent main if not"* ]]
+  [[ "$(field '.errors | join(" ")')" == *"shares commits with kid, and each has its own since, so git can't tell which, if either, was made from the other: git config branch.par.sd-parent kid if par was, or git config branch.par.sd-parent main if not"* ]]
   state kid
   [[ "$(field '.errors | join(" ")')" == *"shares commits with par"* ]]
   git config branch.kid.sd-parent par
   state par
   [[ "$(field '.errors | join(" ")')" != *"shares commits"* ]]
+}
+
+@test "siblings whose parent is gone: flagged without claiming either was made from the other" {
+  git switch -qc par && commit a.txt a
+  git switch -qc kid && commit b.txt b
+  git switch -q par && git switch -qc sib && commit c.txt c
+  git branch -qD par
+  state kid
+  [[ "$(field '.errors | join(" ")')" == *"shares commits with sib, and each has its own since, so git can't tell which, if either, was made from the other"* ]]
 }
 
 @test "an unrecorded stack isn't flagged when gh failed, since a PR may name the parent" {

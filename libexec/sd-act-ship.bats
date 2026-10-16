@@ -190,7 +190,7 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   git switch -q kid
   run "$SD_ACT" ship
   [ "$status" -ne 0 ]
-  [[ "$output" == *"either may be stacked on the other"* ]]
+  [[ "$output" == *"git can't tell which, if either, was made from the other"* ]]
   [ -z "$(git config branch.kid.sd-parent || true)" ]
   [ ! -e "$FX/claude.args" ]
   [ -z "$(remote kid)" ]
