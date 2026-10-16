@@ -89,6 +89,22 @@ EOF
   [[ "$stderr" == *error_max_turns* ]]
 }
 
+@test "harness_run: a success result with nothing usable doesn't print its subtype" {
+  harness_stubs
+  echo '{"type": "result", "subtype": "success", "is_error": false, "result": ""}' > "$FX/out"
+  run --separate-stderr harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [[ "$stderr" != *success* ]]
+}
+
+@test "harness_run: pi replying without a json block shows the end of the reply" {
+  harness_stubs
+  printf 'I need to know which file you mean.\n' > "$FX/out"
+  run --separate-stderr harness_run pi sid1 new 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"which file you mean"* ]]
+}
+
 @test "harness_run: pi's stderr follows the same rule" {
   harness_stubs
   printf 'Done.\n\n```json\n{"ok": true}\n```\n' > "$FX/out"
