@@ -32,6 +32,28 @@ commits_not_ours() {
   sed -n 's/^./^&/p' <<<"$1" | git rev-list --count --stdin "$2"
 }
 
+# step_guidance <setting> <branch> <base> <default-file>: the guidance part of a
+# step's prompt: the file settings.<setting> names, else <default-file>. A
+# relative path is read from the <base> commit, which the branch's agent can't
+# rewrite; an absolute one from disk. A named file that is missing is an error,
+# never the default. The same shape fits any step whose guidance is configurable.
+step_guidance() {
+  local path top
+  path=$(prc_get "settings.$1" "$2" false) || return 1
+  if [[ -z $path ]]; then
+    cat "$4"
+  elif [[ $path == /* ]]; then
+    [[ -f $path ]] || { echo "settings.$1: no such file: $path" >&2; return 1; }
+    cat "$path"
+  else
+    # From the top, so ./ means the worktree's top wherever the step runs.
+    top=$(git rev-parse --show-toplevel) || return 1
+    [[ $(git -C "$top" cat-file -t "$3:$path" 2>/dev/null) == blob ]] \
+      || { echo "settings.$1: no such file in ${3:0:7}: $path" >&2; return 1; }
+    git -C "$top" cat-file blob "$3:$path"
+  fi
+}
+
 # Claude may read and edit; the pipeline commits, pushes and talks to GitHub.
 HARNESS_CLAUDE_ALLOW="Read,Edit,Write,Grep,Glob,Bash(git diff *),Bash(git log *),Bash(git show *),Bash(git status *)"
 HARNESS_CLAUDE_DENY="Bash(git commit *),Bash(git push *),Bash(gh *)"

@@ -92,7 +92,7 @@ EOF
 @test "a fresh session each run, read-only tools, a schema" {
   "$REVIEW" >/dev/null
   grep -qx -- --session-id "$FX/claude.args"
-  ! grep -qx -- --resume "$FX/claude.args"
+  ! grep -qx -- --resume "$FX/claude.args" || false
   grep -qx -- --json-schema "$FX/claude.args"
   allow=$(grep -A1 -x -- --allowedTools "$FX/claude.args" | tail -1)
   [[ $allow != *Edit* && $allow != *Write* ]]
@@ -128,4 +128,82 @@ EOF
   [ "$status" -eq 0 ]
   sid=$(grep -A1 -x -- --session-id "$FX/claude.args" | tail -1)
   [[ "$stderr" == *"claude (new session $sid) is reviewing main (${BASE:0:7}..${HEAD_SHA:0:7})"* ]]
+}
+
+@test "settings.reviewPrompt empty: the shipped guidance and the reporting rules" {
+  "$REVIEW" >/dev/null
+  grep -q 'Find what a careful reviewer would flag' "$FX/claude.prompt"
+  grep -q 'No findings is a valid' "$FX/claude.prompt"
+}
+
+@test "settings.reviewPrompt: a custom file replaces the guidance, the reporting rules stay" {
+  printf 'Look only for off-by-one errors.\n' > "$TMP/guide.md"
+  "$SD_CONFIG" set --global settings.reviewPrompt "$TMP/guide.md"
+  "$REVIEW" >/dev/null
+  grep -q 'Look only for off-by-one errors.' "$FX/claude.prompt"
+  ! grep -q 'Find what a careful reviewer would flag' "$FX/claude.prompt" || false
+  grep -q 'No findings is a valid' "$FX/claude.prompt"
+  grep -q '^+three added' "$FX/claude.prompt"
+}
+
+@test "settings.reviewPrompt: a relative path is read from the base commit, not the worktree" {
+  git switch -q --detach "$BASE"
+  mkdir -p .sheepdog sub
+  printf 'Base guidance.\n' > .sheepdog/review-prompt.md
+  git add .sheepdog && git commit -qm "review guidance"
+  BASE=$(git rev-parse HEAD)
+  printf 'Weaker guidance.\n' > .sheepdog/review-prompt.md
+  git commit -qam "the branch rewrites it"
+  export SHEEPDOG_BASE=$BASE SHEEPDOG_HEAD=$(git rev-parse HEAD)
+  "$SD_CONFIG" set --global settings.reviewPrompt .sheepdog/review-prompt.md
+  (cd sub && "$REVIEW" >/dev/null)
+  [ "$(head -1 "$FX/claude.prompt")" = "Base guidance." ]
+}
+
+@test "settings.reviewPrompt: a missing file fails, nothing on stdout, no review run" {
+  "$SD_CONFIG" set --global settings.reviewPrompt nope.md
+  run --separate-stderr "$REVIEW"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *nope.md* ]]
+  [ ! -e "$FX/claude.args" ]
+}
+
+@test "settings.reviewPrompt: a relative path only the worktree has is missing" {
+  mkdir -p .sheepdog && printf 'Uncommitted.\n' > .sheepdog/review-prompt.md
+  "$SD_CONFIG" set --global settings.reviewPrompt .sheepdog/review-prompt.md
+  run --separate-stderr "$REVIEW"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *".sheepdog/review-prompt.md"* ]]
+  [ ! -e "$FX/claude.args" ]
+}
+
+@test "settings.reviewPrompt: ./ is the worktree's top, wherever the reviewer runs" {
+  mkdir -p .sheepdog sub/.sheepdog
+  printf 'Top guidance.\n' > .sheepdog/review-prompt.md
+  printf 'Sub guidance.\n' > sub/.sheepdog/review-prompt.md
+  git add . && git commit -qm guidance
+  export SHEEPDOG_BASE=$(git rev-parse HEAD) SHEEPDOG_HEAD=$(git rev-parse HEAD)
+  "$SD_CONFIG" set --global settings.reviewPrompt ./.sheepdog/review-prompt.md
+  (cd sub && "$REVIEW" >/dev/null)
+  [ "$(head -1 "$FX/claude.prompt")" = "Top guidance." ]
+}
+
+@test "settings.reviewPrompt: a directory is not a guidance file" {
+  mkdir -p .sheepdog && printf 'x\n' > .sheepdog/review-prompt.md
+  git add . && git commit -qm guidance
+  export SHEEPDOG_BASE=$(git rev-parse HEAD) SHEEPDOG_HEAD=$(git rev-parse HEAD)
+  "$SD_CONFIG" set --global settings.reviewPrompt .sheepdog
+  run --separate-stderr "$REVIEW"
+  [ "$status" -ne 0 ]
+  [ ! -e "$FX/claude.args" ]
+}
+
+@test "settings.reviewPrompt: a missing absolute path fails, no review run" {
+  "$SD_CONFIG" set --global settings.reviewPrompt "$TMP/nope.md"
+  run --separate-stderr "$REVIEW"
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"$TMP/nope.md"* ]]
+  [ ! -e "$FX/claude.args" ]
 }

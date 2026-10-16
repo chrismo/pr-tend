@@ -86,6 +86,12 @@ then exits. It can't ask a question mid-run; if it needs input, it ends and
 prints the question. Permission prompts go to the host or are auto-denied
 (`--permission-prompts none`).
 
+`harness_run` holds the harness's stderr (claude can put protocol JSON there)
+and shows it only when the step fails, so nothing streams while a step runs.
+On failure it adds the harness's own account: claude's error text or subtype,
+or the end of pi's reply (#42). Each step says on stderr when it starts: which
+harness, which session, what it is doing.
+
 **Auth and billing** (docs read 2026-10-11 by the claude-code-guide agent;
 `claude auth status` here = claude.ai, Max):
 
@@ -195,7 +201,8 @@ repeat offender means the step-contract prompt needs tightening.
 | SHA bot was triggered on | `refs/sheepdog/<branch>/bot` |
 | SHA accepted as reviewed enough (J5 "no") | `refs/sheepdog/<branch>/accepted` |
 | Bot command / login | `settings.botCommand`, `settings.botLogin` (config files) |
-| Local reviewer script | `git config [--global] sheepdog.localReview` |
+| Local reviewer script | `settings.localReview` (config files) |
+| Local review guidance | `settings.reviewPrompt` (config files): a path; relative ones read from the base commit |
 | Verify / autofix commands | `settings.verify`, `settings.autofix` (config files) (repo-level for a monorepo app: scope lookup below) |
 | Task text | `git config branch.<name>.sd-task` |
 | Comment IDs handed to the agent | `git config --add branch.<name>.sd-handled <id>` |
@@ -575,10 +582,23 @@ sd config set [--global] settings.localReview <command>
 
 Any executable. What it does inside (prompt, model, emulating the backend bot
 or not) is out of scope; sheepdog defines only the contract, and ships a
-default `libexec/sd-review-local` (built 2026-10-14: `lib/review-prompt.md` plus
-the task, commits and diff, through `harness_run` in `lib/sheepdog.sh` with
-read-only tools and a new session every run; harness, model and effort from
-`sd config step review`). `sd act review` runs it after `sd act verify`
+default `libexec/sd-review-local` (built 2026-10-14: the guidance, then the
+reporting rules in `lib/review-rules.md`, the task, commits and diff, through
+`harness_run` in `lib/sheepdog.sh` with read-only tools and a new session every
+run; harness, model and effort from `sd config step review`). It says on stderr
+when it starts: harness, session, range (#42).
+
+**The guidance is configurable (#38):** `settings.reviewPrompt` names a file
+that replaces `lib/review-prompt.md`, the framing and what to look for. The
+reporting rules stay fixed, since the findings schema and the pins depend on
+them. Empty is the shipped default; a missing file, or a path that isn't a file,
+fails the review. A relative path is read from `SHEEPDOG_BASE`, never from the
+worktree: the authoring agent can edit the worktree, so guidance read there
+would let a branch weaken its own review. A change to the guidance therefore
+applies to later branches, not to the PR that makes it. `./` is the worktree's
+top. `step_guidance` in `lib/sheepdog.sh` holds that rule, for #50 to reuse per
+step. `sd act review` gives the default reviewer 30 s over `stepTimeout`, so the
+harness's own timeout fires first. `sd act review` runs it after `sd act verify`
 passes, over `base..HEAD`; an empty list pins `local` (with its base),
 findings are printed as JSON, and a failed reviewer pins nothing.
 
