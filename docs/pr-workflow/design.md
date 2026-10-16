@@ -524,7 +524,9 @@ pass (O2/O3). No cross-worktree writes.
 Shared helper with A2: "same change modulo base?" via `git diff -U0 | git patch-id --stable` (context-free; see A2 observation).
 
 HEAD counts as **reviewed** when covered by the `local`, `bot`, or `accepted`
-pin (whichever the label requires):
+pin (whichever the label requires). An open PR with none of them, drafts
+included, is unreviewed: its review step comes before waiting on a parent PR or
+a required review (#41).
 
 | Case | Check | Meaning |
 |---|---|---|
