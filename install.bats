@@ -77,12 +77,21 @@ teardown() {
   [ "$(wc -l < "$WATCH_CALLS" | tr -d ' ')" -eq 2 ]
 }
 
+@test "the watcher is installed for the link the installer made" {
+  unset LOCAL_BIN
+  export HOME="$TEST_DIR/home"
+  run "$INSTALLER"
+  [ "$status" -eq 0 ]
+  [ -L "$HOME/.local/bin/sd" ]
+  [ "$(cat "$WATCH_CALLS")" = "watch install" ]
+}
+
 @test "a watcher installation failure fails the installer" {
   export WATCH_EXIT=42
   run "$INSTALLER"
   [ "$status" -eq 42 ]
   [ "$(cat "$WATCH_CALLS")" = "watch install" ]
-  [[ "$output" == *"linked"*"watcher installation failed"*"sd watch install"* ]]
+  [[ "$output" == *"linked"*"watcher installation failed"*"$LOCAL_BIN/sd watch install"* ]]
 }
 
 @test "on Linux links sd and explains that the background watcher requires macOS" {

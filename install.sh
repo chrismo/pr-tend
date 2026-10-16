@@ -4,7 +4,7 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-LOCAL_BIN="${LOCAL_BIN:-$HOME/.local/bin}"
+export LOCAL_BIN="${LOCAL_BIN:-$HOME/.local/bin}"
 mkdir -p "$LOCAL_BIN"
 
 dest="$LOCAL_BIN/sd"
@@ -26,7 +26,7 @@ done
 if [[ $(uname -s) == Darwin ]]; then
   "$dest" watch install || {
     status=$?
-    echo "! sd is linked, but watcher installation failed; retry with: sd watch install" >&2
+    echo "! sd is linked, but watcher installation failed; retry with: $dest watch install" >&2
     exit "$status"
   }
 else

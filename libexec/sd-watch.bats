@@ -1518,6 +1518,17 @@ old_labels_retired() {
   [ "$(plutil -extract ProgramArguments.1 raw "$PLIST")" = watch ]
 }
 
+@test "install: the job runs the sd in LOCAL_BIN, which leads its PATH" {
+  needs_plutil
+  setup_launchd
+  mkdir -p "$TMP/local-bin"
+  ln -s "$BATS_TEST_DIRNAME/../bin/sd" "$TMP/local-bin/sd"
+  LOCAL_BIN="$TMP/local-bin" run "$SD_WATCH" install
+  [ "$status" -eq 0 ]
+  [ "$(plutil -extract ProgramArguments.0 raw "$PLIST")" = "$TMP/local-bin/sd" ]
+  [[ "$(plutil -extract EnvironmentVariables.PATH raw "$PLIST")" == "$TMP/local-bin:"* ]]
+}
+
 @test "uninstall: boots out and removes the plist" {
   needs_plutil
   setup_launchd
