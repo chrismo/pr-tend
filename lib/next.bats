@@ -83,6 +83,24 @@ step() { # step <key> <field> <jq-assignment...>
   [ "$(step retarget cmd "${st[@]}")" = "sd act retarget" ]
 }
 
+@test "a parent that exists only here: ship it first; no push or open-pr until then (#105)" {
+  local st=('.pr = null' '.push = {"remote_sha": null, "ahead": 2, "behind": 0, "diverged": false, "remote_ours": null}'
+            '.parent = {"name": "p", "source": "config", "merged": null, "local": true, "on_remote": false, "pr": null}'
+            '.sync = {"target": "p", "default": "main", "behind": null, "up_to_date": null, "conflict": null, "old_base": null}')
+  [ "$(keys "${st[@]}")" = ship-parent ]
+  [ "$(step ship-parent who "${st[@]}")" = run ]
+  [ "$(step ship-parent say "${st[@]}")" = "ship the parent first: p isn't on origin yet" ]
+  [ "$(step ship-parent cmd "${st[@]}")" = "sd act ship p" ]
+  [ "$(keys "${st[@]}" '.parent.on_remote = true')" = "push open-pr" ]
+}
+
+@test "a merged parent whose branch is gone from origin but still here is not an unpushed parent (#105)" {
+  local st=('.pr.base = "p"' '.push.ahead = 1'
+            '.parent = {"name": "p", "source": "config", "merged": true, "local": true, "on_remote": false, "pr": {"number": 25, "state": "MERGED", "head_sha": "x"}}')
+  [ "$(keys "${st[@]}")" = "push retarget" ]
+  [ "$(keys '.pr.base = "p"' '.parent = {"name": "p", "source": "config", "merged": false, "local": true, "on_remote": false, "pr": {"number": 25, "state": "CLOSED", "head_sha": "x"}}')" = parent-closed ]
+}
+
 @test "the parent closed without merging: chrismo decides; no restack, never ready" {
   local st=('.pr.base = "p"' '.sync.target = "p"' '.sync.up_to_date = false' '.sync.behind = 2'
             '.parent = {"name": "p", "source": "config", "merged": false, "pr": {"number": 25, "state": "CLOSED", "head_sha": "x"}}')

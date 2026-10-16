@@ -7,6 +7,8 @@
 # Reports, for <branch> (default: the current one):
 #   pr        the branch's PR (an open one wins over closed/merged)
 #   parent    sd-parent config, else the PR base, else the default branch;
+#             whether it exists here and on the remote (a parent only here
+#             has to ship first);
 #             a merged parent retargets sync to the default branch
 #   sync      ahead of / behind the parent? would `rebase --onto` conflict?
 #   push      local vs remote branch; whether the remote SHA is ours (reflog),
@@ -232,10 +234,23 @@ parent_in_head() {
   [[ $tree == "$(git rev-parse "$head^{tree}")" ]]
 }
 
+# A stacked branch's parent can exist only here (started with --parent before
+# the parent shipped). Then there's nothing to sync against yet, and NEXT's
+# step is to ship the parent, not an error (#105). A merged or closed parent
+# whose remote branch was deleted looks the same here, so consumers check
+# parent.merged and the parent PR's state too.
+parent_local=null parent_remote=null
+if [[ $parent != "$default_branch" ]]; then
+  if git show-ref -q --verify "refs/heads/$parent"; then parent_local=true; else parent_local=false; fi
+  if [[ -n $(ref "refs/remotes/$remote/$parent") ]]; then parent_remote=true; else parent_remote=false; fi
+fi
+
 target_ref=$(ref "refs/remotes/$remote/$target")
 sync_ahead=null behind=null up_to_date=null old_base="" conflict=null by_tree=false
 if [[ -z $target_ref ]]; then
-  errors+=("no $remote/$target ref (not fetched?)")
+  [[ $target == "$parent" && $parent_local == true && $parent_remote == false \
+     && $(prc_val "$parent_pr" 'this is null or on(state == "OPEN")') == true ]] \
+    || errors+=("no $remote/$target ref (not fetched?)")
 else
   sync_ahead=$(count "$target_ref..$head")
   behind=$(count "$head..$target_ref")
@@ -469,7 +484,7 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
                               | values coalesce(requestedReviewer.login, requestedReviewer.slug, null)
                               | where this is not null
                             ], [])},
-    parent: {name: s.parent, source: s.parent_source, merged: s.parent_merged,
+    parent: {name: s.parent, source: s.parent_source, merged: s.parent_merged, local: s.parent_local, on_remote: s.parent_remote,
              pr: nul(s.parent_pr) ? null : {number: s.parent_pr.number, state: s.parent_pr.state, head_sha: s.parent_pr.headRefOid,
                                        commits: coalesce([unnest coalesce(s.parent_pr.allCommits.nodes, []) | values commit.oid], [])}},
     sync: {target: s.target, default: s.default_branch, ahead: s.sync_ahead, behind: s.behind, up_to_date: s.up_to_date,
@@ -512,12 +527,12 @@ EOF
 errors_json='[]'
 (( ${#errors[@]} == 0 )) || errors_json=$(printf '%s\n' "${errors[@]}" | prc_strings)
 refs_json=$(git for-each-ref --format='%(refname) %(objectname)' "refs/sheepdog/$branch/" | prc_strings)
-args=$(printf '{"branch": %s, "head": %s, "pr": %s, "parent": %s, "parent_source": %s, "parent_pr": %s, "parent_merged": %s,
+args=$(printf '{"branch": %s, "head": %s, "pr": %s, "parent": %s, "parent_source": %s, "parent_pr": %s, "parent_merged": %s, "parent_local": %s, "parent_remote": %s,
   "target": %s, "default_branch": %s, "sync_ahead": %s, "behind": %s, "up_to_date": %s, "old_base": %s, "by_tree": %s, "conflict": %s, "undone": %s,
   "remote_sha": %s, "ahead": %s, "push_behind": %s, "diverged": %s, "remote_ours": %s, "theirs": %s, "remote_made": %s, "dirty": %s, "stale": %s,
   "r_local": %s, "r_bot": %s, "r_accepted": %s, "r_findings": %s, "r_findings_at_head": %s, "review_rounds": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s,
   "ignore": %s, "ignore_body": %s, "handled": %s, "refs": %s, "enrolled": %s, "harness": %s, "session": %s, "lock": %s, "errors": %s}\n' \
-  "$(jstr "$branch")" "$(jstr "$head")" "$pr" "$(jstr "$parent")" "$(jstr "$parent_source")" "$parent_pr" "$parent_merged" \
+  "$(jstr "$branch")" "$(jstr "$head")" "$pr" "$(jstr "$parent")" "$(jstr "$parent_source")" "$parent_pr" "$parent_merged" "$parent_local" "$parent_remote" \
   "$(jstr "$target")" "$(jstr "$default_branch")" "$sync_ahead" "$behind" "$up_to_date" "$(jnull "$old_base")" "$by_tree" "$conflict" "$undone" \
   "$(jnull "$remote_sha")" "$ahead" "$push_behind" "$diverged" "$remote_ours" "$theirs" "$remote_made" "$dirty" "$stale_json" \
   "${review[local]}" "${review[bot]}" "${review[accepted]}" "$r_findings" "$r_findings_at_head" "$review_rounds" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" \

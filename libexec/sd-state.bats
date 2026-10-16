@@ -666,6 +666,42 @@ squash_parent_away() {
   [ "$(field '.next[0].key')" = errors ]
 }
 
+@test "parent: a parent only here is reported as such, with no error, and NEXT ships it first (#105)" {
+  git switch -qc parent && commit p.txt p
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  state
+  [ "$(field .parent.local)" = true ]
+  [ "$(field .parent.on_remote)" = false ]
+  [ "$(field '.errors | length')" = 0 ]
+  [ "$(field '.next[0].key')" = ship-parent ]
+  [ "$(field '.next[0].cmd')" = "sd act ship parent" ]
+  git push -q origin parent 2>/dev/null && git fetch -q
+  state
+  [ "$(field .parent.on_remote)" = true ]
+  [ "$(field '.next[0].key')" != ship-parent ]
+}
+
+@test "parent: a parent closed without merging, its remote branch deleted, still errors (#105)" {
+  git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  pr_fixture parent '.state = "CLOSED"'
+  git push -q origin :parent 2>/dev/null && git fetch -q --prune
+  state
+  [ "$(field .parent.on_remote)" = false ]
+  [[ "$(field '.errors | join(" ")')" == *"no origin/parent ref"* ]]
+  [ "$(field '.next[0].key')" = errors ]
+}
+
+@test "parent: a parent that exists nowhere is still an error" {
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent nosuch
+  state
+  [ "$(field .parent.local)" = false ]
+  [[ "$(field '.errors | join(" ")')" == *"no origin/nosuch ref"* ]]
+}
+
 @test "sync: no shared history with the parent is reported, not guessed" {
   git switch -q --orphan feat && commit a.txt a
   state

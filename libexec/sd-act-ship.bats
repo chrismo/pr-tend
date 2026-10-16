@@ -132,6 +132,12 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   run "$SD_ACT" ship
   [ "$status" -eq 0 ]
   [[ "$(calls)" == "pr create --draft --base A --head feat "* ]]
+  grep -q 'Base: this PR is stacked on A' "$FX/claude.prompt"
+}
+
+@test "describe: told the PR targets main when nothing is stacked (#105)" {
+  "$SD_ACT" describe >/dev/null
+  grep -q 'Base: this PR targets main\.' "$FX/claude.prompt"
 }
 
 @test "ship: a stale description (HEAD moved) is written again" {
@@ -239,6 +245,7 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   [ "$status" -eq 0 ]
   [[ "$(calls)" == "pr create --draft --base main --head feat "* ]]
   [ "$(git config branch.feat.sd-parent)" = main ]
+  grep -q 'Base: A has merged into main, so this PR targets main' "$FX/claude.prompt"
 }
 
 @test "ship: a parent whose PR can't be looked up is refused, never shipped onto" {
