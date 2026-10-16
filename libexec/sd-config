@@ -43,8 +43,6 @@
 #     remote, interval and notify are global-file only
 #   - set values are strings; --json takes a number, list, object or null
 #   - step: the harness's block, with the step's block for it laid over it
-#
-# See docs/pr-workflow/design.md, "Config files".
 
 set -euo pipefail
 

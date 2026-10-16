@@ -376,7 +376,7 @@ ON_OPEN_PARENT=('.pr.base = "p"' '.sync.target = "p"'
   [ "$(keys '.pr = null' '.ci.for_head = null' '.ci.verdict = "none"')" = open-pr ]
 }
 
-@test "order follows design.md's Ordering: restack, agent fixes, push, then waiting" {
+@test "order follows the loop's Ordering (#79 Design record): restack, agent fixes, push, then waiting" {
   [ "$(keys '.fresh = false' '.threads.owed_human = 1' "${STACKED[@]}" \
            '.ci.verdict = "red"' '.threads.owed_bot = 1' '.push.ahead = 1' '.pr.draft = true' \
            '.review.local = {sha: "x", status: "uncovered", uncovered: 1}')" \

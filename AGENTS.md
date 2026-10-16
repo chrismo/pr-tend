@@ -7,6 +7,33 @@ filtered down to these paths. Named pr-tend until 2026-10-15 (#40).
 
 Edit this repo, never `~/.local/bin/sd` — it's a symlink made by `./install.sh`.
 
+## Design rules
+
+The reasoning is in #79 (Design record); these are the rules agents build by:
+
+1. **Deterministic wherever possible.** Scripts observe and act at zero token
+   cost; an agent runs only for judgment. The verbs that run one are
+   `implement`, `address`, `describe`, `review`, `restack --resolve`, and
+   `start` and `ship` when they run implement or describe; `sd act --help`
+   marks them "Spends tokens". Every other verb is zero tokens.
+2. **The pipeline drives; agents are workers.** The pipeline initiates every
+   step and hands an agent one bounded task; the agent edits, and sheepdog
+   commits, pushes and talks to GitHub. Agents never need to know the
+   pipeline exists.
+3. **Harness-agnostic.** Claude and pi both work. The per-harness code is
+   `harness_run` in `lib/sheepdog.sh`, plus the tool-rule wording a step's
+   prompt needs (`implement_run` branches on the harness for that); nothing
+   else may.
+4. **Reconcile, don't rely on enforcement.** Never assume sheepdog is the only
+   writer: each pass compares observed state to desired state and closes the
+   gap. Per-step tool denies are cheap extras, never what correctness depends
+   on.
+5. **Idempotent, keyed on SHA.** Any step can be rerun safely.
+
+Step labels in comments and test headers (O1–O8 observe, A0–A11 act, J0–J6
+judgment, N2–N3 notify) are the design's atomic actions; the legend is in #79
+(Design record, "Atomic actions").
+
 ## Workflow
 
 sheepdog tends its own PRs, so code changes go through them:
@@ -19,8 +46,9 @@ sheepdog tends its own PRs, so code changes go through them:
   `sd act restack && sd act push`.
 - chrismo merges: squash, delete the branch.
 - Docs-only and issue-tracking edits may go straight to `main`.
-- `docs/pr-workflow/` is being consumed, not kept: when work from it is built or
-  filed as an issue, delete that part of the doc in the same change.
+- `docs/pr-workflow/` was consumed into issues (#32) and stays only until the
+  current push of issues is over: don't rely on it, and put notes on built
+  work in the command's header comment, not there.
 
 ### Or run sheepdog against the sandbox
 
@@ -71,9 +99,8 @@ PATH="/opt/homebrew/opt/bash/bin:$PATH" bats ...   # if 3.2 comes first
 intermittently on one construct, so `ci/super-stress` runs every named query
 (the `read -r -d '' NAME <<'EOF'` heredocs in `libexec/sd-*` and `lib/next.sh`'s
 `PRN_QUERY`) 200 times over `ci/fixtures/` and fails on a panic or a differing
-output. RWX runs it with the suite, so `rwx run` after touching a query covers it. SuperDB's edges (missing
-fields are errors, `has()` lies on fused types, dynamic `grep` is not a
-regex) are in `docs/pr-workflow/design.md`, "SuperDB notes".
+output. RWX runs it with the suite, so `rwx run` after touching a query
+covers it. SuperDB's edges are under "SuperDB notes" below.
 
 **Every script is `#!/usr/bin/env bash5`, `install.sh` included.** Test them
 by running them, not sourcing, so the shebang picks the bash. agent-rig's
@@ -100,3 +127,45 @@ better than Captain balances 11 files across runners (37 s vs 77 s, 2026-10-14).
 
 Linux has no `plutil`, so the `sd watch` tests that validate the launchd
 plist skip there (`needs_plutil`). They still run on macOS.
+
+## SuperDB notes (super 0.3.0, observed 2026-10-13 and -14)
+
+Every query goes through `prc_json` / `prc_line` / `prc_val` in
+`lib/config.sh`, with `PRC_FNS` (`on`, `n`, `nul`, `sj`) in scope. Check
+SuperSQL with the superdb MCP, not shell probes.
+
+- **Input is always piped.** `super` reads nothing from a here-string or a
+  `<` redirect.
+- **0.3.0 only.** Every command runs `super -version` once at start and refuses
+  anything else; the config types' optional fields (`{a?:string}`) don't parse
+  on older versions.
+- **A missing field is an error value**, not null: it prints as
+  `error("missing")` and poisons comparisons, so anything that may be absent
+  is `coalesce`d; `on(x)`, `n(x)` and `nul(x)` are the shorthands.
+- **`has()` is unreliable on fused types:** elements of a literal array of
+  differing records, and records from a JSON array of differing shapes, all
+  answer true. Test presence with `coalesce(x, null) is not null`.
+- **`grep(pattern, s)` with a pattern from data is a substring match**, not a
+  regex; only a literal pattern is a regex. Dynamic regexes go through
+  `regexp(re, s)`: `[]` on no match, an error value for an invalid regex
+  (Go RE2 syntax, no lookaround).
+- **`join([], sep)` is an error** ("array of string arg required"), hence
+  `sj()`.
+- **An empty array subquery is null:** `[unnest x | where false]` yields null,
+  so it is always `coalesce([...], [])`.
+- **A subquery sees only its own stream:** function parameters and outer
+  fields are invisible after the first `|`; carry them in the unnested record
+  (`unnest {ctx, x: items}`, exactly two fields with the array second).
+- **No `unnest … into ( … )` lateral subqueries:** the construct panicked
+  ("context canceled") in 12 of 200 runs; plain `unnest` and `aggregate … by`
+  had 0 failures. `count {r: this, j}` numbers a stream (1-based). Inside a
+  subquery, `aggregate` and `fork` were avoided so output order never depends
+  on the scheduler.
+- **`unflatten` needs its keys grouped by prefix**, so merged keys come out
+  alphabetical.
+- **No JSON encoder** (`sd config get` prints with a second call) and
+  **`-f line` prints strings raw**, one per line: an empty string is an empty
+  line, and `$( )` strips trailing newlines, so a run that needs to count lines
+  ends with a marker (`harness_run`).
+- **Startup is about 17 ms per call** (jq: 4 ms), about 50 ms per config file
+  read, so queries are batched where a loop would have called jq per item.

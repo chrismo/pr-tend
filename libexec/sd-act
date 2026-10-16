@@ -42,7 +42,8 @@
 #             there, as wt-new does: $GIT_COMMON_DIR/worktree-setup, else git
 #             config wt.setup. Records the task and parent, pins base at a new
 #             branch's start point, enrolls; then implement unless
-#             --no-implement. stdout is only the worktree's path
+#             --no-implement. stdout is only the worktree's path. Spends
+#             tokens unless --no-implement
 #   implement the agent works the recorded task (J0) in the branch's session;
 #             the pipeline commits its edits, then runs verify. Claude may run
 #             only read-only git, the verify command when it's plain words (no
@@ -57,7 +58,8 @@
 #   unregister  take this repo (or <path>, e.g. one that's gone) off the
 #             watcher's list; refuses while any branch is still enrolled
 #   address   hand owed bot feedback to an agent, then commit, verify, push,
-#             reply and resolve; items the agent marks "ask" are left for chrismo
+#             reply and resolve; items the agent marks "ask" are left for
+#             chrismo. Spends tokens
 #   ack       mark owed bot review bodies and comments read, with no reply:
 #             every i item, or only the --id ones (ids from sd state --json)
 #   restack   rebase --onto the parent (the default branch once the parent
@@ -96,7 +98,8 @@
 #             Refuses while the parent (sd-parent) isn't on the remote, has
 #             merged (restack first), was closed, or can't be looked up; a
 #             merged parent with the branch already on the default branch
-#             ships onto it and rewrites sd-parent
+#             ships onto it and rewrites sd-parent. Spends tokens unless HEAD
+#             already has a stored description
 #   trigger   post settings.botCommand on the PR so the review bot runs, and
 #             pin bot at HEAD; nothing when already pinned there. HEAD must
 #             be on the remote (the bot reviews what GitHub has); the local
@@ -126,7 +129,7 @@
 #   --no-implement  stop after the setup; the task is then optional
 #
 # restack options:
-#   --resolve       on a conflict, run the agent instead of refusing (tokens)
+#   --resolve       on a conflict, run the agent instead of refusing. Spends tokens
 #
 # address options:
 #   --no-publish    stop after the local commit (the agent still runs: tokens)
@@ -141,7 +144,7 @@
 # .sd-harness, .sd-handled, .sd-lock ("<pid>@<host> <time>" while attached);
 # sheepdog.repo (global) lists the enrolled repos.
 #
-# <branch> defaults to the current one. See docs/pr-workflow/design.md, "Act".
+# <branch> defaults to the current one.
 
 set -euo pipefail
 

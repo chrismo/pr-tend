@@ -1,13 +1,7 @@
 # PR workflow — requirements review (acceptance walk-through)
 
-> **Being consumed — not for keeping.** Every part of this file moves out as
-> soon as it has a home, and is deleted here when it does: built behavior into
-> the code and its tests (the README where users need it); unbuilt work, bugs,
-> spikes and open decisions into GitHub issues on the
-> [sheepdog project board](https://github.com/users/chrismo/projects/6). No
-> duplicate docs: don't add anything here that the code or an issue already
-> says; link the issue instead. When nothing is left, delete the file. Don't
-> treat it as current documentation of anything that exists.
+> **Consumed 2026-10-15, kept for now:** see the banner on `design.md`. This
+> file's items are in the issues named there; treat the issues as current.
 
 Acceptance cases played through `design.md` on paper, 2026-10-11. Nothing was
 run: every item below is a **theory** reasoned from the doc, not an observed

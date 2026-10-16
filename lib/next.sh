@@ -6,7 +6,9 @@
 #   run    mechanical             wait   nothing to do yet
 # cmd is what to run by hand meanwhile (null: no command yet).
 #
-# See docs/pr-workflow/design.md, "Watcher" step 2 and "Ordering".
+# Ordering of the loop's own steps, after what blocks everything (stale refs,
+# human items): restack, agent fixes, one push, then review and wait; the push
+# leads because every push restarts CI (#79 Design record).
 
 # Behind the default branch alone is no step: it moves too often to chase.
 # A conflict with it is, and so is a restack after the parent merged.
