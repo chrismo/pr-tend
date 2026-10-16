@@ -4,8 +4,10 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-export LOCAL_BIN="${LOCAL_BIN:-$HOME/.local/bin}"
+LOCAL_BIN="${LOCAL_BIN:-$HOME/.local/bin}"
 mkdir -p "$LOCAL_BIN"
+LOCAL_BIN="$(cd "$LOCAL_BIN" && pwd)"
+export LOCAL_BIN
 
 dest="$LOCAL_BIN/sd"
 if [[ -e $dest && ! -L $dest ]]; then

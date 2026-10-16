@@ -86,6 +86,15 @@ teardown() {
   [ "$(cat "$WATCH_CALLS")" = "watch install" ]
 }
 
+@test "a relative LOCAL_BIN is linked and handed on as an absolute path" {
+  cd "$TEST_DIR"
+  export LOCAL_BIN=local-bin WATCH_EXIT=1
+  run "$INSTALLER"
+  [ "$status" -eq 1 ]
+  [ -L "$TEST_DIR/local-bin/sd" ]
+  [[ "$output" == *"retry with: LOCAL_BIN=$TEST_DIR/local-bin $TEST_DIR/local-bin/sd watch install" ]]
+}
+
 @test "a watcher installation failure fails the installer" {
   export WATCH_EXIT=42
   run "$INSTALLER"

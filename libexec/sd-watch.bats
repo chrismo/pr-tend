@@ -1530,6 +1530,18 @@ old_labels_retired() {
   [[ "$(plutil -extract EnvironmentVariables.PATH raw "$PLIST")" == "$TMP/local-bin:$HOME/.local/bin:/"* ]]
 }
 
+@test "install: a relative LOCAL_BIN is made absolute, since launchd runs jobs from /" {
+  needs_plutil
+  setup_launchd
+  mkdir -p "$TMP/local-bin"
+  ln -s "$BATS_TEST_DIRNAME/../bin/sd" "$TMP/local-bin/sd"
+  cd "$TMP"
+  LOCAL_BIN=local-bin run "$SD_WATCH" install
+  [ "$status" -eq 0 ]
+  [ "$(plutil -extract ProgramArguments.0 raw "$PLIST")" = "$TMP/local-bin/sd" ]
+  [[ "$(plutil -extract EnvironmentVariables.PATH raw "$PLIST")" == "$TMP/local-bin:"* ]]
+}
+
 @test "uninstall: boots out and removes the plist" {
   needs_plutil
   setup_launchd
