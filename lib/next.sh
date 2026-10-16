@@ -113,12 +113,12 @@ values {...s, remote}
       : open and need_review ? step("review", "agent", "review the changes since the last review", "sd act review") : null,
     has_pr and not to_push and not held and not foreign and bot_due
       ? step("bot-trigger", "run", f"trigger the review bot ({bot.command})", "sd act trigger") : null,
+    has_pr and on(ci.verdict == "inconclusive") ? step("ci-rerun", "run", "rerun cancelled CI", "gh pr checks") : null,
     has_pr and bot_waiting and n(review.bot.waited) <= n(bot.timeout)
       ? step("bot-wait", "wait", f"waiting on the review bot ({bot.command})", null) : null,
     has_pr and bot_waiting and n(review.bot.waited) > n(bot.timeout)
       ? step("bot-silent", "you", f"the review bot hasn'"'"'t answered in {n(review.bot.waited) / 60} min: check it, or trigger it again",
              "sd act trigger --force") : null,
-    has_pr and on(ci.verdict == "inconclusive") ? step("ci-rerun", "run", "rerun cancelled CI", "gh pr checks") : null,
     has_pr and not to_push and not held and (on(ci.verdict == "pending") or on(ci.for_head == false))
       ? step("ci-wait", "wait", on(ci.verdict == "pending") ? "CI running" : "CI hasn'"'"'t reported on HEAD yet",
              "gh pr checks --watch") : null,

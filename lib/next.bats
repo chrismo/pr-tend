@@ -416,6 +416,11 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(keys "${st[@]}" '.pr.draft = true' '.pr.merge_state = "DRAFT"')" = bot-wait ]
 }
 
+@test "bot waiting and CI cancelled: the rerun (a run step) comes before the wait" {
+  [ "$(keys '.bot = {command: "/review-bot", timeout: 3600}' '.review.bot = {sha: "h1", status: "covered", triggered: "t", replied: false, waited: 60}' \
+            '.ci.verdict = "inconclusive"')" = "ci-rerun bot-wait" ]
+}
+
 @test "bot replied since the trigger: ready" {
   [ "$(keys '.bot = {command: "/review-bot", timeout: 3600}' '.review.bot = {sha: "h1", status: "covered", triggered: "t", replied: true, waited: 60}')" = ready ]
 }
