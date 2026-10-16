@@ -1106,6 +1106,103 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   [ "$output" = "nothing stale" ]
 }
 
+# ── glyph lookup (#3) ────────────────────────────────────────────────────────
+
+@test "glyph: prints the current worktree's glyph, from a subdirectory too" {
+  ps_fixture feat
+  pass
+  run "$SD_WATCH" glyph
+  [ "$status" -eq 0 ]
+  [ "$output" = "✅" ]
+  mkdir -p sub
+  [ "$(cd sub && "$SD_WATCH" glyph)" = "✅" ]
+}
+
+@test "glyph: takes a path" {
+  git switch -q main
+  git worktree add -q "$TMP/feat-wt" feat
+  ps_fixture feat '.ci.verdict = "red" | .ci.failing = ["lint"]'
+  pass
+  [ "$(cd "$TMP" && "$SD_WATCH" glyph "$TMP/feat-wt")" = "❌" ]
+  [ -z "$("$SD_WATCH" glyph)" ]
+}
+
+@test "glyph: nothing when the worktree has moved to another branch, or no pass saw it" {
+  ps_fixture feat
+  pass
+  git switch -q main
+  run "$SD_WATCH" glyph
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run "$SD_WATCH" glyph "$TMP"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "glyph: a file's path means its worktree; -h prints the help" {
+  ps_fixture feat
+  pass
+  touch notes.txt
+  [ "$(cd "$TMP" && "$SD_WATCH" glyph "$TMP/repo/notes.txt")" = "✅" ]
+  run "$SD_WATCH" glyph -h
+  [[ "$output" == *"Usage: sd watch"* ]] || false
+}
+
+@test "glyph: a worktree paused mid-rebase still shows its branch's glyph" {
+  echo a > f && git add f && git commit -qm a
+  git switch -q main
+  echo b > f && git add f && git commit -qm b
+  git switch -q feat
+  ! git rebase -q main 2>/dev/null
+  [ -d "$(git rev-parse --git-path rebase-merge)" ]
+  ps_fixture feat '.sync.up_to_date = false | .sync.conflict = true'
+  pass
+  [ "$("$SD_WATCH" glyph)" = "❌" ]
+  git rebase --abort
+}
+
+@test "glyph: a tag with the branch's name doesn't hide the glyph" {
+  ps_fixture feat
+  pass
+  git tag feat
+  [ "$("$SD_WATCH" glyph)" = "✅" ]
+}
+
+@test "glyph: an unknown option or a second path is refused" {
+  run "$SD_WATCH" glyph --bogus
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown option: --bogus"* ]] || false
+  run "$SD_WATCH" glyph a b
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"usage: sd watch glyph [<path>]"* ]] || false
+}
+
+@test "glyph: before any pass, nothing" {
+  run "$SD_WATCH" glyph
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "glyph: a refresh updates it, keeping other worktrees'" {
+  git branch other && enroll other
+  git worktree add -q "$TMP/other-wt" other
+  ps_fixture feat
+  ps_fixture other
+  pass
+  ps_fixture feat '.ci.verdict = "pending"'
+  "$SD_WATCH" refresh
+  [ "$("$SD_WATCH" glyph)" = "⏳" ]
+  [ "$("$SD_WATCH" glyph "$TMP/other-wt")" = "✅" ]
+}
+
+@test "glyph: gone after a pass once the branch isn't enrolled" {
+  ps_fixture feat
+  pass
+  git config --unset branch.feat.sheepdog
+  pass
+  [ -z "$("$SD_WATCH" glyph)" ]
+}
+
 # ── status ───────────────────────────────────────────────────────────────────
 
 @test "status: prints the last pass" {
