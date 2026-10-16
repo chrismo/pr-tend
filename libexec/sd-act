@@ -1311,8 +1311,9 @@ EOF
 describe_file() { echo "$(cd "$(git rev-parse --git-common-dir)" && pwd)/sheepdog/${1//\//__}.describe.json"; }
 
 # describe_base <state>: the prompt's line on what the PR targets, so the body
-# doesn't describe a merged parent as pending (#105). Stored with the
-# description: a changed line means the stored body is stale.
+# doesn't describe a merged parent as pending (#105). The description is
+# stored with sync.target: a new target (a parent merged under an unchanged
+# HEAD) makes it stale.
 describe_base() {
   local state=$1 target
   target=$(prc_val "$state" sync.target)
@@ -1349,8 +1350,8 @@ describe_run() {
   step_store "$b"
   f=$(describe_file "$b")
   mkdir -p "$(dirname "$f")"
-  prc_json 'values {head, where, title: r.title, body: coalesce(r.body, "")}' \
-    "{\"head\": \"$head\", \"where\": $(prc_json_string "$where"), \"r\": $result}" > "$f"
+  prc_json 'values {head, target: s.sync.target, title: r.title, body: coalesce(r.body, "")}' \
+    "{\"head\": \"$head\", \"s\": $state, \"r\": $result}" > "$f"
   cat "$f"
 }
 
@@ -1409,7 +1410,7 @@ ship() {
     | values "sd act: warning: the local review doesn'"'"'t cover HEAD (sd act review); the PR stays a draft until it does"' "$state" >&2
   head=$(git rev-parse "refs/heads/$b")
   f=$(describe_file "$b")
-  if [[ ! -f $f || $(prc_line 'values f"{head} {coalesce(where, "")}"' "$(<"$f")" 2>/dev/null) != "$head $(describe_base "$state")" ]]; then
+  if [[ ! -f $f || $(prc_line 'values f"{head} {coalesce(target, "")}"' "$(<"$f")" 2>/dev/null) != "$head $(prc_val "$state" sync.target)" ]]; then
     describe_run "$b" "$wt" "$state" >/dev/null
     [[ $(git rev-parse "refs/heads/$b") == "$head" ]] \
       || die "HEAD moved during the describe step (${head:0:7} → $(git rev-parse --short "refs/heads/$b")); nothing pushed. Look, then ship again"

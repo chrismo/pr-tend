@@ -263,6 +263,12 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   [ "$status" -eq 0 ]
   grep -q 'Base: A has merged into main' "$FX/claude.prompt"
   [[ "$(calls)" == "pr create --draft --base main --head feat --title Add c on main "* ]]
+  # sd-parent is main now; the PR's target hasn't changed, so the body stands
+  rm -f "$FX/claude.args"
+  open_pr feat main 9
+  run "$SD_ACT" ship
+  [ "$status" -eq 0 ]
+  [ ! -e "$FX/claude.args" ]
 }
 
 @test "describe: a parent only here says to ship it first, not an empty reason (#105)" {
