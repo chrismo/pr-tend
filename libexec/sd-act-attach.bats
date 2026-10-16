@@ -80,7 +80,7 @@ wait_for() { local i; for ((i = 0; i < 100; i++)); do [[ -e $1 ]] && return 0; s
   [ "$(cat "$FX/claude.cwd")" = "$TMP/repo" ]
   grep -qx -- --resume "$FX/claude.args"
   grep -qx -- 11111111-2222-4333-8444-555555555555 "$FX/claude.args"
-  ! grep -q -- '^-p$' "$FX/claude.args"
+  ! grep -q -- '^-p$' "$FX/claude.args" || false
   [[ "$(cat "$FX/claude.lock")" =~ ^[0-9]+@$HOST\ 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T ]]
   run lock
   [ "$status" -ne 0 ]
@@ -182,7 +182,7 @@ wait_for() { local i; for ((i = 0; i < 100; i++)); do [[ -e $1 ]] && return 0; s
   [ ! -e "$FX/claude.args" ]
   grep -qx -- --session-id "$FX/pi.args"
   grep -qx -- 11111111-2222-4333-8444-555555555555 "$FX/pi.args"
-  ! grep -q -- '^-p$' "$FX/pi.args"
+  ! grep -q -- '^-p$' "$FX/pi.args" || false
   [[ "$(cat "$FX/pi.lock")" =~ ^[0-9]+@ ]]
 }
 

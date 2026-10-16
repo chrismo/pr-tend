@@ -89,7 +89,7 @@ EOF
   harness_stubs
   run harness_run claude sid1 new 30 "do it" '{}'
   [ "$status" -eq 0 ]
-  ! grep -q -- --max-budget-usd "$FX/args"
+  ! grep -q -- --max-budget-usd "$FX/args" || false
   echo '{"settings": {"stepBudget": 2.5}}' > "$SHEEPDOG_CONFIG"
   run harness_run claude sid1 new 30 "do it" '{}'
   [ "$status" -eq 0 ]
@@ -102,7 +102,7 @@ EOF
   printf 'Done.\n\n```json\n{"ok": true}\n```\n' > "$FX/out"
   run harness_run pi sid1 new 30 "do it" '{}'
   [ "$status" -eq 0 ]
-  ! grep -q -- budget "$FX/args"
+  ! grep -q -- budget "$FX/args" || false
 }
 
 @test "harness_run: a step that hits the budget fails and says so" {
@@ -111,8 +111,27 @@ EOF
   echo '{"type": "result", "is_error": true, "subtype": "error_max_budget_usd", "result": null, "total_cost_usd": 0.1353}' > "$FX/out"
   run --separate-stderr harness_run claude sid1 new 30 "do it" '{}'
   [ "$status" -ne 0 ]
-  [[ "$stderr" == *"settings.stepBudget (0.1 USD)"* ]]
+  [[ "$stderr" == *"hit the step budget (settings.stepBudget 0.1 USD)"* ]]
   [[ "$stderr" == *"0.1353"* ]]
+  # A cap from harnesses.claude.args instead: no stepBudget to blame.
+  rm "$SHEEPDOG_CONFIG"
+  run --separate-stderr harness_run claude sid1 new 30 "do it" '{}' '{"harness": "claude", "args": "--max-budget-usd 0.1"}'
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"hit the step budget"* ]]
+  [[ "$stderr" != *"settings.stepBudget"* ]]
+}
+
+@test "harness_run: a negative stepBudget, or an unreadable config, fails the step before it runs" {
+  harness_stubs
+  echo '{"settings": {"stepBudget": -1}}' > "$SHEEPDOG_CONFIG"
+  run --separate-stderr harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"settings.stepBudget must be 0 or more"* ]]
+  [ ! -e "$FX/args" ]
+  echo 'not json' > "$SHEEPDOG_CONFIG"
+  run --separate-stderr harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [ ! -e "$FX/args" ]
 }
 
 @test "harness_run: every claude step appends its usage to usage.tsv" {

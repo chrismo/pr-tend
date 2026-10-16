@@ -95,8 +95,9 @@ harness_usage() {
       && [[ -n $nums ]] || nums=$'\t\t\t\t\t\t'
   fi
   mkdir -p "$dir" 2>/dev/null || return 0
+  # >> for the header too: two steps at once could both see no file.
   [[ -s $dir/usage.tsv ]] \
-    || printf 'time\trepo\tbranch\tstep\tharness\tsession\tmode\tstatus\tcost_usd\tinput\tcache_create\tcache_read\toutput\tduration_ms\tturns\n' > "$dir/usage.tsv"
+    || printf 'time\trepo\tbranch\tstep\tharness\tsession\tmode\tstatus\tcost_usd\tinput\tcache_create\tcache_read\toutput\tduration_ms\tturns\n' >> "$dir/usage.tsv"
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$repo" "$branch" "${HARNESS_STEP:-}" "$1" "$2" "$3" "$4" "$nums" >> "$dir/usage.tsv"
 }
 
@@ -113,7 +114,7 @@ harness_usage() {
 # The harness's stderr (claude can put protocol JSON there) shows only when
 # the step fails, and then all at once: nothing streams while it runs.
 harness_run() {
-  local h=$1 sid=$2 mode=$3 timeout=$4 prompt=$5 schema=$6 settings=${7:-'{}'} out err rc said budget
+  local h=$1 sid=$2 mode=$3 timeout=$4 prompt=$5 schema=$6 settings=${7:-'{}'} out err rc said budget cap=""
   local model effort provider use_key args fields
   local -a typed=() extra f env=()
   # args last, so a newline in it shifts nothing; the end marker survives $( )
@@ -132,8 +133,10 @@ harness_run() {
       [[ $use_key == true ]] || env=(env -u ANTHROPIC_API_KEY)
       if [[ -n $model ]]; then typed+=(--model "$model"); fi
       if [[ -n $effort ]]; then typed+=(--effort "$effort"); fi
-      budget=$(prc_get settings.stepBudget "$(git branch --show-current 2>/dev/null)" false) || budget=0
-      [[ $budget =~ ^0*(\.0*)?$ ]] || typed+=(--max-budget-usd "$budget") ;;
+      budget=$(prc_get settings.stepBudget "$(git branch --show-current 2>/dev/null)" false) \
+        || { (( $? == 3 )) && budget=0; } || { echo "sd config failed" >&2; rm -f "$err"; return 1; }
+      [[ $budget != -* ]] || { echo "settings.stepBudget must be 0 or more: $budget" >&2; rm -f "$err"; return 1; }
+      [[ $budget =~ ^0*(\.0*)?$ ]] || { typed+=(--max-budget-usd "$budget"); cap=" (settings.stepBudget $budget USD)"; } ;;
     pi)
       if [[ -n $provider ]]; then typed+=(--provider "$provider"); fi
       if [[ -n $model ]]; then typed+=(--model "$model"); fi
@@ -171,7 +174,7 @@ harness_run() {
     if [[ $h == claude ]]; then
       said=$(prc_line 'where kind(this) == "record"
         | values on(subtype == "error_max_budget_usd")
-            ? f"hit settings.stepBudget ('"$budget"' USD): the step cost {coalesce(total_cost_usd, 0)} USD"
+            ? f"hit the step budget'"$cap"': the step cost {coalesce(total_cost_usd, 0)} USD"
             : coalesce(nullif(result, ""), coalesce(is_error, false) ? subtype : null, "")
         | where this != ""' "$out" 2>/dev/null) || said=$out
     fi
