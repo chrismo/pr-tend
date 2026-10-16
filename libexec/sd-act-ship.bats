@@ -179,6 +179,22 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   [ -z "$(calls)" ]
 }
 
+@test "ship: a parent that has merged and is gone from the remote: restack first, not ship it" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
+  a_head=$(git rev-parse A)
+  git switch -q feat && git config branch.feat.sd-parent A
+  (cd "$TMP/other" && git fetch -q origin && git checkout -q main && git merge -q --squash origin/A \
+     && git commit -qm "A (#1)" --allow-empty && git push -q origin main 2>/dev/null && git push -q origin :A 2>/dev/null)
+  jq -n --arg h "$a_head" '{data: {viewer: {login: "me"}, repository: {defaultBranchRef: {name: "main"},
+    pullRequests: {nodes: [{number: 1, state: "MERGED", baseRefName: "main", headRefName: "A", headRefOid: $h, isCrossRepository: false}]}}}}' > "$GH/A.json"
+  run "$SD_ACT" ship
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"A has merged"*"sd act restack"* ]]
+  [ ! -e "$FX/claude.args" ]
+  [ -z "$(remote feat)" ]
+  [ -z "$(calls)" ]
+}
+
 @test "ship: a merged or closed PR is refused" {
   open_pr feat main 7
   jq '.data.repository.pullRequests.nodes[0].state = "MERGED"' "$GH/feat.json" > "$GH/t" && mv "$GH/t" "$GH/feat.json"
