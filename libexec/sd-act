@@ -1769,7 +1769,7 @@ values {s: this, why: sj(coalesce(errors, []), "; ")}
     when nul(s.parent.merged) then {hard: f"can't tell whether {s.parent.name} merged: {why}"}
     when on(s.parent.merged == false) then {hard: f"{s.parent.name} hasn't merged; PR #{s.pr.number} stays on it"}
     when coalesce(s.pr.stack, null) is not null and nul(s.sync.parent_in_history)
-      then {hard: f"PR #{s.pr.number} is in GitHub stack #{s.pr.stack.number}, and sd state can't tell whether GitHub has rewritten {s.branch} yet: {why}"}
+      then {hard: f"PR #{s.pr.number} is in GitHub stack #{s.pr.stack.number}, and sd state can't tell whether GitHub has rewritten {s.branch} yet{why != "" ? f": {why}" : ""}"}
     when coalesce(s.pr.stack, null) is not null and on(s.sync.parent_in_history)
       then {hard: f"PR #{s.pr.number} is in GitHub stack #{s.pr.stack.number}, and GitHub hasn't rewritten {s.branch} yet ({s.parent.name}'s commits are still in it): wait for it, then gh stack sync"}
     when on(s.pr.base == s.sync.default) then {done: f"PR #{s.pr.number} already targets {s.sync.default} (GitHub retargeted it)"}

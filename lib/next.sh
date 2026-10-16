@@ -90,7 +90,7 @@ values {...s, remote}
       ? step("stack-sync", "run", f"behind {sync.target} in GitHub stack #{pr.stack.number} ({pr.stack.position} of {pr.stack.size}): gh stack rebases it, not sd act restack",
              "gh stack sync") : null,
     open and stack_waiting and not undone and not foreign and not parent_closed
-      ? step("stack-wait", "wait", f"waiting on GitHub to retarget and rewrite this PR (stack #{pr.stack.number})", null) : null,
+      ? step("stack-wait", "wait", f"waiting on GitHub to {on(pr.base != sync.default) ? "retarget and rewrite" : "rewrite"} this PR (stack #{pr.stack.number})", null) : null,
     open and not native and not undone and not parent_closed and on(sync.up_to_date == false) and on(sync.conflict)
       ? step("conflict", "agent", f"restack onto {sync.target} conflicts: resolve it", "sd act restack --resolve") : null,
     open and not native and not undone and not parent_closed and on(sync.up_to_date == false) and not on(sync.conflict) and chase

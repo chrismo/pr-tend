@@ -566,6 +566,16 @@ NATIVE=('.pr.stack = {number: 29, position: 2, size: 2}')
   [ "$(step foreign cmd "${NATIVE[@]}" "${pushed[@]}")" = "git log HEAD..origin/feat" ]
 }
 
+@test "native stack: a restack undone from outside is still restack-undone, redone by hand (git rebase, not sd act restack)" {
+  [ "$(keys "${NATIVE[@]}" '.sync.undone = 1' '.sync.up_to_date = false' '.push.ahead = 1')" = restack-undone ]
+  [ "$(step restack-undone cmd "${NATIVE[@]}" '.sync.undone = 1' '.sync.old_base = null')" = "git rebase origin/main && sd act push" ]
+}
+
+@test "native stack: stack-wait after GitHub retargeted says it waits on the rewrite alone" {
+  local after=('.parent.name = "base"' '.parent.merged = true' '.parent.pr = {number: 3, state: "MERGED"}' '.sync.parent_in_history = true')
+  [ "$(step stack-wait say "${NATIVE[@]}" "${after[@]}")" = "waiting on GitHub to rewrite this PR (stack #29)" ]
+}
+
 @test "native stack: our own unpushed commits still push" {
   [ "$(keys "${NATIVE[@]}" '.push.ahead = 1')" = "push" ]
 }
