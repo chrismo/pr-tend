@@ -58,8 +58,9 @@
 # that comments after a push belongs in one of them. A reply is a new review
 # or comment: a bot that edits one sticky comment in place isn't seen, and
 # runs into bot-silent. Nor is the commit checked: a slow reply to an earlier
-# trigger that lands after a later one counts as the later one's reply. botTimeout (seconds, 3600): how long to wait on that
-# reply before bot-silent.
+# trigger that lands after a later one counts as the later one's reply.
+# botTimeout (seconds, 3600): how long to wait on that reply before
+# bot-silent.
 # State: branch.<name>.pr-{parent,tend,harness,session,lock}, branch.<name>.sd-handled
 # (multi-valued: node ids of bot reviews/comments already dealt with),
 # branch.<name>.sd-bot-triggered (when sd act trigger posted its comment).
