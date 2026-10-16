@@ -198,6 +198,17 @@ notified() { cat "$PS_FIXTURES/notified" 2>/dev/null || true; }
   [ "$(glyph repo)" = "❌" ]
 }
 
+@test "glyph: waiting on the review bot is ⏳ and quiet; the bot silent past its timeout is ❌ and notified" {
+  ps_fixture feat '.bot = {command: "/review-bot", timeout: 3600} | .review.bot = {status: "covered", replied: false, waited: 60}'
+  pass
+  [ "$(glyph repo)" = "⏳" ]
+  [ -z "$(notified)" ]
+  ps_fixture feat '.bot = {command: "/review-bot", timeout: 3600} | .review.bot = {status: "covered", replied: false, waited: 9000}'
+  pass
+  [ "$(glyph repo)" = "❌" ]
+  [[ "$(notified)" == *"hasn't answered"* ]]
+}
+
 @test "glyph: work an agent will do later is 🔧" {
   local a
   for a in '.sync.up_to_date = false | .sync.behind = 2 | .sync.target = "base"' \

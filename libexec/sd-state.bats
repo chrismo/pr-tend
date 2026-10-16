@@ -1141,8 +1141,82 @@ squash_parent_away() {
   [ "$(field '.threads.items | length')" = 4 ]
 }
 
-note() { # note <id> <type> <login> [body] — a review or top-level comment node
-  printf '{id: "%s", body: "%s", author: {__typename: "%s", login: "%s"}}' "$1" "${4-findings}" "$2" "$3"
+note() { # note <id> <type> <login> [body] [createdAt] — a review or top-level comment node
+  printf '{id: "%s", body: "%s", createdAt: "%s", author: {__typename: "%s", login: "%s"}}' "$1" "${4-findings}" "${5-2026-10-16T00:00:00Z}" "$2" "$3"
+}
+
+# ── O6, the bot's reply since the trigger (#63) ─────────────────────────────
+
+trigger_pin() { # bot pinned at HEAD, triggered at <time>
+  git update-ref refs/sheepdog/feat/bot HEAD
+  git config branch.feat.sd-bot-triggered "$1"
+}
+
+@test "review.bot: triggered and no bot word since: replied false, waited counts" {
+  git switch -qc feat && commit a.txt a
+  trigger_pin 2026-10-15T12:00:00Z
+  pr_fixture feat ".reviews.nodes = [$(note R0 Bot copilot earlier 2026-10-15T11:59:59Z)]"
+  state
+  [ "$(field .review.bot.status)" = covered ]
+  [ "$(field .review.bot.replied)" = false ]
+  [ "$(field .review.bot.triggered)" = 2026-10-15T12:00:00Z ]
+  [ "$(field .review.bot.waited)" -ge 0 ]
+}
+
+@test "review.bot: a bot review or comment after the trigger means replied; a human's doesn't" {
+  git switch -qc feat && commit a.txt a
+  trigger_pin 2026-10-15T12:00:00Z
+  pr_fixture feat ".reviews.nodes = [$(note R1 User alice lgtm 2026-10-15T12:05:00Z)]"
+  state
+  [ "$(field .review.bot.replied)" = false ]
+  pr_fixture feat ".reviews.nodes = [$(note R1 Bot copilot findings 2026-10-15T12:00:01Z)]"
+  state
+  [ "$(field .review.bot.replied)" = true ]
+  pr_fixture feat ".comments.nodes = [$(note C1 Bot copilot done 2026-10-15T12:05:00Z)]"
+  state
+  [ "$(field .review.bot.replied)" = true ]
+}
+
+@test "review.bot: an ignored bot's word doesn't count as the reply" {
+  git switch -qc feat && commit a.txt a
+  trigger_pin 2026-10-15T12:00:00Z
+  "$SD_CONFIG" set --global --json settings.botIgnore '["dependabot"]'
+  pr_fixture feat ".comments.nodes = [$(note C1 Bot dependabot bump 2026-10-15T12:05:00Z)]"
+  state
+  [ "$(field .review.bot.replied)" = false ]
+}
+
+@test "review.bot: no trigger time (a pin from before, or by hand), or no pin: replied null" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat
+  state
+  [ "$(field .review.bot.replied)" = null ]
+  git update-ref refs/sheepdog/feat/bot HEAD
+  state
+  [ "$(field .review.bot.status)" = covered ]
+  [ "$(field .review.bot.replied)" = null ]
+  [ "$(field .review.bot.waited)" = null ]
+}
+
+@test "bot: settings.botTimeout is reported, 3600 s by default" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat
+  state
+  [ "$(field .bot.timeout)" = 3600 ]
+  "$SD_CONFIG" set --global --json settings.botTimeout 600
+  state
+  [ "$(field .bot.timeout)" = 600 ]
+}
+
+@test "summary: bot ⏳ while waiting on its reply, bot ✓ once it came" {
+  git switch -qc feat && commit a.txt a
+  trigger_pin 2026-10-15T12:00:00Z
+  pr_fixture feat
+  run "$SD_STATE"
+  [[ "$output" == *"bot ⏳"* ]]
+  pr_fixture feat ".reviews.nodes = [$(note R1 Bot copilot findings 2026-10-15T12:00:01Z)]"
+  run "$SD_STATE"
+  [[ "$output" == *"bot ✓"* ]]
 }
 
 @test "threads: inline thread items are typed thread" {

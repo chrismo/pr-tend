@@ -1035,6 +1035,16 @@ old_super() {
   [[ "$output" == *"settings.stepBudget: cannot cast"* ]]
 }
 
+@test "settings.botTimeout: seconds to wait for the review bot, 3600 by default" {
+  [ "$("$SD_CONFIG" get settings.botTimeout)" = 3600 ]
+  "$SD_CONFIG" set --global --json settings.botTimeout 600
+  [ "$("$SD_CONFIG" get settings.botTimeout)" = 600 ]
+  write_global '{"settings":{"botTimeout":"soon"}}'
+  run "$SD_CONFIG" show
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"settings.botTimeout: cannot cast"* ]]
+}
+
 @test "settings.botCommand: a typed string setting, empty by default" {
   run "$SD_CONFIG" get settings.botCommand
   [ "$status" -eq 0 ]

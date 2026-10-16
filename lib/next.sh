@@ -50,7 +50,8 @@ values {...s, remote}
                     and not (covers(review.local) or covers(review.bot) or covers(review.accepted))),
       fixing:=(on(review.findings.at_head) and not (covers(review.local) or covers(review.bot) or covers(review.accepted))),
       bot_due:=(coalesce(bot.command, null) is not null and covers(review.local)
-                and not covers(review.bot) and not covers(review.accepted))
+                and not covers(review.bot) and not covers(review.accepted)),
+      bot_waiting:=(covers(review.bot) and on(review.bot.replied == false))
 | unnest [
     on(pr.state == "MERGED") ? step("merged", "run", "merged: drop the branch'"'"'s pins and enrollment, then remove this worktree", "sd act forget") : null,
     on(pr.state == "CLOSED") ? step("closed", "you", "PR closed without merging", null) : null,
@@ -99,7 +100,7 @@ values {...s, remote}
              : n(push.ahead) == 0 ? f"force-push: drop {plural(push.behind, "commit")} the remote has, reset away here"
              : f"push {plural(push.ahead, "commit")}", "sd act push") : null,
     pr is null and len(errors) == 0 and not parent_unpushed ? step("open-pr", "run", "ship: push, open a draft PR", "sd act ship") : null,
-    has_pr and draft_ready and not need_review and not bot_due
+    has_pr and draft_ready and not need_review and not bot_due and not bot_waiting
       ? step("draft", "run", "CI green and reviewed: mark the PR ready for review", "gh pr ready") : null,
     open and fixing and not on(review.findings.declined) and review.findings.round < review.findings.cap
       ? step("review-fix", "agent", f"fix {plural(review.findings.n, "review finding")} (round {review.findings.round}/{review.findings.cap})",
@@ -112,6 +113,11 @@ values {...s, remote}
       : open and need_review ? step("review", "agent", "review the changes since the last review", "sd act review") : null,
     has_pr and not to_push and not held and not foreign and bot_due
       ? step("bot-trigger", "run", f"trigger the review bot ({bot.command})", "sd act trigger") : null,
+    has_pr and bot_waiting and n(review.bot.waited) <= n(bot.timeout)
+      ? step("bot-wait", "wait", f"waiting on the review bot ({bot.command})", null) : null,
+    has_pr and bot_waiting and n(review.bot.waited) > n(bot.timeout)
+      ? step("bot-silent", "you", f"the review bot hasn'"'"'t answered in {n(review.bot.waited) / 60} min: check it, or trigger it again",
+             "sd act trigger --force") : null,
     has_pr and on(ci.verdict == "inconclusive") ? step("ci-rerun", "run", "rerun cancelled CI", "gh pr checks") : null,
     has_pr and not to_push and not held and (on(ci.verdict == "pending") or on(ci.for_head == false))
       ? step("ci-wait", "wait", on(ci.verdict == "pending") ? "CI running" : "CI hasn'"'"'t reported on HEAD yet",
@@ -125,7 +131,7 @@ values {...s, remote}
              ? f"waiting on review from {join(pr.review_requests, ", ")}" : "waiting on a required review", null) : null,
     has_pr and stacked and not on(parent.merged)
       ? step("parent-wait", "wait", f"waiting on {parent.name} (#{parent.pr.number}) to merge first", null) : null,
-    has_pr and not review_required and not stacked and not parent_closed and not gh_behind and not on(pr.draft)
+    has_pr and not review_required and not stacked and not parent_closed and not gh_behind and not on(pr.draft) and not bot_waiting
       ? (merge_state in ["CLEAN", "UNSTABLE", "HAS_HOOKS"] ? step("ready", "you", "ready to merge", "gh pr merge")
          : merge_state == "UNKNOWN" ? step("merge-wait", "wait", "GitHub hasn'"'"'t decided whether it can merge yet", null)
          : step("blocked", "you", f"GitHub says {why_blocked(merge_state)}: see why", "gh pr view --web")) : null
