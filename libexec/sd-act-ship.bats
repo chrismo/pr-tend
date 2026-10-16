@@ -94,6 +94,17 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   [[ $allow != *Edit* && $allow != *Write* ]]
 }
 
+@test "describe: settings.describePrompt replaces the guidance; read-only stays" {
+  git config branch.feat.sd-task "add a third line"
+  printf 'Titles in French.\n' > "$TMP/describe.md"
+  echo "{\"settings\": {\"describePrompt\": \"$TMP/describe.md\"}}" > "$SHEEPDOG_CONFIG"
+  "$SD_ACT" describe >/dev/null
+  [ "$(head -1 "$FX/claude.prompt")" = "Titles in French." ]
+  ! grep -q 'at most 70 characters' "$FX/claude.prompt" || false
+  grep -q 'You are read-only here' "$FX/claude.prompt"
+  grep -q '^+c$' "$FX/claude.prompt"
+}
+
 @test "describe: stored for HEAD, and ship reuses it without calling the agent" {
   "$SD_ACT" describe >/dev/null
   rm -f "$FX/claude.args"

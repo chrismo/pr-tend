@@ -574,6 +574,19 @@ rebase_in_progress() { [[ -e $(git rev-parse --git-path rebase-merge) || -e $(gi
   [ -z "$(git status --porcelain)" ]
 }
 
+@test "--resolve: settings.resolvePrompt replaces the guidance; the rebase boundaries stay" {
+  git config branch.feat.sd-task "capitalise g"
+  upstream main 's/^g$/X/'
+  resolver GX
+  printf 'Prefer the target.\n' > "$TMP/resolve.md"
+  echo "{\"settings\": {\"resolvePrompt\": \"$TMP/resolve.md\"}}" > "$SHEEPDOG_CONFIG"
+  "$SD_ACT" restack --resolve >/dev/null
+  [ "$(head -1 "$FX/claude.prompt")" = "Prefer the target." ]
+  ! grep -q 'keeps this branch.s intent' "$FX/claude.prompt" || false
+  grep -q 'Do not run git add' "$FX/claude.prompt"
+  grep -q 'already-on-target' "$FX/claude.prompt"
+}
+
 @test "--resolve: the agent sees the conflicting files and hunks, in the branch's session, edit tools only" {
   git config branch.feat.sd-task "capitalise g"
   upstream main 's/^g$/X/'

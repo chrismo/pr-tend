@@ -773,3 +773,15 @@ EOF
   [ "$status" -ne 0 ]
   [ ! -f "$FX/claude.args" ]
 }
+
+@test "settings.addressPrompt replaces the guidance; the actions and boundaries stay" {
+  printf 'Be terse with bots.\n' > "$TMP/address.md"
+  write_cfg "{\"settings\": {\"addressPrompt\": \"$TMP/address.md\"}}"
+  run "$SD_ACT" address
+  [ "$status" -eq 0 ]
+  grep -q 'Be terse with bots.' "$FX/claude.args"
+  ! grep -q 'You are addressing automated code-review feedback' "$FX/claude.args" || false
+  grep -q 'pushback:' "$FX/claude.args"
+  grep -q 'Do not commit, push, or run gh' "$FX/claude.args"
+  grep -q 'should be `THREE`' "$FX/claude.args"
+}
