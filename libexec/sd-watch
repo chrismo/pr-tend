@@ -124,7 +124,7 @@ drop_ambiguous() {
   local base
   while IFS= read -r base; do
     rm -f "$STATUS_DIR/$base.pr"
-  done < <(awk -F'\t' '{ n = $1; sub(/.*\//, "", n); if (++c[n "\t" $2] == 2) print n }' "$1" 2>/dev/null)
+  done < <(awk -F'\t' '!seen[$1]++ { n = $1; sub(/.*\//, "", n); if (++c[n "\t" $2] == 2) print n }' "$1" 2>/dev/null)
 }
 
 # glyph_of [<path>]: the glyph the last check left for the worktree holding

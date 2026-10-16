@@ -1252,7 +1252,15 @@ SH
   pass
   (cd "$TMP/x/wt" && "$SD_WATCH" refresh) >/dev/null
   [ ! -e "$STATUS_DIR/wt.pr" ]
+  [ "$("$SD_WATCH" glyph "$TMP/x/wt")" = "✅" ]
   [ "$("$SD_WATCH" glyph "$TMP/y/wt")" = "❌" ]
+}
+
+@test "same name: a repo registered twice isn't its own twin" {
+  ps_fixture feat
+  git config --global --add sheepdog.repo "$TMP/repo"
+  pass
+  [ "$(glyph repo)" = "✅" ]
 }
 
 # ── status ───────────────────────────────────────────────────────────────────
