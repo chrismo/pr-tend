@@ -90,7 +90,11 @@
 #             didn't move, push, then open a draft PR on the parent (sd-parent,
 #             else the default branch) and enroll; with a PR already open, fix
 #             up its title, body and base instead. Warns when the local review
-#             doesn't cover HEAD; the draft stays a draft until it does
+#             doesn't cover HEAD; the draft stays a draft until it does.
+#             Refuses while the parent (sd-parent) isn't on the remote, has
+#             merged (restack first), was closed, or can't be looked up; a
+#             merged parent with the branch already on the default branch
+#             ships onto it and rewrites sd-parent
 #   trigger   post settings.botCommand on the PR so the review bot runs, and
 #             pin bot at HEAD; nothing when already pinned there. HEAD must
 #             be on the remote (the bot reviews what GitHub has); the local
@@ -961,6 +965,28 @@ ship() {
     none|OPEN) ;;
     *) die "PR #$(prc_val "$state" pr.number) is $(tr '[:upper:]' '[:lower:]' <<<"$pr_state"); nothing to ship" ;;
   esac
+  parent=$(git config --get "branch.$b.sd-parent" || true)
+  parent=${parent:-$(prc_val "$state" sync.default)}
+  if [[ $parent != "$(prc_val "$state" sync.default)" ]]; then
+    # Like RESTACK_GATE: a parent whose state is unknown or closed is nobody's
+    # to ship onto; a merged one means restack first, unless the branch is
+    # already on the target (a fast-forward or rebase merge), in which case
+    # the parent is the default branch from here on; an open parent must be
+    # on the remote before its child can be: ship the parent first.
+    local pstate
+    pstate=$(prc_val "$state" 'parent.merged is null ? "unknown" : on(parent.pr.state == "CLOSED") ? "closed"
+      : on(parent.merged) ? (on(sync.up_to_date) ? "merged-on-target" : "merged") : "open"') \
+      || die "can't parse sd state's answer"
+    case $pstate in
+      open) git -C "$wt" show-ref -q --verify "refs/remotes/$remote/$parent" \
+              || die "parent $parent isn't on $remote: ship it first (sd act ship $parent)" ;;
+      unknown) die "can't tell whether $parent merged: $(prc_val "$state" 'sj(coalesce(errors, []), "; ")')" ;;
+      closed) die "parent $parent (#$(prc_val "$state" parent.pr.number)) was closed without merging: decide what $b targets (git config branch.$b.sd-parent <branch>), then ship" ;;
+      merged) die "parent $parent has merged: sd act restack first, which lands $b on $(prc_val "$state" sync.target) and rewrites sd-parent" ;;
+      merged-on-target) parent_to_default "$b" "$state"; parent=$(prc_val "$state" sync.default) ;;
+      *) die "can't read the parent's state from sd state: $pstate" ;;
+    esac
+  fi
   prc_line 'where not (coalesce(review.local.status, "none") in ["covered", "rewritten-same"])
     | values "sd act: warning: the local review doesn'"'"'t cover HEAD (sd act review); the PR stays a draft until it does"' "$state" >&2
   head=$(git rev-parse "refs/heads/$b")
@@ -972,8 +998,6 @@ ship() {
   fi
   title=$(prc_line 'values title' "$(<"$f")") body=$(prc_line 'values body' "$(<"$f")")
   push_branch "$b" "$remote" || exit 1
-  parent=$(git config --get "branch.$b.sd-parent" || true)
-  parent=${parent:-$(prc_val "$state" sync.default)}
   if [[ $pr_state == none ]]; then
     url=$(gh pr create --draft --base "$parent" --head "$b" --title "$title" --body "$body") \
       || die "gh pr create failed; $b is pushed. Fix the cause and ship again"
