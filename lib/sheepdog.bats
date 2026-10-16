@@ -81,6 +81,14 @@ EOF
   [[ "$stderr" == *"out of turns"* ]]
 }
 
+@test "harness_run: an error result without result text names its subtype" {
+  harness_stubs
+  echo '{"type": "result", "subtype": "error_max_turns", "is_error": true}' > "$FX/out"
+  run --separate-stderr harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *error_max_turns* ]]
+}
+
 @test "harness_run: pi's stderr follows the same rule" {
   harness_stubs
   printf 'Done.\n\n```json\n{"ok": true}\n```\n' > "$FX/out"

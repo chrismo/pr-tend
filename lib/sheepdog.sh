@@ -108,9 +108,12 @@ harness_run() {
   rc=$?
   if (( rc != 0 )); then
     cat "$err" >&2
-    # claude's own account of the failure (e.g. an is_error result's text).
+    # claude's own account of the failure: an error result's text, else its
+    # subtype (e.g. error_max_turns).
     if [[ $h == claude ]]; then
-      prc_line 'where kind(this) == "record" and coalesce(result, "") != "" | values result' "$out" >&2 2>/dev/null
+      prc_line 'where kind(this) == "record"
+        | values coalesce(nullif(result, ""), subtype, "")
+        | where this != ""' "$out" >&2 2>/dev/null
     fi
   fi
   rm -f "$err"
