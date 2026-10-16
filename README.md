@@ -27,6 +27,15 @@ Needs on `PATH`: `bash5` (a link to bash 5+; the commands are
 `#!/usr/bin/env bash5`), `git`, `gh`, `jq`, and SuperDB `super` **0.3.0**
 exactly. `claude` and/or `pi` for the agent steps.
 
+## Agent credentials
+
+Claude steps run with `ANTHROPIC_API_KEY` unset, so `claude -p` uses the
+claude.ai login (an exported key would override it, and a key in a shell rc is
+often not the one to bill). To bill the key instead, set
+`harnesses.claude.useApiKey` to `true` (`sd config set --global --json
+harnesses.claude.useApiKey true`). pi can't use the claude.ai login, so it
+keeps the key, or runs on the provider its block names.
+
 ## Interfaces with other tools
 
 - `sd watch` writes a glyph per worktree to `~/.claude/tab-status/<worktree>.pr`

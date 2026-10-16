@@ -46,6 +46,7 @@ harness_stubs() {
     cat > "$TMP/fakebin/$h" <<'EOF'
 #!/usr/bin/env bash
 echo '{"type":"system","subtype":"init","session_id":"x"}' >&2
+echo "${ANTHROPIC_API_KEY-unset}" > "$FX/key"
 cat "$FX/out"
 exit "$(cat "$FX/status" 2>/dev/null || echo 0)"
 EOF
@@ -53,6 +54,33 @@ EOF
   done
   export PATH="$TMP/fakebin:$PATH"
   echo '{"type": "result", "is_error": false, "structured_output": {"ok": true}}' > "$FX/out"
+}
+
+@test "harness_run: claude runs without ANTHROPIC_API_KEY, so the claude.ai login is used" {
+  harness_stubs
+  export ANTHROPIC_API_KEY=sk-no-credit
+  run harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FX/key")" = unset ]
+}
+
+@test "harness_run: harnesses.claude.useApiKey keeps the key" {
+  harness_stubs
+  export ANTHROPIC_API_KEY=sk-paid
+  run harness_run claude sid1 new 30 "do it" '{}' '{"harness": "claude", "useApiKey": true}'
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FX/key")" = sk-paid ]
+  run harness_run claude sid1 new 30 "do it" '{}' '{"harness": "claude", "useApiKey": false}'
+  [ "$(cat "$FX/key")" = unset ]
+}
+
+@test "harness_run: pi keeps the key; it can't use the claude.ai login" {
+  harness_stubs
+  export ANTHROPIC_API_KEY=sk-paid
+  printf 'Done.\n\n```json\n{"ok": true}\n```\n' > "$FX/out"
+  run harness_run pi sid1 new 30 "do it" '{}'
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FX/key")" = sk-paid ]
 }
 
 @test "harness_run: a successful run keeps the harness's stderr off the terminal" {
