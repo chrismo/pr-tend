@@ -2,7 +2,7 @@
 #
 # sd watch - observe-only pass over every enrolled branch.
 #
-# Usage: sd watch [refresh [<branch>] | status | install | uninstall]
+# Usage: sd watch [refresh [<branch>] | vacuum | status | install | uninstall]
 #
 #   (none)     for each repo in global git config sheepdog.repo: fetch, then
 #              sd state every branch with branch.<name>.sheepdog=true. Writes a
@@ -16,6 +16,8 @@
 #              fetch its repo, glyph, notify, cache its state. Not a pass: other
 #              branches and glyphs are left alone and status still shows the
 #              last pass. Exits non-zero when the branch couldn't be checked.
+#   vacuum     preview stale enrollments: each one's reason and how long it
+#              has been stale. Changes nothing
 #   status     print the last pass
 #   install    launchd job: a pass every settings.interval seconds (default 300)
 #   uninstall  remove the job
@@ -46,10 +48,18 @@
 # A notification that fails is tried once more, on the next pass that still
 # shows its step, then given up on.
 #
+# Stale enrollments: a pass unenrolls a branch (git config only; never the
+# branch, its pins, a worktree or a PR) with no local branch at once, and one
+# merged, closed or checked out nowhere once it has been so for
+# settings.vacuumAfter seconds (default 7 days; 0 turns off these three). An
+# unsure pass (errors, stale) neither starts, resets nor acts on that clock,
+# and a new reason restarts it. Each timed unenroll notifies, once; one for no
+# local branch is only a pass line.
+#
 # Env:    SHEEPDOG_STATE_DIR (~/.local/state/sheepdog), STATUS_DIR (~/.claude/tab-status)
 #         SHEEPDOG_WATCH_TIMEOUT (120): seconds a fetch or sd state may take
 # Config: read with lib/config.sh, no branch file (global file over
-#         built-in defaults): settings.notify, .interval, .remote.
+#         built-in defaults): settings.notify, .interval, .remote, .vacuumAfter.
 #         notify — shell command, run with <title> <message> appended
 #         (default: a macOS notification)
 
@@ -106,6 +116,7 @@ write_glyph() { # write_glyph <worktree-or-empty> <branch> <glyph>
 # is off: every failure is handled explicitly.
 check() {
   local repo=$1 name=$2 b=$3 wt=$4 json cls glyph state_file prev prev_failed key msg errf
+  local carry reason since prev_since prev_reason now stale=null unenrolled=
   local -a sent=() failed=()
   errf=$(mktemp)
   if ! json=$(cd "$repo" && with_timeout "$TIMEOUT" sd-state --json "$b" 2>"$errf" </dev/null); then
@@ -141,21 +152,45 @@ check() {
       failed+=("\"$key\"")
     fi
   done < <(prc_line 'unnest {prev, r: c.reasons} | where not (r.key in prev) | values f"{r.key} {r.msg}"' "{\"prev\": $prev, \"c\": $cls}")
+  carry=$(prc_line 'values carry' "$cls")
+  read -r prev_since prev_reason < <(prc_line 'values coalesce(f"{stale.since} {stale.reason}", "")' "$(cat "$state_file" 2>/dev/null)" 2>/dev/null) || true
+  now=$(date +%s)
+  case $glyph in 🏁) reason=merged ;; 🚫) reason=closed ;; *) reason= ;; esac
+  [[ -n $reason || -n $wt ]] || reason="checked out nowhere"
+  if [[ $carry == true ]]; then
+    since=$prev_since reason=$prev_reason
+  elif [[ -n $reason && $reason == "$prev_reason" && -n $prev_since ]]; then
+    since=$prev_since
+  else
+    since=${reason:+$now}
+  fi
+  if [[ -n $since ]]; then
+    stale="{\"reason\": \"$reason\", \"since\": $since}"
+    if [[ $carry != true ]] && (( ${VACUUM_AFTER:-0} > 0 && now - since >= VACUUM_AFTER )); then
+      git -C "$repo" config --unset "branch.$b.sheepdog" \
+        && unenrolled="unenrolled: $reason for $(dur $(( now - since )))" stale=null
+    fi
+  fi
+
   # A refresh can overlap a pass: unlocked, so both may notify a new reason
   # and the slower may write the older state. Only the temp file is per-process.
-  prc_json 'values {...c, state: s,
+  prc_json 'values {...c, state: s, stale: st,
                     failed: c.carry ? [...prev_failed, ...failed]
                       : [...failed, ...coalesce([unnest {k: c.keep, p: prev_failed} | where p in k | values p], [])],
                     notified: c.carry ? [...prev, ...sent]
                       : [...coalesce([unnest {k: c.keep, p: prev} | where p in k | values p], []),
                          ...coalesce([unnest {k: [...prev, ...sent], r: c.reasons} | where r.key in k | values r.key], [])]}' \
-    "{\"c\": $cls, \"s\": $json, \"prev\": $prev, \"prev_failed\": $prev_failed, \"sent\": [$(IFS=,; echo "${sent[*]}")], \"failed\": [$(IFS=,; echo "${failed[*]}")]}" > "$state_file.$$.tmp" \
+    "{\"c\": $cls, \"s\": $json, \"prev\": $prev, \"prev_failed\": $prev_failed, \"st\": $stale, \"sent\": [$(IFS=,; echo "${sent[*]}")], \"failed\": [$(IFS=,; echo "${failed[*]}")]}" > "$state_file.$$.tmp" \
     && mv "$state_file.$$.tmp" "$state_file" \
     || { rm -f "$state_file.$$.tmp"; echo "sd watch: couldn't save $state_file: its reasons will notify again" >&2; }
 
   write_glyph "$wt" "$b" "$glyph"
   printf '%s\t%s\t%s\t%s\n' "$name" "$b" "$glyph" \
     "$(prc_line 'values sj(coalesce([unnest [...reasons, {msg: coalesce(note, null)}] | where msg is not null | values msg], []), "; ")' "$cls")"
+  if [[ -n $unenrolled ]]; then
+    notify "$name $b" "$unenrolled (sd act enroll $b to watch it again)"
+    printf '%s\t%s\t-\t%s\n' "$name" "$b" "$unenrolled"
+  fi
 }
 
 state_dir() { echo "$STATE_DIR/branches/$(basename "$1")-$(printf '%s' "$1" | shasum | cut -c1-8)"; }
@@ -240,16 +275,34 @@ fetch() {
   fi
 }
 
-# load_worktrees <repo>: worktree_of[<branch>] is the worktree it's checked out in.
+# load_worktrees <repo>: worktree_of[<branch>] is the worktree it's checked out
+# in, counting one paused mid-rebase of it (listed as detached), and not one
+# whose directory is gone (rm -rf leaves git listing it).
 load_worktrees() {
-  local key val wt_path
+  local key val wt_path gd head
   declare -gA worktree_of=()
   while read -r key val; do
     case $key in
       worktree) wt_path=$val ;;
-      branch) worktree_of[${val#refs/heads/}]=$wt_path ;;
+      branch) if [[ -d $wt_path ]]; then worktree_of[${val#refs/heads/}]=$wt_path; fi ;;
+      detached)
+        gd=$(git -C "$wt_path" rev-parse --absolute-git-dir 2>/dev/null) || continue
+        head=$(cat "$gd/rebase-merge/head-name" 2>/dev/null || cat "$gd/rebase-apply/head-name" 2>/dev/null) || continue
+        if [[ $head == refs/heads/* ]]; then worktree_of[${head#refs/heads/}]=$wt_path; fi ;;
     esac
   done < <(git -C "$1" worktree list --porcelain)
+}
+
+# dur <seconds>: whole days, else hours, else minutes.
+dur() {
+  if (( $1 >= 86400 )); then echo "$(( $1 / 86400 ))d"
+  elif (( $1 >= 3600 )); then echo "$(( $1 / 3600 ))h"
+  else echo "$(( $1 / 60 ))m"; fi
+}
+
+enrolled_branches() {
+  git -C "$1" config --get-regexp '^branch\..*\.sheepdog$' 2>/dev/null \
+    | awk '$2 == "true" { sub(/^branch\./, "", $1); sub(/\.sheepdog$/, "", $1); print $1 }'
 }
 
 run_pass() {
@@ -259,13 +312,23 @@ run_pass() {
   local -a repos branches
   local repo name b lines="" out
   mapfile -t repos < <(git config --global --get-all sheepdog.repo || true)
+  # A config failure is reported per repo by fetch, which then skips it.
+  VACUUM_AFTER=$(prc_get settings.vacuumAfter "" true 2>/dev/null) || VACUUM_AFTER=0
 
   for repo in "${repos[@]}"; do
     [[ -d $repo ]] || continue
     name=$(basename "$repo")
-    mapfile -t branches < <(git -C "$repo" config --get-regexp '^branch\..*\.sheepdog$' 2>/dev/null \
-      | awk '$2 == "true" { sub(/^branch\./, "", $1); sub(/\.sheepdog$/, "", $1); print $1 }')
+    mapfile -t branches < <(enrolled_branches "$repo")
     sweep_pins "$repo"
+    local -a kept=()
+    for b in "${branches[@]}"; do
+      if git -C "$repo" rev-parse -q --verify "refs/heads/$b" >/dev/null; then
+        kept+=("$b")
+      elif git -C "$repo" config --unset "branch.$b.sheepdog"; then
+        lines+="$name"$'\t'"$b"$'\t-\tunenrolled: no local branch\n'
+      fi
+    done
+    branches=("${kept[@]}")
     out=$(report_gone "$repo" "$name") || true
     [[ -z $out ]] || lines+=$out$'\n'
     (( ${#branches[@]} )) || continue
@@ -315,11 +378,41 @@ refresh() {
   mkdir -p "$STATE_DIR" "$STATUS_DIR"
   WRITTEN=/dev/null
   out=$(fetch "$repo" "$name") || { show <<<"$out"; exit 1; }
+  VACUUM_AFTER=$(cd "$repo" && prc_get settings.vacuumAfter "" true) || VACUUM_AFTER=0
   [[ -z $out ]] || show <<<"$out"
   load_worktrees "$repo"
   line=$(check "$repo" "$name" "$b" "${worktree_of[$b]:-}") || rc=1
   show <<<"$line"
   return $rc
+}
+
+# vacuum_preview: each enrolled branch on the stale clock, from cached state.
+vacuum_preview() {
+  local -a repos branches
+  local repo name b after since reason now out=""
+  now=$(date +%s)
+  after=$(prc_get settings.vacuumAfter "" true) || die "sd config failed"
+  mapfile -t repos < <(git config --global --get-all sheepdog.repo || true)
+  for repo in "${repos[@]}"; do
+    [[ -d $repo ]] || continue
+    name=$(basename "$repo")
+    mapfile -t branches < <(enrolled_branches "$repo")
+    for b in "${branches[@]}"; do
+      if ! git -C "$repo" rev-parse -q --verify "refs/heads/$b" >/dev/null; then
+        out+="$name"$'\t'"$b"$'\tno local branch: unenrolled next pass\n'
+        continue
+      fi
+      since= reason=
+      read -r since reason < <(prc_line 'values coalesce(f"{stale.since} {stale.reason}", "")' \
+        "$(cat "$(state_dir "$repo")/$b.json" 2>/dev/null)" 2>/dev/null) || true
+      [[ -n $since ]] || continue
+      out+="$name"$'\t'"$b"$'\t'"$reason for $(dur $(( now - since ))): "
+      if (( after == 0 )); then out+=$'kept (vacuumAfter 0)\n'
+      elif (( now - since >= after )); then out+=$'unenrolled next pass\n'
+      else out+="unenrolled after $(dur "$after")"$'\n'; fi
+    done
+  done
+  if [[ -n $out ]]; then printf '%s' "$out" | show; else echo "nothing stale"; fi
 }
 
 plist_path() { echo "$LAUNCH_AGENTS/$LABEL.plist"; }
@@ -379,6 +472,12 @@ uninstall_job() {
 case ${1:-} in
   "") prc_super_init || exit 1; run_pass ;;
   refresh) shift; refresh "$@" ;;
+  vacuum)
+    case ${2:-} in
+      "") prc_super_init || exit 1; vacuum_preview ;;
+      -h|--help) usage ;;
+      *) die "usage: sd watch vacuum (it takes no arguments)" ;;
+    esac ;;
   status)
     if [[ -f $STATE_DIR/last-pass ]]; then show < "$STATE_DIR/last-pass"; else echo "no pass yet"; fi ;;
   install) prc_super_init || exit 1; install_job ;;
