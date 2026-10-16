@@ -977,6 +977,20 @@ values {remote, resolve, s, why: sj(coalesce(s.errors, []), "; "), onto: f"{remo
 | values coalesce([unnest this | where this is not null], [])
 EOF
 
+# Over the sd state JSON: why sd-parent stays on a merged parent, else nothing.
+# Until the PR targets the default branch, sd-parent is what keeps retarget
+# owed: deleting the merged parent's branch would close a PR still on it.
+read -r -d '' KEEP_PARENT <<'EOF' || true
+where on(parent.merged)
+| values {s: this, gh: f"gh ({branch}):"}
+| values nul(s.pr)
+    ? (len(coalesce([unnest {gh, e: coalesce(s.errors, [])} | where e[0:len(gh)] == gh], [])) > 0
+       ? f"sd-parent of {s.branch} stays {s.parent.name}: can't read its PR" : null)
+  : on(s.pr.state == "OPEN") and on(s.pr.base != s.sync.default)
+    ? f"PR #{s.pr.number} still targets {s.pr.base}: sd act retarget" : null
+| where this is not null
+EOF
+
 restack() {
   local b=$branch wt remote state gate line target new_base old_base old_head new_head before replay
   wt=$(worktree_for "$b")
@@ -1023,9 +1037,8 @@ restack() {
   fi
   git update-ref -m "sd act restack" "refs/sheepdog/$b/base" "$new_base"
   echo "restacked $b onto $remote/$target ($(plural "$(git rev-list --count "$new_base..$new_head")" commit)); not pushed: sd act push"
-  # Until the PR targets the default branch, sd-parent is what keeps retarget
-  # owed: deleting the merged parent's branch would close a PR still on it.
-  line=$(prc_line 'where on(parent.merged) and on(pr.state == "OPEN") and on(pr.base != sync.default) | values f"PR #{pr.number} still targets {pr.base}: sd act retarget"' "$state")
+  line=$(prc_line "$KEEP_PARENT" "$state") \
+    || die "restacked $b, but couldn't tell whether its PR still targets the parent; sd-parent left as is"
   if [[ -n $line ]]; then echo "$line"; else parent_to_default "$b" "$state"; fi
   if $resolved; then
     echo "conflicts resolved by the agent, so $b's change is unreviewed: sd act review next"

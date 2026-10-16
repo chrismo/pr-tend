@@ -195,6 +195,18 @@ base_pin() { git rev-parse -q --verify refs/sheepdog/feat/base || true; }
   [ "$(git config branch.child.sd-parent)" = main ]
 }
 
+@test "parent merged, the branch's own PR lookup fails: sd-parent kept" {
+  stacked_child
+  (cd "$TMP/other" && git fetch -q origin && git checkout -q main && git merge -q --squash origin/A >/dev/null \
+     && git commit -qm "A (#1)" && git push -q origin main 2>/dev/null)
+  merged_pr A "$a_head"
+  GH_FAIL_FOR=child run "$SD_ACT" restack
+  [ "$status" -eq 0 ]
+  [ "$(git rev-parse child^)" = "$(git rev-parse origin/main)" ]
+  [ "$(git config branch.child.sd-parent)" = A ]
+  [[ "$output" == *"sd-parent of child stays A: can't read its PR"* ]]
+}
+
 @test "restack onto a parent closed without merging is refused" {
   stacked_child
   closed_pr A "$a_head"
