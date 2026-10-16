@@ -54,11 +54,13 @@ teardown() {
 @test "a regular file blocks installation without being overwritten or installing the watcher" {
   mkdir -p "$LOCAL_BIN"
   echo mine > "$LOCAL_BIN/sd"
+  ln -s /somewhere/pr-watch "$LOCAL_BIN/pr-watch"
   run "$INSTALLER"
   [ "$status" -ne 0 ]
   [ ! -e "$WATCH_CALLS" ]
   [ ! -L "$LOCAL_BIN/sd" ]
   [ "$(cat "$LOCAL_BIN/sd")" = mine ]
+  [ "$(readlink "$LOCAL_BIN/pr-watch")" = /somewhere/pr-watch ]
   [[ "$output" == *"sd"*"not a symlink"* ]]
 }
 
