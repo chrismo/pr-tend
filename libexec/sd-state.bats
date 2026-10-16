@@ -1177,6 +1177,14 @@ trigger_pin() { # bot pinned at HEAD, triggered at <time>
   [ "$(field .review.bot.replied)" = true ]
 }
 
+@test "review.bot: a review started before the trigger and submitted after it is the reply" {
+  git switch -qc feat && commit a.txt a
+  trigger_pin 2026-10-15T12:00:00Z
+  pr_fixture feat '.reviews.nodes = [{id: "R1", body: "findings", createdAt: "2026-10-15T11:50:00Z", submittedAt: "2026-10-15T12:05:00Z", author: {__typename: "Bot", login: "copilot"}}]'
+  state
+  [ "$(field .review.bot.replied)" = true ]
+}
+
 @test "review.bot: an ignored bot's word doesn't count as the reply" {
   git switch -qc feat && commit a.txt a
   trigger_pin 2026-10-15T12:00:00Z
