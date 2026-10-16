@@ -161,29 +161,29 @@ state_dir() { echo "$STATE_DIR/branches/$(basename "$1")-$(printf '%s' "$1" | sh
 # notified is. GitHub not answering, or a failed notification's one retry,
 # keeps the state for the next pass.
 report_gone() {
-  local repo=$1 name=$2 dir f d b cached pr pull msg pr_state err
+  local repo=$1 name=$2 dir f d b cached pr url api pull msg pr_state err
   dir=$(state_dir "$repo")
   [[ -d $dir ]] || return 0
   while IFS= read -r f; do
-    b=${f#"$dir/"}; b=${b%.json}
+    b=${f#"$dir/"}; b=${b%.json}; err=
     [[ $(git -C "$repo" config "branch.$b.sheepdog") == true ]] && continue
     cached=$(cat "$f")
     pr=$(prc_line 'values coalesce(state.pr.number, "")' "$cached" 2>/dev/null) || pr=
     if [[ -n $pr ]] && ! git -C "$repo" rev-parse -q --verify "refs/heads/$b" >/dev/null \
        && [[ $(prc_line 'values "merged" in coalesce(notified, [unnest reasons | values key], [])' "$cached" 2>/dev/null) != true ]]; then
+      # By URL, not {owner}/{repo}: gh's default repo may be a fork.
+      url=$(prc_line 'values coalesce(state.pr.url, "")' "$cached" 2>/dev/null) || url=
+      api="repos/{owner}/{repo}/pulls/$pr"
+      [[ $url =~ ^https://[^/]+/([^/]+/[^/]+)/pull/([0-9]+)$ ]] && api="repos/${BASH_REMATCH[1]}/pulls/${BASH_REMATCH[2]}"
       err=$(mktemp)
-      if ! pull=$(cd "$repo" && with_timeout "$TIMEOUT" gh api "repos/{owner}/{repo}/pulls/$pr" 2>"$err" </dev/null); then
-        if grep -q 'HTTP 404' "$err"; then
-          printf '%s\t%s\t⚠️\tbranch is gone; GitHub has no #%s\n' "$name" "$b" "$pr"
-          rm -f "$err" "$f"
+      if ! pull=$(cd "$repo" && with_timeout "$TIMEOUT" gh api "$api" 2>"$err" </dev/null); then
+        if ! grep -q 'HTTP 404' "$err"; then
+          printf '%s\t%s\t⚠️\tbranch is gone; GitHub didn'"'"'t say what became of #%s\n' "$name" "$b" "$pr"
+          rm -f "$err"
           continue
         fi
-        printf '%s\t%s\t⚠️\tbranch is gone; GitHub didn'"'"'t say what became of #%s\n' "$name" "$b" "$pr"
-        rm -f "$err"
-        continue
-      fi
-      rm -f "$err"
-      if [[ $(prc_line 'values on(merged)' "$pull" 2>/dev/null) == true ]]; then
+        printf '%s\t%s\t⚠️\tbranch is gone; GitHub has no #%s\n' "$name" "$b" "$pr"
+      elif [[ $(prc_line 'values on(merged)' "$pull" 2>/dev/null) == true ]]; then
         msg="merged (#$pr); the local branch is already gone"
         printf '%s\t%s\t🏁\t%s\n' "$name" "$b" "$msg"
         if ! notify "$name $b" "$msg"; then
@@ -193,6 +193,7 @@ report_gone() {
             prc_json 'values {...this, failed: [...coalesce(failed, []), "merged"]}' "$cached" > "$f.$$.tmp" \
               && mv "$f.$$.tmp" "$f" \
               || { rm -f "$f.$$.tmp"; echo "sd watch: couldn't save $f: its merge will notify again" >&2; }
+            rm -f "$err"
             continue
           fi
         fi
@@ -202,7 +203,7 @@ report_gone() {
           "$([[ $pr_state == closed ]] && echo 🚫 || echo ⚠️)" "$pr" "$pr_state"
       fi
     fi
-    rm -f "$f"
+    rm -f "$f" ${err:+"$err"}
     d=$(dirname "$f")
     while [[ $d != "$dir" ]] && rmdir "$d" 2>/dev/null; do d=$(dirname "$d"); done
   done < <(find "$dir" -name '*.json' -type f)

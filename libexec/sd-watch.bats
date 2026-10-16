@@ -468,9 +468,10 @@ state_files() { find "$SHEEPDOG_STATE_DIR/branches" -name '*.json' 2>/dev/null; 
 }
 
 @test "gone: a PR GitHub says doesn't exist drops the state" {
-  ps_fixture feat '.ci.verdict = "pending"'
+  git switch -qc 12/doc && enroll 12/doc
+  ps_fixture 12/doc '.ci.verdict = "pending"'
   pass
-  gone feat
+  gone 12/doc
   cat > "$TMP/fakebin/gh" <<'SH'
 #!/usr/bin/env bash
 echo "gh: Not Found (HTTP 404)" >&2
@@ -478,8 +479,19 @@ exit 1
 SH
   chmod +x "$TMP/fakebin/gh"
   pass
-  grep -q "feat.*⚠️.*branch is gone; GitHub has no #7" "$SHEEPDOG_STATE_DIR/last-pass"
-  [ -z "$(state_files)" ]
+  grep -q "12/doc.*⚠️.*branch is gone; GitHub has no #7" "$SHEEPDOG_STATE_DIR/last-pass"
+  [ -z "$(state_files | grep doc)" ]
+  [ -z "$(find "$SHEEPDOG_STATE_DIR/branches" -mindepth 2 -type d)" ]
+  [ -z "$(notified)" ]
+}
+
+@test "gone: the PR is asked for by its URL, not gh's default repo" {
+  ps_fixture feat '.ci.verdict = "pending" | .pr.url = "https://github.com/up/stream/pull/7"'
+  pass
+  gone feat
+  gh_pull '{"state": "closed", "merged": true}'
+  pass
+  [ "$(cat "$PS_FIXTURES/gh-calls")" = "api repos/up/stream/pulls/7" ]
 }
 
 @test "gone: a PR that wasn't merged drops the state quietly" {
