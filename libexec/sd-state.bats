@@ -750,6 +750,14 @@ lost_pin_stack() {
   [ "$(field .review.findings.at_head)" = false ]
 }
 
+@test "review: --long lists a finding missing fields as itself" {
+  git switch -qc feat && commit a.txt a
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: $h, round: 1, findings: [{file: "a.txt", body: "x"}]}')
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
+  run "$SD_STATE" --long
+  [[ "$output" == *"r  ?  a.txt:?  x"* ]]
+}
+
 @test "review: a findings record whose base is gone is just not at HEAD" {
   git switch -qc feat && commit a.txt a
   rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: "0123456789abcdef0123456789abcdef01234567", round: 1,

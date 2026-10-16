@@ -521,5 +521,5 @@ $long || exit 0
 prc_line "$LONG" "$state"
 # The local review's open findings, if any (sd act review's record).
 prc_line 'where not nul(review.findings) | unnest review.findings.items
-  | values f"  r  {severity}  {file}:{line}  {body}"' "$state"
+  | values f"  r  {coalesce(severity, "?")}  {coalesce(file, "?")}:{coalesce(line, "?")}  {coalesce(body, "")}"' "$state"
 prc_line 'where on(review.findings.declined) | values f"  the agent declined them: {review.findings.reason}"' "$state"

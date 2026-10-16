@@ -308,6 +308,11 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
     = "the agent declined 1 review finding: fix it, or accept HEAD as reviewed (sd state --long lists them)" ]
 }
 
+@test "review findings on an older head, before any PR or pin: the next review is due" {
+  [ "$(keys '.pr = null' '.review.local = {sha: null, status: "none"}' \
+           '.review.findings = {sha: "x", round: 1, n: 1, at_head: false, declined: false, cap: 3, items: []}')" = "open-pr review" ]
+}
+
 @test "review findings an accepted pin covers: no review step" {
   [ "$(keys '.review.local = {sha: "x", status: "uncovered", uncovered: 2}' \
            '.review.findings = {sha: "h1", round: 3, n: 1, at_head: true, declined: false, cap: 3, items: []}' \

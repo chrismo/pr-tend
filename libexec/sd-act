@@ -997,7 +997,8 @@ implement_run() {
   fi
   if [[ -n $rec && $(prc_line 'values on(review.findings.at_head)' "$state") == true ]]; then
     listed=$(prc_line 'where not on(declined) | unnest findings | where coalesce(severity, "") != "nit"
-      | values f"- {file}:{line} ({severity}) {body}"' "$rec") || die "couldn't read the review findings on $b"
+      | values f"- {coalesce(file, "?")}:{coalesce(line, "?")} ({coalesce(severity, "?")}) {coalesce(body, "")}"' "$rec") \
+      || die "couldn't read the review findings on $b"
   fi
   [[ -n $task || -n $listed ]] || die "no task recorded for $b: git config branch.$b.sd-task \"<task>\""
   verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "sd config failed"

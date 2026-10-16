@@ -37,7 +37,8 @@ values {...s, remote}
       parent_closed:=(on(pr.base != sync.default) and on(parent.pr.state == "CLOSED")),
       restack:=(sync.old_base is null ? f"git rebase {remote}/{sync.target}"
                 : f"git rebase --onto {remote}/{sync.target} {sync.old_base[0:12]}"),
-      need_review:=((on(pr.state == "OPEN") or trails(review.local) or trails(review.bot) or trails(review.accepted))
+      need_review:=((on(pr.state == "OPEN") or trails(review.local) or trails(review.bot) or trails(review.accepted)
+                     or on(review.findings.at_head == false))
                     and not (covers(review.local) or covers(review.bot) or covers(review.accepted))),
       fixing:=(on(review.findings.at_head) and not (covers(review.local) or covers(review.bot) or covers(review.accepted))),
       bot_due:=(coalesce(bot.command, null) is not null and covers(review.local)

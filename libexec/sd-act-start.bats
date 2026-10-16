@@ -508,6 +508,14 @@ findings_at() {
   [ ! -e "$FX/claude.prompt" ]
 }
 
+@test "implement: a finding missing fields still reads as itself in the prompt" {
+  started
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: $h, round: 1, findings: [{file: "file.txt", body: "b?"}]}')
+  git update-ref refs/sheepdog/feat-x/findings "$(git hash-object -w --stdin <<<"$rec")"
+  "$SD_ACT" implement >/dev/null
+  grep -qF -- '- file.txt:? (?) b?' "$FX/claude.prompt"
+}
+
 @test "implement: findings on an older head stay out of the prompt" {
   started
   findings_at HEAD 1
