@@ -33,10 +33,10 @@
 #   sd act ship                        describe, push, open a draft PR, enroll
 #
 # Verbs:
-#   start     a worktree beside the main one, named after <name> with slashes
-#             as dashes, on the branch <name> (an existing
-#             local branch; else origin/<name>, tracked; else new, off the
-#             fetched default branch or --parent). Runs the repo's setup hook
+#   start     a worktree beside the main one, named after <name> with
+#             slashes as dashes, on the branch <name> (an existing local
+#             branch; else origin/<name>, tracked; else new, off the fetched
+#             default branch or --parent). Runs the repo's setup hook
 #             there, as wt-new does: $GIT_COMMON_DIR/worktree-setup, else git
 #             config wt.setup. Records the task and parent, pins base at a new
 #             branch's start point, enrolls; then implement unless
@@ -1219,12 +1219,12 @@ record_lineage() {
 
 # enroll_mark <branch>: mark it for sd watch and register this repo.
 enroll_mark() {
-  local b=$1 main_worktree
+  local b=$1 main
   git rev-parse -q --verify "refs/heads/$b" >/dev/null || die "no such branch: $b"
   git config "branch.$b.sheepdog" true
-  main_worktree=$(main_worktree)
-  if ! grep -qxF "$main_worktree" <<<"$(git config --global --get-all sheepdog.repo || true)"; then
-    git config --global --add sheepdog.repo "$main_worktree"
+  main=$(main_worktree)
+  if ! grep -qxF "$main" <<<"$(git config --global --get-all sheepdog.repo || true)"; then
+    git config --global --add sheepdog.repo "$main"
   fi
   echo "enrolled $b"
 }

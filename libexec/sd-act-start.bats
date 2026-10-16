@@ -2,9 +2,10 @@
 
 bats_require_minimum_version 1.5.0
 
-# Test suite for `sd act start` (A0: a worktree beside the main worktree, named
-# after the branch with slashes as dashes, set up by the repo's hook, with the task, parent and base
-# recorded and the branch enrolled; then implement) and `sd act implement`
+# Test suite for `sd act start` (A0: a worktree beside the main worktree,
+# named after the branch with slashes as dashes, set up by the repo's hook,
+# with the task, parent and base recorded and the branch enrolled; then
+# implement) and `sd act implement`
 # (J0: the agent edits in the branch's session, the pipeline commits and runs
 # verify).
 #
