@@ -241,16 +241,27 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(step push cmd '.push.ahead = 2')" = "sd act push" ]
 }
 
+@test "a restack undone from outside sheepdog: redo it by hand, then sd act push (#47)" {
+  [ "$(keys '.sync.undone = 1' '.sync.up_to_date = false' '.push.ahead = 1' '.push.behind = 0')" = restack-undone ]
+  [ "$(step restack-undone who '.sync.undone = 1')" = you ]
+  [ "$(step restack-undone say '.sync.undone = 1')" = "the restack was undone (1 of main's commits is a copy on feat; a plain git push after a restack?): redo it, and don't sd act push before that, which would publish the copies" ]
+  [ "$(step restack-undone say '.sync.undone = 2')" = "the restack was undone (2 of main's commits are copies on feat; a plain git push after a restack?): redo it, and don't sd act push before that, which would publish the copies" ]
+  [ "$(step restack-undone cmd '.sync.undone = 1' '.sync.old_base = null')" = "git rebase origin/main && sd act push" ]
+  [ "$(step restack-undone cmd '.sync.undone = 1' '.sync.old_base = "0123456789abcdef0123"')" = "git rebase --onto origin/main 0123456789ab && sd act push" ]
+  [ "$(keys '.sync.undone = 0')" = ready ]
+  [ "$(keys '.sync.undone = 1' '.pr.merge_state = "BEHIND"')" = restack-undone ]
+}
+
 @test "rewritten history of our own: sd act push, which leases" {
-  [ "$(step push say '.push.ahead = 2' '.push.behind = 2' '.push.diverged = true' '.sync.ahead = 2')" = "force-push 2 commits (rewritten)" ]
+  [ "$(step push say '.push.ahead = 2' '.push.behind = 2' '.push.diverged = true' '.sync.ahead = 2')" = "force-push 2 commits (rewritten); a plain git push is rejected, and pulling would undo the rewrite" ]
   [ "$(step push cmd '.push.ahead = 2' '.push.behind = 2' '.push.diverged = true')" = "sd act push" ]
 }
 
 @test "rewritten after a restack: count the branch's own commits, not what came in from the target" {
   # After a restack onto a squash-merged parent, remote..HEAD also counts the
   # squash commit (#31). sync.ahead is <target>..HEAD: just the branch's own.
-  [ "$(step push say '.push.ahead = 3' '.push.behind = 2' '.push.diverged = true' '.sync.ahead = 2')" = "force-push 2 commits (rewritten)" ]
-  [ "$(step push say '.push.ahead = 3' '.push.behind = 2' '.push.diverged = true' '.sync.ahead = null')" = "force-push 3 commits (rewritten)" ]
+  [ "$(step push say '.push.ahead = 3' '.push.behind = 2' '.push.diverged = true' '.sync.ahead = 2')" = "force-push 2 commits (rewritten); a plain git push is rejected, and pulling would undo the rewrite" ]
+  [ "$(step push say '.push.ahead = 3' '.push.behind = 2' '.push.diverged = true' '.sync.ahead = null')" = "force-push 3 commits (rewritten); a plain git push is rejected, and pulling would undo the rewrite" ]
 }
 
 @test "never pushed: sd act push" {

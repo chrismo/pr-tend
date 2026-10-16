@@ -404,6 +404,15 @@ EOF
   [ -z "$(notified)" ]
 }
 
+@test "notify: a restack undone from outside is ❌ and notifies (#47)" {
+  ps_fixture feat '.sync.undone = 1 | .sync.up_to_date = false'
+  pass
+  run notified
+  [ "${lines[0]}" = "repo feat|the restack was undone (1 of main's commits is a copy on feat; a plain git push after a restack?): redo it, and don't sd act push before that, which would publish the copies" ]
+  run "$SD_WATCH" status
+  [[ "$output" == *"feat"*"❌"* ]] || false
+}
+
 @test "notify: human items, conflict, foreign push, merged" {
   ps_fixture feat '.threads.owed_human = 2'
   pass

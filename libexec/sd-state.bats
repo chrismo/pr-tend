@@ -502,6 +502,50 @@ lost_pin_stack() {
   [[ "$(field '.errors | join(" ")')" == *"base pin ${pin:0:7} is no longer in feat's history"* ]]
 }
 
+# A restack, then git's own advice after a rejected plain push: pull --rebase
+# onto the old remote head, which replays main's commit as a copy (#47).
+@test "sync: a restack undone by a plain push is reported as undone, with the copied commits counted (#47)" {
+  git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
+  local pre; pre=$(git rev-parse feat)
+  commit m.txt m "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
+  git fetch -q
+  git rebase -q --onto origin/main main feat
+  git update-ref refs/sheepdog/feat/base origin/main
+  git reset -q --hard "$pre" && git cherry-pick origin/main >/dev/null
+  state
+  [ "$(field .sync.undone)" = 1 ]
+  [ "$(field '.errors | length')" = 0 ]
+  [ "$(field '.next[0].key')" = restack-undone ]
+  local cmd; cmd=$(field '.next[0].cmd')
+  [[ $cmd == "git rebase --onto origin/main "*" && sd act push" ]] || false
+  # Running the suggested rebase puts the branch back on the target without the copy.
+  eval "${cmd%% && *}" >/dev/null 2>&1
+  [ "$(git log --format=%s origin/main..feat)" = "edit a.txt" ]
+  state
+  [ "$(field .sync.undone)" = 0 ]
+  [ "$(field .sync.up_to_date)" = true ]
+}
+
+# A child rewritten by hand (a reword of the parent's commits it carries keeps
+# their author dates and subjects): copies of the parent's commits, but the
+# branch's own remote head is gone from its history, so not an undone restack.
+@test "sync: a hand rewrite that keeps the parent's commits' dates and subjects is not an undone restack (#47)" {
+  git switch -qc parent && commit p.txt p1 && commit q.txt p2 && git push -q origin parent 2>/dev/null
+  local p1 p2; p1=$(git rev-parse parent~1) p2=$(git rev-parse parent)
+  git switch -qc feat && commit c.txt c && git push -q -u origin feat 2>/dev/null
+  git config branch.feat.sd-parent parent
+  git update-ref refs/sheepdog/feat/base "$p2"
+  local n1 n2 n3
+  n1=$(GIT_AUTHOR_DATE=$(git log -1 --format=%ad "$p1") GIT_COMMITTER_DATE="2030-01-01T00:00:00" git commit-tree "$p1^{tree}" -p "$p1^" -m "edit p.txt")
+  n2=$(GIT_AUTHOR_DATE=$(git log -1 --format=%ad "$p2") GIT_COMMITTER_DATE="2030-01-01T00:00:01" git commit-tree "$p2^{tree}" -p "$n1" -m "edit q.txt")
+  n3=$(git commit-tree "feat^{tree}" -p "$n2" -m "edit c.txt")
+  git reset -q --hard "$n3"
+  state
+  [ "$(field .sync.undone)" = 0 ]
+  [[ "$(field '.errors | join(" ")')" == *"base pin ${p2:0:7} is no longer in feat's history"* ]]
+  [ "$(field '.next[0].key')" = errors ]
+}
+
 @test "sync: no shared history with the parent is reported, not guessed" {
   git switch -q --orphan feat && commit a.txt a
   state

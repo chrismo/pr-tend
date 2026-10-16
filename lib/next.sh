@@ -27,6 +27,7 @@ values {...s, remote}
       bot_blocking:=(n(threads.owed_bot) - n(threads.info)),
       to_push:=(push.remote_sha is null or n(push.ahead) > 0),
       chase:=(on(sync.target != sync.default) or on(parent.merged)),
+      undone:=(n(sync.undone) > 0),
       merge_state:=coalesce(pr.merge_state, "UNKNOWN"),
       gh_behind:=on(pr.merge_state == "BEHIND"),
       draft_ready:=(on(pr.draft) and not (push.remote_sha is null or n(push.ahead) > 0)
@@ -58,12 +59,16 @@ values {...s, remote}
              f"git log HEAD..{remote}/{branch}") : null,
     open and n(threads.owed_human) > 0
       ? step("human", "you", f"reply to {plural(threads.owed_human, "human item")}", "sd state --long") : null,
-    open and not parent_closed and on(sync.up_to_date == false) and on(sync.conflict)
+    open and undone
+      ? step("restack-undone", "you",
+             f"the restack was undone ({sync.undone} of {sync.target}'"'"'s commits {sync.undone == 1 ? "is a copy" : "are copies"} on {branch}; a plain git push after a restack?): redo it, and don'"'"'t sd act push before that, which would publish the copies",
+             f"{restack} && sd act push") : null,
+    open and not undone and not parent_closed and on(sync.up_to_date == false) and on(sync.conflict)
       ? step("conflict", "agent", f"restack onto {sync.target} conflicts: resolve it", "sd act restack --resolve") : null,
-    open and not parent_closed and on(sync.up_to_date == false) and not on(sync.conflict) and chase
+    open and not undone and not parent_closed and on(sync.up_to_date == false) and not on(sync.conflict) and chase
       ? step("behind", "run", f"restack onto {sync.target} ({sync.behind} behind)",
              sync.old_base is null ? restack : "sd act restack")
-      : has_pr and not parent_closed and not on(sync.conflict) and gh_behind
+      : has_pr and not undone and not parent_closed and not on(sync.conflict) and gh_behind
       ? step("behind", "run", f"restack onto {sync.default} ({n(sync.behind)} behind): GitHub requires branches to be up to date",
              "sd act restack") : null,
     has_pr and on(ci.verdict == "red") and on(ci.for_head) and not to_push
@@ -72,9 +77,9 @@ values {...s, remote}
       ? step("bot", "agent", f"address {plural(threads.owed_bot, "bot item")}", "sd act address") : null,
     open and bot_blocking == 0 and n(threads.info) > 0
       ? step("read", "you", f"read {plural(threads.info, "bot item")} in sd state --long, then ack", "sd act ack") : null,
-    open and not foreign and to_push
+    open and not foreign and not undone and to_push
       ? step("push", "run", push.remote_sha is null ? f"push: not on {remote} yet"
-             : on(push.diverged) ? f"force-push {plural(coalesce(sync.ahead, push.ahead), "commit")} (rewritten)"
+             : on(push.diverged) ? f"force-push {plural(coalesce(sync.ahead, push.ahead), "commit")} (rewritten); a plain git push is rejected, and pulling would undo the rewrite"
              : f"push {plural(push.ahead, "commit")}", "sd act push") : null,
     pr is null and len(errors) == 0 ? step("open-pr", "run", "ship: push, open a draft PR", "sd act ship") : null,
     has_pr and draft_ready and not need_review and not bot_due

@@ -24,7 +24,8 @@
 #         ✅ ready to merge  🏁 merged          🚫 closed
 #
 # Notified, once per lib/next.sh step entered (again only after it clears):
-#   ci-red conflict human foreign parent-closed: ❌ the PR is stuck or wrong
+#   ci-red conflict human foreign parent-closed restack-undone: ❌ the PR is
+#     stuck or wrong
 #     until chrismo, or an agent chrismo starts, deals with it
 #   merged ready: chrismo acts (clean up, merge)
 #   review-decide: ❌ the local review still blocks after
@@ -67,7 +68,7 @@ TIMEOUT=${SHEEPDOG_WATCH_TIMEOUT:-120}
 read -r -d '' CLASSIFY <<'EOF' || true
 values {next: kind(next) == "array" ? next : []}
 | values {next, k: coalesce([unnest next | values key], []),
-          red: coalesce([unnest next | where key in ["ci-red", "conflict", "human", "foreign", "parent-closed", "review-decide"] | values {key, msg: say}], []),
+          red: coalesce([unnest next | where key in ["ci-red", "conflict", "human", "foreign", "parent-closed", "review-decide", "restack-undone"] | values {key, msg: say}], []),
           waiting: len(coalesce([unnest next | where who != "wait"], [])) == 0}
 | values {carry: len(next) == 0 or "errors" in k or "stale" in k,
           keep: k == ["merge-wait"] or k == ["attached"] ? ["ready"] : [], ...(case

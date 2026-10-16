@@ -135,7 +135,16 @@ base_pin() { git rev-parse -q --verify refs/sheepdog/feat/base || true; }
   [ "$(base_pin)" = "$(git rev-parse origin/main)" ]
   [ "$(remote_feat)" = "$before_remote" ]
   [[ "$output" == *"restacked feat onto origin/main"* ]]
-  [[ "$output" == *"sd act push"* ]]
+  [[ "$output" == *"not pushed: a plain git push is rejected"*"sd act push"* ]] || false
+}
+
+@test "onto the moved default branch, branch never pushed: no plain-push warning, just sd act push (#47)" {
+  git push -q origin :feat 2>/dev/null && git fetch -q --prune
+  upstream main 's/^b$/B/'
+  run "$SD_ACT" restack
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"; not pushed: sd act push" ]] || false
+  [[ "$output" != *"rejected"* ]] || false
 }
 
 @test "already on the target: nothing to do" {
