@@ -1241,7 +1241,9 @@ SH
 @test "same name: on different branches the .pr file stays, its branch telling whose it is" {
   twin other
   pass
-  [ -e "$STATUS_DIR/wt.pr" ]
+  [[ "$(cut -f1 "$STATUS_DIR/wt.pr")" =~ ^(feat|other)$ ]] || false
+  [ "$("$SD_WATCH" glyph "$TMP/x/wt")" = "✅" ]
+  [ "$("$SD_WATCH" glyph "$TMP/y/wt")" = "❌" ]
 }
 
 @test "same name: a refresh doesn't put the shared .pr file back" {

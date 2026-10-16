@@ -426,7 +426,7 @@ refresh() {
   # Unlocked like the state file: a pass that finishes between this read and
   # the mv loses to the older index until the next pass.
   if [[ -s $GLYPHS ]]; then
-    { awk -F'	' -v p="${worktree_of[$b]}" '$1 != p' "$STATE_DIR/glyphs" 2>/dev/null; cat "$GLYPHS"; } > "$GLYPHS_NEW" \
+    { awk -F'\t' -v p="${worktree_of[$b]}" '$1 != p' "$STATE_DIR/glyphs" 2>/dev/null; cat "$GLYPHS"; } > "$GLYPHS_NEW" \
       && mv "$GLYPHS_NEW" "$STATE_DIR/glyphs"
     drop_ambiguous "$STATE_DIR/glyphs"
   fi
