@@ -47,10 +47,36 @@ stack_setup() {
   [ "$output" = "par $fork" ]
 }
 
-@test "stacked_on: a moved parent can't tell its own child from a parent either" {
+@test "stacked_on: a moved parent made the fork commit itself, so its child isn't its parent" {
+  stack_setup
+  c par p3
+  run stacked_on par origin main
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
+@test "stacked_on: a backup of the branch taken before its last commit isn't its parent" {
+  stack_setup
+  git branch kid-bak kid
+  c kid k2
+  run stacked_on kid origin main
+  [ "$status" -eq 0 ]
+  [ "$output" = "par $(git rev-parse par)" ]
+}
+
+@test "stacked_on: a branch renamed right after it was made still names its parent" {
+  stack_setup
+  git switch -q par && git switch -qc tmp && git branch -m tmp kid2 && git commit -q --allow-empty -m k2
+  run stacked_on kid2 origin main
+  [ "$status" -eq 0 ]
+  [ "$output" = "par $(git rev-parse par)" ]
+}
+
+@test "stacked_on: without a reflog, a moved parent still can't tell its child from a parent" {
   stack_setup
   local fork; fork=$(git rev-parse par)
   c par p3
+  git reflog expire --expire=all --all
   run stacked_on par origin main
   [ "$status" -eq 3 ]
   [ "$output" = "kid $fork" ]

@@ -230,20 +230,26 @@ harness_run() {
 # which was made from which (a parent that moved on looks like a child).
 # Git only, and bounded for sd state: candidates are local branches and their
 # remote-tracking refs that hold <branch>'s oldest commit past the default, two
-# rev-lists each. A branch holding all of <branch>'s commits is its child, not
-# its parent, and so is one whose sd-parent names <branch>. At equal shared
-# commits, one with none of its own beats one with some: a sibling shares the
-# parent's commits too.
+# rev-lists and a merge-base each, plus one read of <branch>'s reflog. A branch
+# holding all of <branch>'s commits is its child, not its parent, and so is one
+# whose sd-parent names <branch>, and one forked where <branch>'s reflog has it
+# arrive other than by being created or renamed there: a commit <branch> made
+# itself, so the other is a child or a backup. At equal shared commits, one
+# with none of its own beats one with some: a sibling shares the parent's
+# commits too.
 stacked_on() {
-  local b=$1 remote=$2 def="refs/remotes/$2/$3" oldest total ref name own theirs shared score
-  local best="" best_ref="" best_score=0 best_theirs=0
-  local -A local_branch=() tie=()
+  local b=$1 remote=$2 def="refs/remotes/$2/$3" oldest total ref name own theirs shared score fork sha msg
+  local best="" best_base="" best_score=0 best_theirs=0
+  local -A local_branch=() tie=() reached=()
   [[ $b != "$3" ]] || return 1
   oldest=$(git rev-list --topo-order --reverse "$def..refs/heads/$b" 2>/dev/null) || return 1
   oldest=${oldest%%$'\n'*}
   [[ -n $oldest ]] || return 1
   total=$(git rev-list --count "$def..refs/heads/$b")
   while read -r name; do local_branch[$name]=1; done < <(git for-each-ref --format='%(refname:short)' refs/heads)
+  while read -r sha msg; do
+    [[ $msg == "branch: Created from "* || $msg == "Branch: renamed "* ]] || reached[$sha]=1
+  done < <(git reflog show --format='%H %gs' "refs/heads/$b" -- 2>/dev/null)
   while read -r ref; do
     name=${ref#refs/heads/}; name=${name#refs/remotes/"$remote"/}
     [[ $name != "$b" && $name != "$3" && -n ${local_branch[$name]:-} ]] || continue
@@ -251,16 +257,18 @@ stacked_on() {
     (( own > 0 )) || continue
     theirs=$(git rev-list --count "$ref" "^$def" "^refs/heads/$b")
     if (( theirs > 0 )) && [[ $(git config --get "branch.$name.sd-parent") == "$b" ]]; then continue; fi
+    fork=$(git merge-base "refs/heads/$b" "$ref")
+    [[ -z ${reached[$fork]:-} ]] || continue
     shared=$(( total - own ))
     score=$(( shared * 2 + (theirs == 0) ))
     if (( score > best_score )); then
-      best=$name best_ref=$ref best_score=$score best_theirs=$theirs tie=()
+      best=$name best_base=$fork best_score=$score best_theirs=$theirs tie=()
     elif (( score == best_score )) && [[ $name != "$best" ]]; then
       tie[$name]=1
     fi
   done < <(git for-each-ref --contains "$oldest" --format='%(refname)' refs/heads "refs/remotes/$remote")
   [[ -n $best ]] || return 1
   if (( ${#tie[@]} )); then printf '%s\n' "$best" "${!tie[@]}" | sort | paste -sd' ' -; return 2; fi
-  echo "$best $(git merge-base "refs/heads/$b" "$best_ref")"
+  echo "$best $best_base"
   (( best_theirs == 0 )) || return 3
 }

@@ -208,17 +208,14 @@ field() { jq -r "$@" <<<"$output"; }
   [[ "$(field '.errors | join(" ")')" == *"stacked on par or twin without sheepdog knowing"* ]]
 }
 
-@test "an unrecorded stack whose parent moved on says it can't tell which way, both ways round" {
+@test "an unrecorded stack whose parent moved on: the child can't tell which way, the parent made the fork commit" {
   git switch -qc par && commit a.txt a
   git switch -qc kid && commit b.txt b
   git switch -q par && commit c.txt c
-  state par
-  [[ "$(field '.errors | join(" ")')" == *"shares commits with kid, and each has its own since, so git can't tell which, if either, was made from the other: git config branch.par.sd-parent kid if par was, or git config branch.par.sd-parent main if not"* ]]
   state kid
-  [[ "$(field '.errors | join(" ")')" == *"shares commits with par"* ]]
-  git config branch.kid.sd-parent par
+  [[ "$(field '.errors | join(" ")')" == *"shares commits with par, and each has its own since, so git can't tell which, if either, was made from the other: git config branch.kid.sd-parent par if kid was, or git config branch.kid.sd-parent main if not"* ]]
   state par
-  [[ "$(field '.errors | join(" ")')" != *"shares commits"* ]]
+  [ "$(field '.errors | length')" = 0 ]
 }
 
 @test "siblings whose parent is gone: flagged without claiming either was made from the other" {

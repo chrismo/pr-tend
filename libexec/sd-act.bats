@@ -91,18 +91,19 @@ SH
   [ -z "$(git config branch.kid.sd-parent || true)" ]
 }
 
-@test "enroll: a parent that moved on since records nothing either way, and says so" {
+@test "enroll: a parent that moved on since: the child records nothing and says so, the parent isn't asked" {
   git switch -q main && no_prs
   git switch -qc par && git commit -q --allow-empty -m p1
   git switch -qc kid && git commit -q --allow-empty -m k1
   git switch -q par && git commit -q --allow-empty -m p2
-  run "$SD_ACT" enroll par
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"par shares commits with kid"*"git config branch.par.sd-parent kid"*"git config branch.par.sd-parent main"* ]]
-  [ -z "$(git config branch.par.sd-parent || true)" ]
   run "$SD_ACT" enroll kid
   [ "$status" -eq 0 ]
+  [[ "$output" == *"kid shares commits with par"*"git config branch.kid.sd-parent par"*"git config branch.kid.sd-parent main"* ]]
   [ -z "$(git config branch.kid.sd-parent || true)" ]
+  run "$SD_ACT" enroll par
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"shares commits"* ]]
+  [ -z "$(git config branch.par.sd-parent || true)" ]
 }
 
 @test "enroll: a PR on the default branch, or gh failing, records no git-inferred parent" {

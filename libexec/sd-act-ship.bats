@@ -197,6 +197,16 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   [ -z "$(calls)" ]
 }
 
+@test "ship: a branch a scratch branch was made from still ships onto the default branch (#94)" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A1
+  git switch -qc scratch && git commit -q --allow-empty -m s1
+  git switch -q A && git commit -q --allow-empty -m A2
+  run "$SD_ACT" ship
+  [ "$status" -eq 0 ]
+  [ -z "$(git config branch.A.sd-parent || true)" ]
+  [[ "$(calls)" == "pr create --draft --base main --head A "* ]]
+}
+
 @test "ship: a stale description (HEAD moved) is written again" {
   "$SD_ACT" describe >/dev/null
   echo d >> file.txt && git commit -qam "add d"
