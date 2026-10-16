@@ -85,13 +85,23 @@ step() { # step <key> <field> <jq-assignment...>
 
 @test "a parent that exists only here: ship it first; no push or open-pr until then (#105)" {
   local st=('.pr = null' '.push = {"remote_sha": null, "ahead": 2, "behind": 0, "diverged": false, "remote_ours": null}'
-            '.parent = {"name": "p", "source": "config", "merged": null, "local": true, "on_remote": false, "pr": null}'
+            '.parent = {"name": "p", "source": "config", "merged": false, "local": true, "on_remote": false, "pr": null}'
             '.sync = {"target": "p", "default": "main", "behind": null, "up_to_date": null, "conflict": null, "old_base": null}')
   [ "$(keys "${st[@]}")" = ship-parent ]
   [ "$(step ship-parent who "${st[@]}")" = run ]
   [ "$(step ship-parent say "${st[@]}")" = "ship the parent first: p isn't on origin yet" ]
   [ "$(step ship-parent cmd "${st[@]}")" = "sd act ship p" ]
   [ "$(keys "${st[@]}" '.parent.on_remote = true')" = "push open-pr" ]
+}
+
+@test "a parent missing from origin is unpushed only when it is known unmerged and has no PR (#105)" {
+  local st=('.pr = null' '.push = {"remote_sha": null, "ahead": 2, "behind": 0, "diverged": false, "remote_ours": null}'
+            '.parent = {"name": "p", "source": "config", "merged": false, "local": true, "on_remote": false, "pr": null}'
+            '.sync = {"target": "p", "default": "main", "behind": null, "up_to_date": null, "conflict": null, "old_base": null}')
+  # gh failed: whether p merged is unknown, and shipping a merged p would push it back
+  [[ " $(keys "${st[@]}" '.parent.merged = null') " != *" ship-parent "* ]]
+  # an open PR means p is on GitHub: origin/p is missing because it isn't fetched
+  [[ " $(keys "${st[@]}" '.parent.pr = {"number": 25, "state": "OPEN", "head_sha": "x"}') " != *" ship-parent "* ]]
 }
 
 @test "a merged parent whose branch is gone from origin but still here is not an unpushed parent (#105)" {

@@ -236,9 +236,10 @@ parent_in_head() {
 
 # A stacked branch's parent can exist only here (started with --parent before
 # the parent shipped). Then there's nothing to sync against yet, and NEXT's
-# step is to ship the parent, not an error (#105). A merged or closed parent
-# whose remote branch was deleted looks the same here, so consumers check
-# parent.merged and the parent PR's state too.
+# step is to ship the parent, not an error (#105). Only a parent known to have
+# no PR counts: a merged or closed one whose remote branch was deleted looks
+# the same here, an open one is on GitHub but not fetched, and a failed gh
+# lookup leaves both unknown.
 parent_local=null parent_remote=null
 if [[ $parent != "$default_branch" ]]; then
   if git show-ref -q --verify "refs/heads/$parent"; then parent_local=true; else parent_local=false; fi
@@ -248,8 +249,8 @@ fi
 target_ref=$(ref "refs/remotes/$remote/$target")
 sync_ahead=null behind=null up_to_date=null old_base="" conflict=null by_tree=false
 if [[ -z $target_ref ]]; then
-  [[ $target == "$parent" && $parent_local == true && $parent_remote == false \
-     && $(prc_val "$parent_pr" 'this is null or on(state == "OPEN")') == true ]] \
+  [[ $target == "$parent" && $parent_local == true && $parent_remote == false && $parent_merged == false \
+     && $(prc_val "$parent_pr" 'this is null') == true ]] \
     || errors+=("no $remote/$target ref (not fetched?)")
 else
   sync_ahead=$(count "$target_ref..$head")

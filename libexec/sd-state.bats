@@ -694,6 +694,17 @@ squash_parent_away() {
   [ "$(field '.next[0].key')" = errors ]
 }
 
+@test "parent: an open parent PR whose ref isn't fetched is an error, not an unpushed parent (#105)" {
+  git switch -qc parent && commit p.txt p
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  pr_fixture parent
+  state
+  [ "$(field .parent.on_remote)" = false ]
+  [[ "$(field '.errors | join(" ")')" == *"no origin/parent ref"* ]]
+  [ "$(field '.next[0].key')" = errors ]
+}
+
 @test "parent: a parent that exists nowhere is still an error" {
   git switch -qc feat && commit c.txt c
   git config branch.feat.sd-parent nosuch
