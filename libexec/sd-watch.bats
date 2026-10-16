@@ -408,6 +408,105 @@ EOF
   [ "${lines[3]}" = "repo feat|merged: drop the branch's pins and enrollment, then remove this worktree" ]
 }
 
+# ── a branch deleted with its state left behind (#64) ───────────────────────
+
+# gh_pull <json>: what the fake gh serves for GET repos/{owner}/{repo}/pulls/<n>.
+gh_pull() {
+  printf '%s\n' "$1" > "$PS_FIXTURES/gh-pull"
+  cat > "$TMP/fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+echo "$*" >> "$PS_FIXTURES/gh-calls"
+[[ -f $PS_FIXTURES/gh-pull ]] || { echo "gh: API rate limit exceeded" >&2; exit 1; }
+cat "$PS_FIXTURES/gh-pull"
+SH
+  chmod +x "$TMP/fakebin/gh"
+}
+
+# gone <branch>: what gh pr merge --delete-branch does from the branch's checkout.
+gone() { git switch -q main && git branch -qD "$1"; }
+
+state_files() { find "$SHEEPDOG_STATE_DIR/branches" -name '*.json' 2>/dev/null; }
+
+@test "gone: an enrolled branch deleted after its PR merged is notified merged once, and its state dropped" {
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  gone feat
+  gh_pull '{"state": "closed", "merged": true}'
+  pass
+  [ "$(notified)" = "repo feat|merged (#7); the local branch is already gone" ]
+  grep -q "feat.*🏁.*merged (#7)" "$SHEEPDOG_STATE_DIR/last-pass"
+  [ -z "$(state_files)" ]
+  pass
+  [ "$(notified | wc -l | tr -d ' ')" = 1 ]
+  [ "$(cat "$PS_FIXTURES/gh-calls")" = "api repos/{owner}/{repo}/pulls/7" ]
+}
+
+@test "gone: a merge already notified before the branch went isn't notified again" {
+  ps_fixture feat '.pr.state = "MERGED"'
+  pass
+  gone feat
+  gh_pull '{"state": "closed", "merged": true}'
+  pass
+  [ "$(notified | grep -c merged)" = 1 ]
+  [ -z "$(state_files)" ]
+}
+
+@test "gone: a branch with a slash in its name is found" {
+  git switch -qc 12/doc && enroll 12/doc
+  ps_fixture 12/doc '.ci.verdict = "pending"'
+  pass
+  gone 12/doc
+  gh_pull '{"state": "closed", "merged": true}'
+  pass
+  [[ "$(notified)" == *"repo 12/doc|merged (#7)"* ]] || false
+  [ -z "$(state_files | grep doc)" ]
+}
+
+@test "gone: GitHub not answering keeps the state, and the next pass tries again" {
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  gone feat
+  gh_pull '{}' && rm "$PS_FIXTURES/gh-pull"
+  pass
+  grep -q "feat.*⚠️.*branch is gone; GitHub didn't say what became of #7" "$SHEEPDOG_STATE_DIR/last-pass"
+  [ -n "$(state_files)" ]
+  [ -z "$(notified)" ]
+  gh_pull '{"state": "closed", "merged": true}'
+  pass
+  [ "$(notified)" = "repo feat|merged (#7); the local branch is already gone" ]
+}
+
+@test "gone: a PR that wasn't merged drops the state quietly" {
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  gone feat
+  gh_pull '{"state": "closed", "merged": false}'
+  pass
+  [ -z "$(notified)" ]
+  [ -z "$(state_files)" ]
+  grep -q "feat.*branch is gone; #7 is closed, not merged" "$SHEEPDOG_STATE_DIR/last-pass"
+}
+
+@test "gone: a branch that never had a PR drops the state without asking GitHub" {
+  ps_fixture feat '.pr = null'
+  pass
+  gone feat
+  gh_pull '{"state": "closed", "merged": true}'
+  pass
+  [ -z "$(state_files)" ]
+  [ ! -e "$PS_FIXTURES/gh-calls" ]
+}
+
+@test "gone: a branch that still exists but isn't enrolled keeps its state" {
+  ps_fixture feat
+  pass
+  git config --unset branch.feat.sheepdog
+  gh_pull '{"state": "closed", "merged": true}'
+  pass
+  [ -n "$(state_files)" ]
+  [ ! -e "$PS_FIXTURES/gh-calls" ]
+}
+
 # ── notification policy (#52) ────────────────────────────────────────────────
 
 # policy n|q: the step keys sd watch --help lists as notified (n) or not (q).

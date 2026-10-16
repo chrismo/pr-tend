@@ -9,7 +9,9 @@
 #              glyph for the branch's worktree (shown by tab-status), notifies
 #              per the policy below, and records the pass. Also deletes
 #              refs/sheepdog/<b>/* whose branch no longer exists (pins outlive
-#              a branch -D).
+#              a branch -D). A branch checked before that is gone now (gh pr
+#              merge --delete-branch takes its enrollment too): its PR's merge
+#              is notified if it wasn't yet, and its cached state dropped.
 #   refresh    the same check for one branch (default: the current one), now:
 #              fetch its repo, glyph, notify, cache its state. Not a pass: other
 #              branches and glyphs are left alone and status still shows the
@@ -115,7 +117,7 @@ check() {
   fi
   glyph=$(prc_line 'values glyph' "$cls")
 
-  state_file="$STATE_DIR/branches/$(basename "$repo")-$(printf '%s' "$repo" | shasum | cut -c1-8)/$b.json"
+  state_file="$(state_dir "$repo")/$b.json"
   mkdir -p "$(dirname "$state_file")"
   # An unreadable previous state re-notifies rather than silently dropping reasons.
   # notified is the keys already sent; files before it have only reasons.
@@ -149,6 +151,39 @@ check() {
   write_glyph "$wt" "$b" "$glyph"
   printf '%s\t%s\t%s\t%s\n' "$name" "$b" "$glyph" \
     "$(prc_line 'values sj(coalesce([unnest [...reasons, {msg: coalesce(note, null)}] | where msg is not null | values msg], []), "; ")' "$cls")"
+}
+
+state_dir() { echo "$STATE_DIR/branches/$(basename "$1")-$(printf '%s' "$1" | shasum | cut -c1-8)"; }
+
+# report_gone <repo> <name>: for each state file whose branch no longer exists
+# (gh pr merge --delete-branch takes the branch's config, enrollment and all),
+# ask GitHub about its PR: notify a merge not yet notified, then drop the state.
+# A failed ask keeps it for the next pass.
+report_gone() {
+  local repo=$1 name=$2 dir f b pr pull msg
+  dir=$(state_dir "$repo")
+  [[ -d $dir ]] || return 0
+  while IFS= read -r f; do
+    b=${f#"$dir/"}; b=${b%.json}
+    git -C "$repo" rev-parse -q --verify "refs/heads/$b" >/dev/null && continue
+    pr=$(prc_line 'values coalesce(state.pr.number, "")' "$(cat "$f")" 2>/dev/null) || pr=
+    if [[ -n $pr ]]; then
+      if ! pull=$(cd "$repo" && with_timeout "$TIMEOUT" gh api "repos/{owner}/{repo}/pulls/$pr" 2>/dev/null </dev/null); then
+        printf '%s\t%s\t⚠️\tbranch is gone; GitHub didn'"'"'t say what became of #%s\n' "$name" "$b" "$pr"
+        continue
+      fi
+      if [[ $(prc_line 'values on(merged)' "$pull" 2>/dev/null) == true ]]; then
+        msg="merged (#$pr); the local branch is already gone"
+        [[ $(prc_line 'values "merged" in coalesce(notified, [unnest reasons | values key], [])' "$(cat "$f")" 2>/dev/null) == true ]] \
+          || notify "$name $b" "$msg"
+        printf '%s\t%s\t🏁\t%s\n' "$name" "$b" "$msg"
+      else
+        printf '%s\t%s\t🚫\tbranch is gone; #%s is %s, not merged\n' "$name" "$b" "$pr" \
+          "$(prc_line 'values coalesce(state, "unknown")' "$pull" 2>/dev/null)"
+      fi
+    fi
+    rm -f "$f"
+  done < <(find "$dir" -name '*.json' -type f)
 }
 
 # sweep_pins <repo>: delete refs/sheepdog/<b>/* whose branch no longer exists.
@@ -202,6 +237,8 @@ run_pass() {
     mapfile -t branches < <(git -C "$repo" config --get-regexp '^branch\..*\.sheepdog$' 2>/dev/null \
       | awk '$2 == "true" { sub(/^branch\./, "", $1); sub(/\.sheepdog$/, "", $1); print $1 }')
     sweep_pins "$repo"
+    out=$(report_gone "$repo" "$name")
+    [[ -z $out ]] || lines+=$out$'\n'
     (( ${#branches[@]} )) || continue
 
     out=$(fetch "$repo" "$name") || { lines+=$out$'\n'; continue; }
