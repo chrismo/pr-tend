@@ -241,11 +241,15 @@ else
     else errors+=("base pin ${base_pin:0:7} is no longer in $branch's history (rewritten outside sheepdog?)")
     fi
   fi
-  # The merged parent's head still in the branch, and not in the target (a
-  # squash or rebase merge left it behind): GitHub's rewrite hasn't landed.
+  # The merged parent's head, or any of its commits, still in the branch and
+  # not in the target (a squash or rebase merge left them behind; the branch
+  # may hold an older head of the parent): GitHub's rewrite hasn't landed.
   if [[ $parent_merged == true && -n $merged_head ]]; then
     parent_in_history=false
-    is_ancestor "$merged_head" "$head" && ! is_ancestor "$merged_head" "$target_ref" && parent_in_history=true
+    if { is_ancestor "$merged_head" "$head" && ! is_ancestor "$merged_head" "$target_ref"; } \
+       || holds_parent_commits "$target_ref..$head"; then
+      parent_in_history=true
+    fi
   fi
   if $rewritten; then
     old_base=$(git merge-base "$target_ref" "$head" || true)

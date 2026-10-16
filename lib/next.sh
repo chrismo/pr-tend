@@ -38,7 +38,7 @@ values {...s, remote}
       foreign:=(on(push.remote_ours == false) and n(push.theirs) > 0),
       native:=(coalesce(pr.stack, null) is not null),
       stack_waiting:=(coalesce(pr.stack, null) is not null and on(parent.merged)
-                      and (on(pr.base != sync.default) or on(sync.parent_in_history))),
+                      and (on(pr.base != sync.default) or not on(sync.parent_in_history == false))),
       bot_blocking:=(n(threads.owed_bot) - n(threads.info)),
       to_push:=(push.remote_sha is null or n(push.ahead) > 0),
       chase:=(on(sync.target != sync.default) or on(parent.merged)),

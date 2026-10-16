@@ -1338,3 +1338,21 @@ review() {
   [ "$(field .pr.stack)" = null ]
   [ "$(field '.errors | length')" = 0 ]
 }
+
+@test "sync.parent_in_history: an older commit of the merged parent still in the branch counts, not only its last head" {
+  git switch -qc A && commit a.txt a && git push -q origin A 2>/dev/null
+  local a_old; a_old=$(git rev-parse A)
+  git switch -qc feat && commit b.txt b
+  git config branch.feat.sd-parent A
+  git switch -q A && commit a2.txt a2 && git push -q origin A 2>/dev/null   # A moves on; feat was never rebased
+  local a_head; a_head=$(git rev-parse A)
+  git switch -q feat
+  (cd "$TMP/other" && git fetch -q origin && git merge -q --squash origin/A && git commit -qm "A (#1)" && git push -q origin main 2>/dev/null)
+  git fetch -q origin
+  jq -n --arg h "$a_head" --arg o "$a_old" '{data: {viewer: {login: "me"}, repository: {defaultBranchRef: {name: "main"},
+    pullRequests: {nodes: [{number: 1, state: "MERGED", baseRefName: "main", headRefName: "A", headRefOid: $h, isCrossRepository: false,
+                            allCommits: {nodes: [{commit: {oid: $o}}, {commit: {oid: $h}}]}}]}}}}' > "$GH_FIXTURES/A.json"
+  pr_fixture feat '.stack = {number: 29, size: 2} | .stackEntry = {position: 2}'
+  state
+  [ "$(field .sync.parent_in_history)" = true ]
+}

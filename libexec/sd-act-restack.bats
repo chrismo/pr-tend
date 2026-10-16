@@ -703,6 +703,16 @@ github_rewrites_child() {
   [ "$(git config branch.child.sd-parent)" = A ]
 }
 
+@test "retarget: a PR in a gh stack whose rewrite sd state can't judge (no merged head from GitHub): refused, says so" {
+  stacked_child
+  merged_pr A ""
+  open_pr child main 2 && in_stack child
+  run "$SD_ACT" retarget
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"can't tell whether GitHub has rewritten child yet"* ]]
+  [ "$(git config branch.child.sd-parent)" = A ]
+}
+
 @test "retarget: a PR in a gh stack still on its merged parent: the base edit is GitHub's, refused" {
   stacked_child
   github_rewrites_child

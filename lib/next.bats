@@ -542,6 +542,8 @@ NATIVE=('.pr.stack = {number: 29, position: 2, size: 2}')
   [ "$(keys "${NATIVE[@]}" "${after[@]}")" = ready ]
   # retargeted but not rewritten yet: the merged parent's commits are still ours to lose
   [ "$(keys "${NATIVE[@]}" "${after[@]}" '.sync.parent_in_history = true')" = stack-wait ]
+  # ... and when sd state can't tell (null), as sd act retarget refuses it then
+  [ "$(keys "${NATIVE[@]}" "${after[@]}" '.sync.parent_in_history = null')" = stack-wait ]
   # ... even when the probe sees a conflict with main (it replays the parent's commits)
   [ "$(keys "${NATIVE[@]}" "${after[@]}" '.sync.parent_in_history = true' '.sync.conflict = true')" = stack-wait ]
   # a stale sd-parent with GitHub's BEHIND is still a sync, never an empty list
