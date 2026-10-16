@@ -192,8 +192,9 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   git switch -qc kid && git commit -q --allow-empty -m kid
   touch "$GH/fail-kid-after-1"
   run "$SD_ACT" ship
+  [ "$status" -eq 0 ]
   [ "$(git config branch.kid.sd-parent)" = A ]
-  [[ "$(calls)" != *"--base main"* ]]
+  [[ "$(calls)" == "pr create --draft --base A --head kid "* ]]
 }
 
 @test "ship: an unrecorded stack git can't orient (the parent moved on) is refused before describe or push (#94)" {
