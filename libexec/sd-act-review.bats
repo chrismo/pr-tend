@@ -207,3 +207,12 @@ findings_rec() { git cat-file blob refs/sheepdog/feat/findings | jq -c "$1"; }
   [ "$status" -eq 0 ]
   [ "$(findings_rec .round)" = 1 ]
 }
+
+@test "a second review of the same HEAD keeps the round and what the agent declined" {
+  echo '[{"file": "file.txt", "line": 3, "severity": "error", "body": "c?"}]' > "$FX/findings.json"
+  "$SD_ACT" review >/dev/null 2>&1
+  rec=$(git cat-file blob refs/sheepdog/feat/findings | jq -c '. + {declined: true, reason: "c is right"}')
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
+  "$SD_ACT" review >/dev/null 2>&1
+  [ "$(findings_rec '[.round, .declined, .reason]')" = '[1,true,"c is right"]' ]
+}

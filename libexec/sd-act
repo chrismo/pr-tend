@@ -100,8 +100,8 @@
 #             Clean, or only nits: pin local at HEAD. Errors or warnings:
 #             printed as JSON and recorded (refs/sheepdog/<b>/findings: head,
 #             base, round, findings; implement adds declined and reason),
-#             nothing pinned; each such review is the next round, until a pin
-#             clears the record. A failed reviewer is never clean. sd state
+#             nothing pinned; each such review of a changed HEAD is the next
+#             round, until a pin clears the record. A failed reviewer is never clean. sd state
 #             shows the record and NEXT follows it: findings about HEAD (the
 #             same change, even rebased) go to the agent (review-fix: sd act
 #             implement, its prompt carrying them) below settings.reviewRounds,
@@ -645,7 +645,7 @@ autofix() {
 # ── review ───────────────────────────────────────────────────────────────────
 
 review() {
-  local b=$branch wt state base head task timeout reviewer findings n blocking round rec
+  local b=$branch wt state base head task timeout reviewer findings n blocking round rec prev keep
   wt=$(worktree_for "$b")
   [[ -n $wt ]] || die "$b isn't checked out in any worktree"
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
@@ -690,11 +690,19 @@ review() {
       printf '%s\n' "$findings"
     fi
   else
-    round=$(git cat-file blob "refs/sheepdog/$b/findings" 2>/dev/null | prc_line 'values coalesce(round, 0)' 2>/dev/null || true)
+    prev=$(git cat-file blob "refs/sheepdog/$b/findings" 2>/dev/null || true)
+    round=$(prc_line 'values coalesce(round, 0)' "${prev:-null}" 2>/dev/null || true)
     [[ $round =~ ^[0-9]+$ ]] || round=0
-    round=$(( round + 1 ))
-    rec=$(prc_json 'values {head: h, base: b, round: r, findings: f}' \
-            "{\"h\": \"$head\", \"b\": \"$base\", \"r\": $round, \"f\": $findings}") \
+    # The same HEAD (or the same change rebased, as sd state judged it) reviewed
+    # again isn't a new round, and keeps what the agent declined.
+    keep='{}'
+    if [[ $(prc_val "$state" 'on(review.findings.at_head)') == true ]]; then
+      keep=$(prc_json 'values {declined: coalesce(declined, false), reason: coalesce(reason, null)}' "$prev")
+    else
+      round=$(( round + 1 ))
+    fi
+    rec=$(prc_json 'values {...k, head: h, base: b, round: r, findings: f}' \
+            "{\"k\": $keep, \"h\": \"$head\", \"b\": \"$base\", \"r\": $round, \"f\": $findings}") \
       && git update-ref -m "review round $round" "refs/sheepdog/$b/findings" "$(git hash-object -w --stdin <<<"$rec")" \
       || die "couldn't record the findings"
     echo "sd act: $(plural "$n" finding) on $b, $blocking blocking (review round $round); nothing pinned" >&2
@@ -988,8 +996,8 @@ implement_run() {
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
   task=$(git config --get "branch.$b.sd-task" || true)
   before=$(git rev-parse "refs/heads/$b")
-  # sd act review's blocking findings on HEAD, unless the agent already declined
-  # them: then this run fixes those, with the task as context.
+  # A fix round: sd act review's blocking findings, when they're about HEAD and
+  # not yet declined. The task goes along as context.
   rec=$(git cat-file blob "refs/sheepdog/$b/findings" 2>/dev/null || true)
   # sd state decides whether they're about HEAD, so NEXT and this agree.
   if [[ -n $rec ]]; then
