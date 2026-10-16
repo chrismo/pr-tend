@@ -41,9 +41,15 @@ from chrismo's real config, glyphs and launchd job.
 
 This is a TDD repo: write a failing bats test first, then make it pass.
 
-**Run the suites in parallel.** One at a time they take about 7 minutes;
-`--jobs` (needs GNU `parallel`, `brew install parallel`) brings them down to
-under 2 minutes on a 10-core machine (424/424 in 107 s, 2026-10-13):
+**Lean on RWX for the full suite; don't run it locally.** Locally, run only the
+bats file you're changing during red-green. Send the full suite (and
+`ci/super-stress`) to RWX with `rwx run .rwx/tests.yml --wait`, which uploads
+local edits as a patch, no push needed (see CI below). Several sessions often
+work in parallel worktrees here, and a local full run takes every core.
+
+Offline, or to check the macOS-only `sd watch` plist tests that skip on RWX
+(`needs_plutil`), the local full run is (needs GNU `parallel`,
+`brew install parallel`; about 2 minutes on 10 cores):
 
 ```bash
 bats --jobs 10 lib/*.bats bin/*.bats libexec/*.bats ci/*.bats
@@ -65,7 +71,7 @@ PATH="/opt/homebrew/opt/bash/bin:$PATH" bats ...   # if 3.2 comes first
 intermittently on one construct, so `ci/super-stress` runs every named query
 (the `read -r -d '' NAME <<'EOF'` heredocs in `libexec/sd-*` and `lib/next.sh`'s
 `PRN_QUERY`) 200 times over `ci/fixtures/` and fails on a panic or a differing
-output. Run it after touching one; CI runs it too. SuperDB's edges (missing
+output. RWX runs it with the suite, so `rwx run` after touching a query covers it. SuperDB's edges (missing
 fields are errors, `has()` lies on fused types, dynamic `grep` is not a
 regex) are in `docs/pr-workflow/design.md`, "SuperDB notes".
 
@@ -75,7 +81,8 @@ by running them, not sourcing, so the shebang picks the bash. agent-rig's
 with `env: bash5: No such file or directory`.
 
 The suites pass inside Claude Code's sandbox as well as outside it (424/424 in
-104 s, 2026-10-13).
+104 s, 2026-10-13). `rwx` may not: an x509/TLS error from it in the sandbox
+means the sandbox, so run it outside.
 
 ## CI (RWX)
 
