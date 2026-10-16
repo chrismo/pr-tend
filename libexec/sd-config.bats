@@ -983,6 +983,37 @@ old_super() {
   [ "$output" = "sd config: $SHEEPDOG_CONFIG: settings.verfy: unknown key" ]
 }
 
+# flatten() and fields() drop an empty record, so these come off the type.
+@test "validate: an unknown key holding an empty block is an unknown key" {
+  write_global '{"settnigs":{}}'
+  run "$SD_CONFIG" show
+  [ "$status" -eq 1 ]
+  [ "$output" = "sd config: $SHEEPDOG_CONFIG: settnigs: unknown key" ]
+}
+
+@test "validate: an empty block under a misspelled step or harness is named by its path" {
+  write_global '{"steps":{"adress":{"claude":{}}},"harnesses":{"claud":{}}}'
+  run "$SD_CONFIG" show
+  [ "$status" -eq 1 ]
+  [[ "${lines[0]}" == *": harnesses.claud: unknown key" ]]
+  [[ "${lines[1]}" == *": steps.adress.claude: unknown key" ]]
+  [ "${#lines[@]}" -eq 2 ]
+}
+
+@test "validate: known empty blocks are fine" {
+  write_global '{"settings":{},"harnesses":{"claude":{},"pi":{}},"steps":{"address":{},"review":{"pi":{}}}}'
+  run "$SD_CONFIG" show
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: an empty block in a branch file is checked the same way" {
+  "$SD_CONFIG" init >/dev/null
+  printf '{"setings":{}}\n' > "$(branch_file feat)"
+  run "$SD_CONFIG" show
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"setings: unknown key"* ]]
+}
+
 @test "settings.botCommand: a typed string setting, empty by default" {
   run "$SD_CONFIG" get settings.botCommand
   [ "$status" -eq 0 ]
