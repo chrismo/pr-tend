@@ -19,6 +19,7 @@
 #   sd act describe [<branch>]
 #   sd act ship     [--force] [<branch>]
 #   sd act trigger  [--force] [<branch>]
+#   sd act attach   [--force] [--harness <h>] [<branch>]
 #
 # Examples:
 #   cd "$(sd act start fix-login "Fix the login redirect")"   worktree, then the agent builds it
@@ -31,6 +32,7 @@
 #   sd act restack --resolve           the same, with the agent resolving conflicts
 #   sd act review                      verify, then the local reviewer; clean pins local
 #   sd act ship                        describe, push, open a draft PR, enroll
+#   sd act attach                      open the branch's session yourself; agent steps wait
 #
 # Verbs:
 #   start     a worktree beside this one, on the branch <name> (an existing
@@ -92,10 +94,21 @@
 #             pin bot at HEAD; nothing when already pinned there. HEAD must
 #             be on the remote (the bot reviews what GitHub has); the local
 #             review not covering HEAD is a soft refusal
+#   attach    takeover (A9): hold branch.<b>.sd-lock, open the branch's
+#             session interactively in its worktree (claude --resume, or pi
+#             --session-id; a new session when none is stored), release the
+#             lock when the session exits, Ctrl-C included. While the lock is
+#             held, agent steps (implement, address, restack --resolve,
+#             review, describe) and the verbs that publish refuse to run;
+#             verify and the rest of sd state's mechanics go on. A lock whose
+#             process is gone from this host is stale: attach replaces it, an
+#             agent step clears it and runs
 #
 # --force:
 #   address         run even if the branch is unpushed, diverged or taken over
 #   restack, push, ship   run even if taken over
+#   implement, review, describe   the same
+#   attach          take over a lock another attach still holds
 #   trigger         even when the local review doesn't cover HEAD
 #   unregister      even with branches still enrolled (the watcher drops them)
 #
@@ -116,7 +129,7 @@
 #   harness   model, effort, provider (pi), args
 #
 # State (git config): branch.<b>.sheepdog, .sd-task, .sd-parent, .sd-session,
-# .sd-harness, .sd-handled;
+# .sd-harness, .sd-handled, .sd-lock ("<pid>@<host> <time>" while attached);
 # sheepdog.repo (global) lists the enrolled repos.
 #
 # <branch> defaults to the current one. See docs/pr-workflow/design.md, "Act".
@@ -512,6 +525,7 @@ review() {
   wt=$(worktree_for "$b")
   [[ -n $wt ]] || die "$b isn't checked out in any worktree"
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
+  attached_check "$b" "reviewing $b"
   state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
   base=$(prc_val "$state" 'coalesce(sync.old_base, "")')
   [[ -n $base ]] || die "can't find $b's base: $(prc_val "$state" 'sj(coalesce(errors, []), "; ")')"
@@ -540,9 +554,12 @@ review() {
 
 # step_session <branch> <step>: the harness and session a step runs in: the
 # branch's session (branch.<b>.sd-session) resumed, else a new one. Sets
-# STEP_CFG, STEP_H, STEP_SID, STEP_MODE, STEP_TIMEOUT.
+# STEP_CFG, STEP_H, STEP_SID, STEP_MODE, STEP_TIMEOUT. Refuses while the
+# branch is attached: the session is open in a TUI, and a resume beside it
+# forks the transcript (#14).
 step_session() {
   local b=$1 step=$2 stored_h
+  attached_check "$b" "running the $step step on $b"
   stored_h=$(git config --get "branch.$b.sd-harness" || true)
   STEP_CFG=$(prc_step "$step" "$b" "${harness_opt:-$stored_h}") || die "sd config failed"
   STEP_H=$(prc_val "$STEP_CFG" harness)
@@ -562,6 +579,86 @@ step_session() {
 step_store() {
   git config "branch.$1.sd-session" "$STEP_SID"
   git config "branch.$1.sd-harness" "$STEP_H"
+}
+
+# ── attach: A9, takeover ─────────────────────────────────────────────────────
+
+# branch.<b>.sd-lock is "<pid>@<host> <time>": the attach holding the branch's
+# session open. Stale once that pid is gone from this host; a lock from
+# another host can't be checked, so it never is.
+lock_stale() {
+  local pid=${1%%@*} host=${1#*@}
+  host=${host%% *}
+  [[ $pid =~ ^[0-9]+$ && $host == "$(hostname)" ]] || return 1
+  ! kill -0 "$pid" 2>/dev/null
+}
+
+# attached_check <branch> <doing>: an agent step on an attached branch is
+# refused (--force runs it anyway); a stale lock is cleared and the step runs.
+attached_check() {
+  local lock
+  lock=$(git config --get "branch.$1.sd-lock" || true)
+  [[ -n $lock ]] || return 0
+  if lock_stale "$lock"; then
+    echo "sd act: clearing a stale lock on $1 ($lock)" >&2
+    git config --unset "branch.$1.sd-lock"
+  elif $force; then
+    echo "sd act: warning: $1 is attached ($lock); running anyway" >&2
+  else
+    die "not $2: attached ($lock). Exit that session, or --force"
+  fi
+}
+
+# attach_release <branch>: drop the lock, if it is still the one attach took.
+attach_release() {
+  [[ $(git config --get "branch.$1.sd-lock" || true) == "$ATTACH_LOCK" ]] || return 0
+  git config --unset "branch.$1.sd-lock"
+}
+
+attach() {
+  local b=$branch wt lock stored_h h sid mode rc=0
+  local -a cmd
+  wt=$(worktree_for "$b")
+  [[ -n $wt ]] || die "$b isn't checked out in any worktree"
+  lock=$(git config --get "branch.$b.sd-lock" || true)
+  if [[ -n $lock ]]; then
+    if lock_stale "$lock"; then echo "sd act: replacing a stale lock on $b ($lock)" >&2
+    elif $force; then echo "sd act: taking over $b's lock ($lock)" >&2
+    else die "$b is already attached ($lock); exit that session, or --force to take it over"
+    fi
+  fi
+  stored_h=$(git config --get "branch.$b.sd-harness" || true)
+  sid=$(git config --get "branch.$b.sd-session" || true)
+  h=${harness_opt:-$stored_h}
+  if [[ -z $h ]]; then h=$(prc_get harness "$b" false) || die "sd config failed"; fi
+  if [[ -n $sid ]]; then
+    [[ $h == "${stored_h:-claude}" ]] \
+      || die "branch.$b.sd-session belongs to ${stored_h:-claude}; unset it to start a $h session"
+    mode=resume
+  else
+    sid=$(uuidgen | tr 'A-F' 'a-f') mode=new
+  fi
+  case $h in
+    claude) if [[ $mode == resume ]]; then cmd=(claude --resume "$sid"); else cmd=(claude --session-id "$sid"); fi ;;
+    pi) cmd=(pi --session-id "$sid") ;;
+    *) die "unknown harness: $h (claude or pi)" ;;
+  esac
+  ATTACH_LOCK="$$@$(hostname) $(date -u +%FT%TZ)"
+  git config "branch.$b.sd-lock" "$ATTACH_LOCK"
+  # A signal while the TUI runs is handled once it exits (bash waits for the
+  # foreground child); the EXIT trap then releases the lock either way.
+  trap 'attach_release "$b"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+  echo "sd act: attached to $b: $h ($mode session $sid) in $wt; agent steps wait until you exit" >&2
+  (cd "$wt" && "${cmd[@]}") || rc=$?
+  # The session exists once the TUI ran; 127 is the harness not running at all.
+  if (( rc != 127 )); then
+    git config "branch.$b.sd-session" "$sid"
+    git config "branch.$b.sd-harness" "$h"
+  fi
+  exit "$rc"
 }
 
 # ── start: A0 ───────────────────────────────────────────────────────────────
@@ -788,6 +885,7 @@ describe() {
   wt=$(worktree_for "$b")
   [[ -n $wt ]] || die "$b isn't checked out in any worktree"
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
+  attached_check "$b" "describing $b"
   state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
   describe_run "$b" "$wt" "$state"
 }
@@ -1245,5 +1343,6 @@ case $verb in
   describe) describe ;;
   ship) ship ;;
   trigger) trigger ;;
+  attach) attach ;;
   *) die "unknown verb: $verb" ;;
 esac

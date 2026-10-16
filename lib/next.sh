@@ -47,6 +47,8 @@ values {...s, remote}
     open and on(fresh == false)
       ? step("stale", "run", "fetch: GitHub is ahead of your remote refs, so the steps below may be wrong",
            f"git fetch --prune {remote}") : null,
+    open and on(session.locked)
+      ? step("attached", "wait", "attached: the branch'"'"'s session is open interactively; agent steps wait until it exits", null) : null,
     open and foreign
       ? step("foreign", "you", f"{remote}/{branch} has {plural(push.theirs, "commit")} this copy has never had",
              f"git log HEAD..{remote}/{branch}") : null,
