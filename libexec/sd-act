@@ -983,12 +983,13 @@ start() {
 
 # ── implement: J0 ────────────────────────────────────────────────────────────
 
-read -r -d '' IMPLEMENT_PROMPT <<'EOF' || true
-Implement the task below in this worktree; its branch is checked out for this
-work. Follow the repo's own instructions (AGENTS.md, CLAUDE.md, README) for how
-to work and test here. Edit files, but do not commit, push, or run gh: the
-pipeline commits your edits with your commit_message, runs the repo's checks,
-and opens the PR later.
+# The implement step's prompt: guidance (settings.implementPrompt, else
+# .sheepdog/implement.md in the base commit, else lib/prompts/implement.md),
+# then this contract, which the pipeline relies on. A fix round swaps in the
+# review-fix guidance and contract.
+read -r -d '' IMPLEMENT_CONTRACT <<'EOF' || true
+Edit files, but do not commit, push, or run gh: the pipeline commits your edits
+with your commit_message, runs the repo's checks, and opens the PR later.
 
 Return outcome "done" when the task is implemented, with a one-line
 commit_message; "needs-input" when you need a decision from the task's author
@@ -996,14 +997,9 @@ commit_message; "needs-input" when you need a decision from the task's author
 you can't make sense of it (say why in summary).
 EOF
 
-read -r -d '' REVIEW_FIX_PROMPT <<'EOF' || true
-Fix the local review's findings below in this worktree; its branch is checked
-out. The reviewer was a separate, read-only session with no context on why the
-code looks the way it does; you have that context. Fix each finding that is
-right. Leave any you judge wrong, and say which and why in summary. Follow the
-repo's own instructions (AGENTS.md, CLAUDE.md, README) for how to work and test
-here. Edit files, but do not commit, push, or run gh: the pipeline commits your
-edits with your commit_message and runs the repo's checks.
+read -r -d '' REVIEW_FIX_CONTRACT <<'EOF' || true
+Edit files, but do not commit, push, or run gh: the pipeline commits your edits
+with your commit_message and runs the repo's checks.
 
 Return outcome "done" with a one-line commit_message once you have fixed what
 you agree with. If you agree with none, change nothing and return "done": the
@@ -1011,6 +1007,16 @@ findings then go to the branch's owner. Return "needs-input" when you need a
 decision from the owner (put the question in summary), or "gave-up" when you
 can't make sense of them (say why in summary).
 EOF
+
+# guidance_base <branch>: the commit a step reads repo guidance (.sheepdog/,
+# relative prompt paths) from, which the branch's agent can't rewrite: the
+# base pin, else where the branch forked from the default branch.
+guidance_base() {
+  local remote def
+  git rev-parse -q --verify "refs/sheepdog/$1/base" && return
+  remote=$(prc_get settings.remote "$1" false) && def=$(start_default "$remote") \
+    && git merge-base "refs/heads/$1" "refs/remotes/$remote/$def"
+}
 
 read -r -d '' IMPLEMENT_SCHEMA <<'EOF' || true
 {"type": "object", "required": ["outcome", "commit_message", "summary"],
@@ -1021,7 +1027,7 @@ EOF
 
 # implement_run <branch> <worktree>
 implement_run() {
-  local b=$1 wt=$2 task verify before prompt result outcome summary msg extra rule rec state listed="" allow=$HARNESS_CLAUDE_ALLOW
+  local b=$1 wt=$2 task verify before prompt result outcome summary msg extra rule rec state gbase guidance listed="" allow=$HARNESS_CLAUDE_ALLOW
   local -a rules=()
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
   task=$(git config --get "branch.$b.sd-task" || true)
@@ -1049,10 +1055,13 @@ implement_run() {
   fi
   while IFS= read -r rule; do [[ -z $rule ]] || rules+=("$rule"); done <<<"$extra"
   step_session "$b" implement
+  gbase=$(guidance_base "$b") || die "can't find $b's base, to read its prompt guidance from"
   if [[ -n $listed ]]; then
-    prompt="$REVIEW_FIX_PROMPT"$'\n\nFindings:\n'"$listed"$'\n\nThe task this branch was made for, for context:\n'"${task:-(none recorded)}"
+    guidance=$(step_guidance reviewFixPrompt "$b" "$gbase" "$SD_LIB/prompts/review-fix.md") || die "can't read the review-fix guidance"
+    prompt="$guidance"$'\n\n'"$REVIEW_FIX_CONTRACT"$'\n\nFindings:\n'"$listed"$'\n\nThe task this branch was made for, for context:\n'"${task:-(none recorded)}"
   else
-    prompt="$IMPLEMENT_PROMPT"$'\n\nTask:\n'"$task"
+    guidance=$(step_guidance implementPrompt "$b" "$gbase" "$SD_LIB/prompts/implement.md") || die "can't read the implement guidance"
+    prompt="$guidance"$'\n\n'"$IMPLEMENT_CONTRACT"$'\n\nTask:\n'"$task"
   fi
   [[ -z $verify ]] || prompt+=$'\n\nThe repo\'s checks, which the pipeline runs after you: '"$verify"
   if [[ $STEP_H == claude ]] && (( ${#rules[@]} )); then

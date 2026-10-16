@@ -516,6 +516,37 @@ findings_at() {
   grep -qF -- '- file.txt:? (?) b?' "$FX/claude.prompt"
 }
 
+@test "implement: settings.implementPrompt replaces the guidance; the contract and task stay" {
+  started
+  printf 'Work in tiny steps.\n' > "$TMP/implement.md"
+  echo "{\"settings\": {\"implementPrompt\": \"$TMP/implement.md\"}}" > "$SHEEPDOG_CONFIG"
+  "$SD_ACT" implement >/dev/null
+  [ "$(head -1 "$FX/claude.prompt")" = "Work in tiny steps." ]
+  ! grep -q 'Implement the task below' "$FX/claude.prompt" || false
+  grep -q 'do not commit, push, or run gh' "$FX/claude.prompt"
+  grep -q 'Return outcome "done"' "$FX/claude.prompt"
+  grep -q 'add a third line' "$FX/claude.prompt"
+}
+
+@test "implement: .sheepdog/implement.md in the branch's base is the repo's guidance" {
+  mkdir -p .sheepdog && printf 'Repo implement guidance.\n' > .sheepdog/implement.md
+  git add .sheepdog && git commit -qm guidance && git push -q origin main 2>/dev/null
+  started
+  "$SD_ACT" implement >/dev/null
+  [ "$(head -1 "$FX/claude.prompt")" = "Repo implement guidance." ]
+}
+
+@test "implement: settings.reviewFixPrompt replaces a fix round's guidance; the contract stays" {
+  started
+  findings_at HEAD 1
+  printf 'Only fix errors.\n' > "$TMP/fix.md"
+  echo "{\"settings\": {\"reviewFixPrompt\": \"$TMP/fix.md\"}}" > "$SHEEPDOG_CONFIG"
+  "$SD_ACT" implement >/dev/null
+  [ "$(head -1 "$FX/claude.prompt")" = "Only fix errors." ]
+  grep -q 'do not commit, push, or run gh' "$FX/claude.prompt"
+  grep -q 'b should be B' "$FX/claude.prompt"
+}
+
 @test "implement: findings on an older head stay out of the prompt" {
   started
   findings_at HEAD 1
