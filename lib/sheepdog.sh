@@ -63,7 +63,7 @@ harness_result() {
 # The harness's stderr (claude can put protocol JSON there) shows only when
 # the step fails, and then all at once: nothing streams while it runs.
 harness_run() {
-  local h=$1 sid=$2 mode=$3 timeout=$4 prompt=$5 schema=$6 settings=${7:-'{}'} out err rc
+  local h=$1 sid=$2 mode=$3 timeout=$4 prompt=$5 schema=$6 settings=${7:-'{}'} out err rc said
   local model effort provider args fields
   local -a typed=() extra f
   # args last, so a newline in it shifts nothing; the end marker survives $( )
@@ -108,14 +108,16 @@ harness_run() {
   rc=$?
   if (( rc != 0 )); then
     cat "$err" >&2
-    # The harness's own account of the failure: claude's result text, else an
-    # error result's subtype (e.g. error_max_turns); the end of pi's reply.
-    case $h in
-      claude) prc_line 'where kind(this) == "record"
-                | values coalesce(nullif(result, ""), coalesce(is_error, false) ? subtype : null, "")
-                | where this != ""' "$out" >&2 2>/dev/null ;;
-      pi) [[ -z $out ]] || tail -n 20 <<<"$out" >&2 ;;
-    esac
+    # The end of the harness's own account of the failure: claude's result
+    # text, else an error result's subtype (e.g. error_max_turns), else
+    # stdout that isn't JSON; pi's reply.
+    said=$out
+    if [[ $h == claude ]]; then
+      said=$(prc_line 'where kind(this) == "record"
+        | values coalesce(nullif(result, ""), coalesce(is_error, false) ? subtype : null, "")
+        | where this != ""' "$out" 2>/dev/null) || said=$out
+    fi
+    [[ -z $said ]] || tail -n 20 <<<"$said" >&2
   fi
   rm -f "$err"
   return "$rc"

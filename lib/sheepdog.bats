@@ -105,6 +105,24 @@ EOF
   [[ "$stderr" == *"which file you mean"* ]]
 }
 
+@test "harness_run: claude failing with stdout that isn't JSON shows its end" {
+  harness_stubs
+  printf 'Error: unknown option --bogus\n' > "$FX/out"
+  echo 1 > "$FX/status"
+  run --separate-stderr harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"unknown option --bogus"* ]]
+}
+
+@test "harness_run: claude's error text is cut to its last 20 lines" {
+  harness_stubs
+  jq -n '{type: "result", is_error: true, result: ([range(1; 31) | "line \(.)"] | join("\n"))}' > "$FX/out"
+  run --separate-stderr harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"line 30"* ]]
+  [[ "$stderr" != *"line 10"$'\n'* ]]
+}
+
 @test "harness_run: pi's stderr follows the same rule" {
   harness_stubs
   printf 'Done.\n\n```json\n{"ok": true}\n```\n' > "$FX/out"
