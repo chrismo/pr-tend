@@ -57,7 +57,8 @@
 # after sd act trigger: any other bot's post does, so a CI or preview bot
 # that comments after a push belongs in one of them. A reply is a new review
 # or comment: a bot that edits one sticky comment in place isn't seen, and
-# runs into bot-silent. botTimeout (seconds, 3600): how long to wait on that
+# runs into bot-silent. Nor is the commit checked: a slow reply to an earlier
+# trigger that lands after a later one counts as the later one's reply. botTimeout (seconds, 3600): how long to wait on that
 # reply before bot-silent.
 # State: branch.<name>.pr-{parent,tend,harness,session,lock}, branch.<name>.sd-handled
 # (multi-valued: node ids of bot reviews/comments already dealt with),
@@ -482,6 +483,8 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
     br: coalesce([
       unnest {g: {...g, t: coalesce(a.bot_triggered, "~")},
               x: [...coalesce(a.pr.reviews.nodes, []), ...coalesce(a.pr.comments.nodes, [])]}
+      -- posted strictly after the trigger, which keeps out the trigger comment
+      -- itself when the viewer is a Bot account
       | where is_bot(coalesce(x.author, {}), g.bots) and not ignored(coalesce(x.author, {}), g.ign)
             and coalesce(x.submittedAt, x.createdAt, "") > g.t and not matches(coalesce(x.body, ""), g.ignore_body)
       | values x.id
