@@ -225,7 +225,7 @@ base_pin() { git rev-parse -q --verify refs/sheepdog/feat/base || true; }
   before=$(git rev-parse child)
   run "$SD_ACT" restack --resolve
   [ "$status" -ne 0 ]
-  [[ "$output" == *"wrong base: this would replay 2 of #1's commits onto origin/main; rebase past them by hand: git rebase --onto origin/main ${a_head:0:12} child && git update-ref refs/sheepdog/child/base origin/main"* ]]
+  [[ "$output" == *"wrong base: this would replay 2 of #1's commits onto origin/main; if the stack is linear, rebase past them by hand: git rebase --onto origin/main ${a_head:0:12} child && git update-ref refs/sheepdog/child/base origin/main"* ]]
   [ "$(git rev-parse child)" = "$before" ]
   ! rebase_in_progress
   [ ! -e "$FX/claude.calls" ]

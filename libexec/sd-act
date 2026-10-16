@@ -966,7 +966,7 @@ values {remote, resolve, s, why: sj(coalesce(s.errors, []), "; "), onto: f"{remo
       ? {hard: f"can't restack {s.branch}: {why}"}
     : on(s.sync.up_to_date) ? {done: f"{s.branch} is already on {onto}"}
     : on(s.parent.merged) and len(from_parent) > 0
-      ? {hard: f"wrong base: this would replay {len(from_parent)} of #{s.parent.pr.number}'s commits onto {onto}; rebase past them by hand: git rebase --onto {onto} {from_parent[0][0:12]} {s.branch} && git update-ref refs/sheepdog/{s.branch}/base {onto}"}
+      ? {hard: f"wrong base: this would replay {len(from_parent)} of #{s.parent.pr.number}'s commits onto {onto}; if the stack is linear, rebase past them by hand: git rebase --onto {onto} {from_parent[0][0:12]} {s.branch} && git update-ref refs/sheepdog/{s.branch}/base {onto}"}
     : nul(s.sync.conflict) ? {hard: f"can't tell whether restacking {s.branch} would conflict: {why}"}
     : on(s.sync.conflict) and not resolve
       ? {hard: f"restacking {s.branch} onto {onto} would conflict; resolve it by hand: git rebase --onto {onto} {s.sync.old_base[0:12]}, or let the agent: sd act restack --resolve"}
@@ -986,7 +986,7 @@ restack() {
   state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
   old_base=$(prc_val "$state" 'coalesce(sync.old_base, "")')
   replay='[]'
-  if [[ -n $old_base ]]; then
+  if [[ -n $old_base && $(prc_val "$state" 'on(parent.merged) and on(sync.up_to_date == false)') == true ]]; then
     replay=$(git rev-list --topo-order "$old_base..refs/heads/$b" | prc_strings) || die "can't list $old_base..$b"
   fi
 
