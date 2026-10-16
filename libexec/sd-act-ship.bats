@@ -168,6 +168,17 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   [[ "$stderr" == *"local review"* ]]
 }
 
+@test "ship: a parent that isn't on the remote is refused before describe or push" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A   # never pushed
+  git switch -q feat && git config branch.feat.sd-parent A
+  run "$SD_ACT" ship
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"A isn't on origin"*"sd act ship A"* ]]
+  [ ! -e "$FX/claude.args" ]
+  [ -z "$(remote feat)" ]
+  [ -z "$(calls)" ]
+}
+
 @test "ship: a merged or closed PR is refused" {
   open_pr feat main 7
   jq '.data.repository.pullRequests.nodes[0].state = "MERGED"' "$GH/feat.json" > "$GH/t" && mv "$GH/t" "$GH/feat.json"

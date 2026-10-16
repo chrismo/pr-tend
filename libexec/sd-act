@@ -90,7 +90,8 @@
 #             didn't move, push, then open a draft PR on the parent (sd-parent,
 #             else the default branch) and enroll; with a PR already open, fix
 #             up its title, body and base instead. Warns when the local review
-#             doesn't cover HEAD; the draft stays a draft until it does
+#             doesn't cover HEAD; the draft stays a draft until it does.
+#             Refuses while the parent (sd-parent) isn't on the remote
 #   trigger   post settings.botCommand on the PR so the review bot runs, and
 #             pin bot at HEAD; nothing when already pinned there. HEAD must
 #             be on the remote (the bot reviews what GitHub has); the local
@@ -961,6 +962,11 @@ ship() {
     none|OPEN) ;;
     *) die "PR #$(prc_val "$state" pr.number) is $(tr '[:upper:]' '[:lower:]' <<<"$pr_state"); nothing to ship" ;;
   esac
+  parent=$(git config --get "branch.$b.sd-parent" || true)
+  parent=${parent:-$(prc_val "$state" sync.default)}
+  if [[ $parent != "$(prc_val "$state" sync.default)" ]] && ! git -C "$wt" show-ref -q --verify "refs/remotes/$remote/$parent"; then
+    die "parent $parent isn't on $remote: ship it first (sd act ship $parent)"
+  fi
   prc_line 'where not (coalesce(review.local.status, "none") in ["covered", "rewritten-same"])
     | values "sd act: warning: the local review doesn'"'"'t cover HEAD (sd act review); the PR stays a draft until it does"' "$state" >&2
   head=$(git rev-parse "refs/heads/$b")
@@ -972,8 +978,6 @@ ship() {
   fi
   title=$(prc_line 'values title' "$(<"$f")") body=$(prc_line 'values body' "$(<"$f")")
   push_branch "$b" "$remote" || exit 1
-  parent=$(git config --get "branch.$b.sd-parent" || true)
-  parent=${parent:-$(prc_val "$state" sync.default)}
   if [[ $pr_state == none ]]; then
     url=$(gh pr create --draft --base "$parent" --head "$b" --title "$title" --body "$body") \
       || die "gh pr create failed; $b is pushed. Fix the cause and ship again"
