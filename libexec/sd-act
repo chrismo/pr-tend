@@ -1501,11 +1501,6 @@ push_branch() {
         return 1
       fi
     fi
-    if (( ahead > 0 )) && ! made_here "refs/heads/$b..$rsha"; then
-      echo "sd act: $remote/$b has $(plural "$behind" commit) this branch took but didn't make; not rewriting over them." \
-           "Look: git log $b..$remote/$b, then rebase onto or merge $remote/$b and push again" >&2
-      return 1
-    fi
     push_ref "$b" "$remote" "$rsha" --force-with-lease="refs/heads/$b:$rsha" || return
     if (( ahead == 0 )); then
       echo "force-pushed $b to $remote (dropped $(plural "$behind" commit); the remote head ${rsha:0:7} was ours)"

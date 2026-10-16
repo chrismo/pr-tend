@@ -1216,7 +1216,7 @@ review() {
   pr_fixture feat ".headRefOid = \"$(git rev-parse origin/feat)\""
   run "$SD_STATE"
   [ "$status" -eq 0 ]
-  [[ "${lines[0]}" == *"remote +1 (was here, dropped)"* ]] || false
+  [[ "${lines[0]}" == *"remote +1 (reset away here)"* ]] || false
   [[ "${lines[1]}" == "NEXT  run    force-push: drop 1 commit the remote has, reset away here  → sd act push"* ]]
   state
   [ "$(field .push.remote_made)" = true ]

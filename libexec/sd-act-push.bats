@@ -199,16 +199,16 @@ inherit_main() { git branch -q --set-upstream-to=origin/main "${1:-feat}"; }
   [[ "$output" == "force-pushed feat to origin (dropped 1 commit;"* ]] || false
 }
 
-@test "diverged over someone's commit taken and reset away: not rewritten over (#86)" {
+@test "a rewrite over commits this branch had keeps pushing with a lease, whoever made them (a restack past a colleague's squash) (#86)" {
   inherit_main
   upstream theirs
-  theirs=$(remote feat)
-  git fetch -q origin && git merge -q --ff-only origin/feat && git reset -q --hard HEAD~1
+  git fetch -q origin && git merge -q --ff-only origin/feat
+  git reset -q --hard HEAD~1
   commit mine
   run "$SD_ACT" push
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"took but didn't make"* ]] || false
-  [ "$(remote feat)" = "$theirs" ]
+  [ "$status" -eq 0 ]
+  [ "$(remote feat)" = "$(git rev-parse feat)" ]
+  [[ "$output" == "force-pushed feat to origin (rewritten;"* ]] || false
 }
 
 @test "the remote is only ahead: refused, says how to take its commits" {

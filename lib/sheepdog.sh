@@ -45,9 +45,10 @@ worktree_for() {
 # fast-forward merge, pull or rebase onto the remote keeps the original one).
 # Only those may be dropped by a force-push (#86). No user.email: nothing is.
 made_here() {
-  local me
+  local me committers
   me=$(git config user.email) && [[ -n $me ]] || return 1
-  [[ -z $(git log --format=%ce "$1" | grep -vxF "$me") ]]
+  committers=$(git log --format=%ce "$1") || return 1
+  [[ -z $(grep -vxF "$me" <<<"$committers") ]]
 }
 
 # step_guidance <setting> <branch> <base> <default-file>: the guidance part of a
