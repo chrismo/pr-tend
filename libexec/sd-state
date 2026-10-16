@@ -55,9 +55,11 @@
 # (regexes: bot reviews and PR comments whose body matches are never owed).
 # Either also keeps a bot's post from counting as the review bot's reply
 # after sd act trigger: any other bot's post does, so a CI or preview bot
-# that comments after a push belongs in one of them. A reply is a new review
-# or comment: a bot that edits one sticky comment in place isn't seen, and
-# runs into bot-silent. Nor is the commit checked: a slow reply to an earlier
+# that comments after a push belongs in one of them. So a botIgnoreBody
+# pattern must not match the review bot's own verdict (a clean "No issues
+# found" included), or that verdict never ends the wait. A reply is a new
+# review or comment: a bot that edits one sticky comment in place isn't seen,
+# and runs into bot-silent. Nor is the commit checked: a slow reply to an earlier
 # trigger that lands after a later one counts as the later one's reply.
 # botTimeout (seconds, 3600): how long to wait on that reply before
 # bot-silent.

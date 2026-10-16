@@ -429,7 +429,7 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   local st=('.bot = {command: "/review-bot", timeout: 3600}' '.review.bot = {sha: "h1", status: "covered", triggered: "t", replied: false, waited: 4000}')
   [ "$(keys "${st[@]}")" = bot-silent ]
   [ "$(step bot-silent who "${st[@]}")" = you ]
-  [ "$(step bot-silent say "${st[@]}")" = "the review bot hasn't answered in 66 min: check it, or trigger it again" ]
+  [ "$(step bot-silent say "${st[@]}")" = "the review bot hasn't answered in 66 min: check it, trigger it again, or accept HEAD as reviewed (sd act review --accept)" ]
   [ "$(step bot-silent cmd "${st[@]}")" = "sd act trigger --force" ]
 }
 

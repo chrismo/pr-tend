@@ -3,7 +3,8 @@
 bats_require_minimum_version 1.5.0
 
 # Test suite for `sd act trigger` (A5): post settings.botCommand as a PR
-# comment and pin bot at HEAD with its base; skip when already pinned there.
+# comment and pin bot at HEAD with its base, recording when GitHub says it
+# was posted; skip when already pinned there unless --force.
 # The bot reviews what is on GitHub, so an unpushed HEAD is refused, and a
 # local review that doesn't cover HEAD is a soft refusal (--force).
 #

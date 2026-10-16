@@ -117,7 +117,7 @@ values {...s, remote}
     has_pr and bot_waiting and n(review.bot.waited) <= n(bot.timeout)
       ? step("bot-wait", "wait", f"waiting on the review bot ({bot.command})", null) : null,
     has_pr and bot_waiting and n(review.bot.waited) > n(bot.timeout)
-      ? step("bot-silent", "you", f"the review bot hasn'"'"'t answered in {n(review.bot.waited) / 60} min: check it, or trigger it again",
+      ? step("bot-silent", "you", f"the review bot hasn'"'"'t answered in {n(review.bot.waited) / 60} min: check it, trigger it again, or accept HEAD as reviewed (sd act review --accept)",
              "sd act trigger --force") : null,
     has_pr and not to_push and not held and (on(ci.verdict == "pending") or on(ci.for_head == false))
       ? step("ci-wait", "wait", on(ci.verdict == "pending") ? "CI running" : "CI hasn'"'"'t reported on HEAD yet",
