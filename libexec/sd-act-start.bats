@@ -545,6 +545,16 @@ findings_at() {
   [ "$(head -1 "$FX/claude.prompt")" = "Local repo guidance." ]
 }
 
+@test "implement: with no base to trust, the branch's own .sheepdog/ is ignored" {
+  git init -q -b feat "$TMP/lone" && cd "$TMP/lone"
+  mkdir -p .sheepdog && printf 'Branch-written guidance.\n' > .sheepdog/implement.md
+  printf 'a\nb\n' > file.txt && git add . && git commit -qm init
+  git config branch.feat.sd-task "add c"
+  "$SD_ACT" implement >/dev/null
+  [ "$(head -1 "$FX/claude.prompt")" != "Branch-written guidance." ]
+  grep -q 'Implement the task below' "$FX/claude.prompt"
+}
+
 @test "implement: settings.reviewFixPrompt replaces a fix round's guidance; the contract stays" {
   started
   findings_at HEAD 1

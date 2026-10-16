@@ -59,13 +59,17 @@ made_here() {
 # (ciFixPrompt: .sheepdog/ci-fix.md); else <default-file>. A relative path is
 # read from the <base> commit, which the branch's agent can't rewrite; an
 # absolute one from disk. A named file that is missing is an error, never the
-# default. Every configurable step prompt goes through here.
+# default. An empty <base> means none can be trusted: no .sheepdog/ lookup,
+# and a relative path is refused. Every configurable step prompt goes through
+# here.
 step_guidance() {
   local path top conv
   path=$(prc_get "settings.$1" "$2" false) || return 1
   # From the top, so ./ means the worktree's top wherever the step runs.
   top=$(git rev-parse --show-toplevel) || return 1
-  if [[ -z $path ]]; then
+  if [[ -z $path && -z $3 ]]; then
+    cat "$4"
+  elif [[ -z $path ]]; then
     conv=".sheepdog/$(sed -E 's/Prompt$//; s/([A-Z])/-\1/g' <<<"$1" | tr 'A-Z' 'a-z').md"
     if [[ $(git -C "$top" cat-file -t "$3:$conv" 2>/dev/null) == blob ]]; then
       git -C "$top" cat-file blob "$3:$conv"
@@ -75,6 +79,8 @@ step_guidance() {
   elif [[ $path == /* ]]; then
     [[ -f $path ]] || { echo "settings.$1: no such file: $path" >&2; return 1; }
     cat "$path"
+  elif [[ -z $3 ]]; then
+    echo "settings.$1: no base commit to read $path from; use an absolute path" >&2; return 1
   else
     [[ $(git -C "$top" cat-file -t "$3:$path" 2>/dev/null) == blob ]] \
       || { echo "settings.$1: no such file in ${3:0:7}: $path" >&2; return 1; }

@@ -279,3 +279,14 @@ guidance_repo() {
   printf '{"settings": {"reviewPrompt": ".sheepdog/mine.md"}}\n' > "$SHEEPDOG_CONFIG"
   [ "$(step_guidance reviewPrompt feat HEAD "$TMP/default.md")" = named ]
 }
+
+@test "step_guidance: no trusted base: the convention is skipped, a relative path refused" {
+  guidance_repo
+  mkdir -p .sheepdog && printf 'branch-written\n' > .sheepdog/review.md
+  git add .sheepdog && git commit -qm guidance
+  [ "$(step_guidance reviewPrompt feat "" "$TMP/default.md")" = shipped ]
+  printf '{"settings": {"reviewPrompt": ".sheepdog/review.md"}}\n' > "$SHEEPDOG_CONFIG"
+  run step_guidance reviewPrompt feat "" "$TMP/default.md"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no base commit"* ]]
+}
