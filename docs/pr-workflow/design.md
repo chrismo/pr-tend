@@ -201,7 +201,7 @@ repeat offender means the step-contract prompt needs tightening.
 | SHA last locally reviewed clean | `refs/sheepdog/<branch>/local` |
 | SHA bot was triggered on | `refs/sheepdog/<branch>/bot` |
 | SHA accepted as reviewed enough (J5 "no") | `refs/sheepdog/<branch>/accepted` |
-| Open local review findings | `refs/sheepdog/<branch>/findings`: a blob, `{head, base, round, findings, declined?}` |
+| Open local review findings | `refs/sheepdog/<branch>/findings`: a blob, `{head, base, round, findings, declined?, reason?}` |
 | Review rounds before chrismo decides | `settings.reviewRounds` (config files), 3 by default |
 | Bot command / login | `settings.botCommand`, `settings.botLogin` (config files) |
 | Local reviewer script | `settings.localReview` (config files) |

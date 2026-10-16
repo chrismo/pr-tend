@@ -29,6 +29,22 @@ pin_write() {
     && git update-ref -m "pin $2 base" "refs/sheepdog/$1/$2-base" "$4"
 }
 
+# findings_at_head <findings-record> <head> <head-base>: whether sd act review's
+# findings record (refs/sheepdog/<b>/findings) is about <head>: the same
+# commit, or the same change rebased (base..head's patch-id unchanged, as the
+# pins compare it).
+findings_at_head() {
+  local h b
+  h=$(prc_line 'values coalesce(head, "")' "$1" 2>/dev/null) \
+    && b=$(prc_line 'values coalesce(base, "")' "$1" 2>/dev/null) || return 1
+  [[ $h == "$2" ]] && return 0
+  [[ -n $h && -n $b && -n $3 ]] && git cat-file -e "$h^{commit}" 2>/dev/null || return 1
+  local was now
+  was=$(git diff -U0 "$b" "$h" | git patch-id --stable | cut -d' ' -f1)
+  now=$(git diff -U0 "$3" "$2" | git patch-id --stable | cut -d' ' -f1)
+  [[ -n $was && $was == "$now" ]]
+}
+
 # commits_not_ours <reflog> <sha>: how many commits of <sha> no reflog entry reaches.
 commits_not_ours() {
   sed -n 's/^./^&/p' <<<"$1" | git rev-list --count --stdin "$2"

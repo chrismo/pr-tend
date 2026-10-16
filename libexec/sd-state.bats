@@ -691,6 +691,8 @@ lost_pin_stack() {
   git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
   run "$SD_STATE" --long
   [[ "$output" == *"the agent declined them: x is fine"* ]]
+  run "$SD_STATE"
+  [[ "$output" == *"review: 1 finding (round 2/3, declined)"* ]]
   commit b.txt b
   state
   [ "$(field .review.findings.at_head)" = false ]
@@ -732,6 +734,20 @@ lost_pin_stack() {
   git fetch -q && git rebase -q origin/main
   state
   [ "$(field .review.local.status)" = rewritten-same ]
+}
+
+@test "review: findings stay at HEAD across a rebase that keeps the change" {
+  git switch -qc feat && commit a.txt a
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" --arg b "$(git rev-parse main)" '{head: $h, base: $b, round: 3,
+          findings: [{file: "a.txt", line: 1, severity: "error", body: "x"}]}')
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
+  commit b.txt b "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
+  git fetch -q && git rebase -q origin/main
+  state
+  [ "$(field .review.findings.at_head)" = true ]
+  commit c.txt c
+  state
+  [ "$(field .review.findings.at_head)" = false ]
 }
 
 @test "review: a pin's recorded base keeps it covered across a restack past a squash-merged parent" {

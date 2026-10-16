@@ -688,7 +688,7 @@ review() {
             "{\"h\": \"$head\", \"b\": \"$base\", \"r\": $round, \"f\": $findings}") \
       && git update-ref -m "review round $round" "refs/sheepdog/$b/findings" "$(git hash-object -w --stdin <<<"$rec")" \
       || die "couldn't record the findings"
-    echo "sd act: $(plural "$n" finding) on $b (review round $round); nothing pinned" >&2
+    echo "sd act: $(plural "$n" finding) on $b, $blocking blocking (review round $round); nothing pinned" >&2
     printf '%s\n' "$findings"
   fi
 }
@@ -982,9 +982,11 @@ implement_run() {
   # sd act review's blocking findings on HEAD, unless the agent already declined
   # them: then this run fixes those, with the task as context.
   rec=$(git cat-file blob "refs/sheepdog/$b/findings" 2>/dev/null || true)
-  [[ -z $rec ]] || listed=$(prc_line "where head == \"$before\" and not on(declined)
-    | unnest findings | where coalesce(severity, \"\") != \"nit\"
-    | values f\"- {file}:{line} ({severity}) {body}\"" "$rec" 2>/dev/null || true)
+  if [[ -n $rec ]] \
+     && findings_at_head "$rec" "$before" "$(git rev-parse -q --verify "refs/sheepdog/$b/base" || true)"; then
+    listed=$(prc_line 'where not on(declined) | unnest findings | where coalesce(severity, "") != "nit"
+      | values f"- {file}:{line} ({severity}) {body}"' "$rec" 2>/dev/null || true)
+  fi
   [[ -n $task || -n $listed ]] || die "no task recorded for $b: git config branch.$b.sd-task \"<task>\""
   verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "sd config failed"
   extra=$(cd "$wt" && prc_get settings.implementAllow "$b" false) || die "sd config failed"

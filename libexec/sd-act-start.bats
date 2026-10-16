@@ -453,6 +453,20 @@ findings_at() {
   grep -q '(none recorded)' "$FX/claude.prompt"
 }
 
+@test "implement: findings the agent already declined aren't sent again" {
+  started
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: $h, round: 1, declined: true, reason: "no",
+          findings: [{file: "file.txt", line: 2, severity: "error", body: "b should be B"}]}')
+  git update-ref refs/sheepdog/feat-x/findings "$(git hash-object -w --stdin <<<"$rec")"
+  "$SD_ACT" implement >/dev/null
+  ! grep -q 'b should be B' "$FX/claude.prompt" || false
+  grep -q '^Implement the task below' "$FX/claude.prompt"
+  git config --unset branch.feat-x.sd-task
+  run "$SD_ACT" implement
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no task recorded"* ]]
+}
+
 @test "implement: findings on an older head stay out of the prompt" {
   started
   findings_at HEAD 1

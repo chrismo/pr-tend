@@ -14,6 +14,10 @@
 #   review    coverage of HEAD by refs/sheepdog/<branch>/{local,bot,accepted};
 #             a pin's <kind>-base ref is the base it was taken against, so a
 #             restack doesn't make a reviewed change look changed
+#             review.findings: sd act review's open findings
+#             (refs/sheepdog/<b>/findings), counting those that block, and
+#             whether they're about HEAD (the same commit, or the same change
+#             rebased)
 #   threads   what's owed, marked ! (blocks: unresolved threads, reviews
 #             requesting changes) or i (to read: bot review bodies and PR
 #             comments not yet marked handled)
@@ -28,7 +32,8 @@
 #   default   the one-liner (led by the PR's url, not the branch), then NEXT:
 #             the first step and how many follow
 #   --long    the one-liner, every step, then a line per owed item
-#             (mark, type, author, excerpt, url)
+#             (mark, type, author, excerpt, url) and per open review finding
+#             (r, severity, file:line, body)
 #   --json    everything
 #
 # Read-only: never fetches or writes. Remote refs are as fresh as the last
@@ -306,6 +311,10 @@ if git rev-parse -q --verify "refs/sheepdog/$branch/findings" >/dev/null && [[ -
   errors+=("review findings: refs/sheepdog/$branch/findings isn't a findings record")
 fi
 [[ -n $r_findings ]] || r_findings=null
+r_findings_at_head=false
+if [[ $r_findings != null ]] && findings_at_head "$r_findings" "$head" "${old_base:-}"; then
+  r_findings_at_head=true
+fi
 
 declare -A review
 for p in local bot accepted; do
@@ -411,7 +420,7 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
              findings: nul(s.r_findings) ? null
                : {sha: s.r_findings.head, round: s.r_findings.round,
                   n: len(coalesce([unnest s.r_findings.findings | where coalesce(severity, "") != "nit"], [])),
-                  at_head: s.r_findings.head == s.head, declined: on(s.r_findings.declined),
+                  at_head: s.r_findings_at_head, declined: on(s.r_findings.declined),
                   reason: coalesce(s.r_findings.reason, null),
                   cap: s.review_rounds, items: s.r_findings.findings}},
     threads: {owed_bot: s.gh_ok ? len(ob) : null,
@@ -438,12 +447,12 @@ refs_json=$(git for-each-ref --format='%(refname) %(objectname)' "refs/sheepdog/
 args=$(printf '{"branch": %s, "head": %s, "pr": %s, "parent": %s, "parent_source": %s, "parent_pr": %s, "parent_merged": %s,
   "target": %s, "default_branch": %s, "sync_ahead": %s, "behind": %s, "up_to_date": %s, "old_base": %s, "conflict": %s,
   "remote_sha": %s, "ahead": %s, "push_behind": %s, "diverged": %s, "remote_ours": %s, "theirs": %s, "stale": %s,
-  "r_local": %s, "r_bot": %s, "r_accepted": %s, "r_findings": %s, "review_rounds": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s,
+  "r_local": %s, "r_bot": %s, "r_accepted": %s, "r_findings": %s, "r_findings_at_head": %s, "review_rounds": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s,
   "ignore": %s, "ignore_body": %s, "handled": %s, "refs": %s, "enrolled": %s, "harness": %s, "session": %s, "lock": %s, "errors": %s}\n' \
   "$(jstr "$branch")" "$(jstr "$head")" "$pr" "$(jstr "$parent")" "$(jstr "$parent_source")" "$parent_pr" "$parent_merged" \
   "$(jstr "$target")" "$(jstr "$default_branch")" "$sync_ahead" "$behind" "$up_to_date" "$(jnull "$old_base")" "$conflict" \
   "$(jnull "$remote_sha")" "$ahead" "$push_behind" "$diverged" "$remote_ours" "$theirs" "$stale_json" \
-  "${review[local]}" "${review[bot]}" "${review[accepted]}" "$r_findings" "$review_rounds" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" \
+  "${review[local]}" "${review[bot]}" "${review[accepted]}" "$r_findings" "$r_findings_at_head" "$review_rounds" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" \
   "$ignore" "$ignore_body" "$(jlist "branch.$branch.sd-handled")" "$refs_json" \
   "$(jstr "$(cfg sheepdog)")" "$(jstr "$(cfg sd-harness)")" "$(jstr "$(cfg sd-session)")" "$(jstr "$(cfg sd-lock)")" "$errors_json")
 state=$(prc_json "$ASSEMBLE" "$args") || die "couldn't assemble the state"
@@ -471,7 +480,7 @@ values [
   nul(pr) or nul(threads.blocking) ? null : f"!:{threads.blocking} i:{threads.info}",
   pin("local", review.local), pin("bot", review.bot), pin("accepted", review.accepted),
   nul(review.findings) ? null
-    : f"review: {review.findings.n} finding{review.findings.n == 1 ? "" : "s"} (round {review.findings.round}/{review.findings.cap}){review.findings.at_head ? "" : " on old head"}",
+    : f"review: {review.findings.n} finding{review.findings.n == 1 ? "" : "s"} (round {review.findings.round}/{review.findings.cap}{on(review.findings.declined) ? ", declined" : ""}){review.findings.at_head ? "" : " on old head"}",
   on(session.locked) ? "locked" : null,
   on(fresh == false) ? "⚠ stale: fetch" : null,
   len(errors) > 0 ? f"⚠ {len(errors)} error(s)" : null
