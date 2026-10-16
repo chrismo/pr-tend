@@ -32,7 +32,7 @@ change the link directory) and starts the watcher, which checks enrolled
 branches every five minutes by default. Re-run it to update both. Use
 `sd watch uninstall` to stop the background job, or `sd watch install` to
 start it again. On other platforms, only the CLI is linked; the background
-watcher requires launchd. An existing regular file at `$LOCAL_BIN/sd` blocks
+watcher requires macOS (launchd). An existing regular file at `$LOCAL_BIN/sd` blocks
 installation without being overwritten.
 
 Needs on `PATH`: `bash5` (a link to bash 5+; the commands are
@@ -94,12 +94,13 @@ A custom local reviewer (`settings.localReview`) keeps the contract in
 
 sheepdog was pr-tend until 2026-10-15: `pr-act push` is now `sd act push`, and
 its state moved to new names (`refs/sheepdog/`, `~/.config/sheepdog/`, git
-config `sheepdog.*`, `SHEEPDOG_*` env vars). On a machine that ran pr-tend, after
-`./install.sh`:
+config `sheepdog.*`, `SHEEPDOG_*` env vars). On a machine that ran pr-tend,
+migrate its state before installing:
 
 ```bash
-sd migrate --dry-run   # what it would move, and anything it can't
-sd migrate
+./bin/sd migrate --dry-run   # what it would move, and anything it can't
+./bin/sd migrate
+./install.sh
 ```
 
 ## Tests
