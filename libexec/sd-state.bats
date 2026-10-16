@@ -687,6 +687,10 @@ lost_pin_stack() {
   [[ "$output" == *"review: 1 finding (round 2/3)"* ]]
   run "$SD_STATE" --long
   [[ "$output" == *"error  a.txt:1  x"* ]]
+  rec=$(git cat-file blob refs/sheepdog/feat/findings | jq -c '. + {declined: true, reason: "x is fine"}')
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
+  run "$SD_STATE" --long
+  [[ "$output" == *"the agent declined them: x is fine"* ]]
   commit b.txt b
   state
   [ "$(field .review.findings.at_head)" = false ]

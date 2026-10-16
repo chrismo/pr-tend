@@ -682,7 +682,8 @@ review() {
     fi
   else
     round=$(git cat-file blob "refs/sheepdog/$b/findings" 2>/dev/null | prc_line 'values coalesce(round, 0)' 2>/dev/null || true)
-    round=$(( ${round:-0} + 1 ))
+    [[ $round =~ ^[0-9]+$ ]] || round=0
+    round=$(( round + 1 ))
     rec=$(prc_json 'values {head: h, base: b, round: r, findings: f}' \
             "{\"h\": \"$head\", \"b\": \"$base\", \"r\": $round, \"f\": $findings}") \
       && git update-ref -m "review round $round" "refs/sheepdog/$b/findings" "$(git hash-object -w --stdin <<<"$rec")" \
@@ -1028,7 +1029,7 @@ implement_run() {
     git -C "$wt" add -A && git -C "$wt" commit -q -m "$msg" || die "commit failed; the edits are left in $wt"
   elif [[ $(git rev-parse "refs/heads/$b") == "$before" ]]; then
     [[ -n $listed ]] || die "the agent says done but changed nothing (session $STEP_SID)"
-    rec=$(prc_json 'values {...this, declined: true}' "$rec") \
+    rec=$(prc_json 'values {...r, declined: true, reason: why}' "{\"r\": $rec, \"why\": $(prc_json_string "$summary")}") \
       && git update-ref -m "review findings declined" "refs/sheepdog/$b/findings" "$(git hash-object -w --stdin <<<"$rec")" \
       || die "couldn't record that the agent declined the findings"
     echo "$b: the agent declined the review findings: $summary"

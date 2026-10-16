@@ -412,6 +412,7 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
                : {sha: s.r_findings.head, round: s.r_findings.round,
                   n: len(coalesce([unnest s.r_findings.findings | where coalesce(severity, "") != "nit"], [])),
                   at_head: s.r_findings.head == s.head, declined: on(s.r_findings.declined),
+                  reason: coalesce(s.r_findings.reason, null),
                   cap: s.review_rounds, items: s.r_findings.findings}},
     threads: {owed_bot: s.gh_ok ? len(ob) : null,
               owed_human: s.gh_ok ? len(coalesce([unnest owed | where kind == "human"], [])) : null,
@@ -503,3 +504,4 @@ prc_line "$LONG" "$state"
 # The local review's open findings, if any (sd act review's record).
 prc_line 'where not nul(review.findings) | unnest review.findings.items
   | values f"  r  {severity}  {file}:{line}  {body}"' "$state"
+prc_line 'where on(review.findings.declined) | values f"  the agent declined them: {review.findings.reason}"' "$state"

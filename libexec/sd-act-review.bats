@@ -199,3 +199,11 @@ findings_rec() { git cat-file blob refs/sheepdog/feat/findings | jq -c "$1"; }
   run git rev-parse -q --verify refs/sheepdog/feat/findings
   [ "$status" -ne 0 ]
 }
+
+@test "a findings record with no usable round starts the count over" {
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<'{"round": "lots"}')"
+  echo '[{"file": "file.txt", "line": 3, "severity": "error", "body": "c?"}]' > "$FX/findings.json"
+  run --separate-stderr "$SD_ACT" review
+  [ "$status" -eq 0 ]
+  [ "$(findings_rec .round)" = 1 ]
+}

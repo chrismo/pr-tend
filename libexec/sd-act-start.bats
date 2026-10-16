@@ -469,7 +469,7 @@ findings_at() {
   run "$SD_ACT" implement
   [ "$status" -eq 0 ]
   [[ "$output" == *"declined"*"b is right as it is."* ]]
-  [ "$(git cat-file blob refs/sheepdog/feat-x/findings | jq -c '[.declined, .round]')" = '[true,2]' ]
+  [ "$(git cat-file blob refs/sheepdog/feat-x/findings | jq -c '[.declined, .round, .reason]')" = '[true,2,"b is right as it is."]' ]
 }
 
 @test "implement: needs-input prints the question, leaves the edits uncommitted, nonzero" {
