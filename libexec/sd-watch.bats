@@ -1139,6 +1139,15 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   [ -z "$output" ]
 }
 
+@test "glyph: a file's path means its worktree; -h prints the help" {
+  ps_fixture feat
+  pass
+  touch notes.txt
+  [ "$(cd "$TMP" && "$SD_WATCH" glyph "$TMP/repo/notes.txt")" = "✅" ]
+  run "$SD_WATCH" glyph -h
+  [[ "$output" == *"Usage: sd watch"* ]] || false
+}
+
 @test "glyph: before any pass, nothing" {
   run "$SD_WATCH" glyph
   [ "$status" -eq 0 ]

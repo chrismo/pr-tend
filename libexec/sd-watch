@@ -120,8 +120,9 @@ write_glyph() { # write_glyph <worktree-or-empty> <branch> <glyph>
 # <path> (default .), while it's still on the branch checked. No super, so a
 # shell prompt can run it.
 glyph_of() {
-  local top branch
-  top=$(git -C "${1:-.}" rev-parse --show-toplevel 2>/dev/null) || return 0
+  local dir=${1:-.} top branch
+  [[ -d $dir ]] || dir=$(dirname "$dir")
+  top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || return 0
   branch=$(git -C "$top" symbolic-ref -q --short HEAD) || return 0
   awk -F'\t' -v p="$top" -v b="$branch" '$1 == p && $2 == b { print $3; exit }' "$STATE_DIR/glyphs" 2>/dev/null || true
 }
@@ -401,6 +402,8 @@ refresh() {
   [[ -z $out ]] || show <<<"$out"
   load_worktrees "$repo"
   line=$(check "$repo" "$name" "$b" "${worktree_of[$b]:-}") || rc=1
+  # Unlocked like the state file: a pass that finishes between this read and
+  # the mv loses to the older index until the next pass.
   if [[ -s $GLYPHS ]]; then
     { awk -F'\t' -v p="${worktree_of[$b]}" '$1 != p' "$STATE_DIR/glyphs" 2>/dev/null; cat "$GLYPHS"; } > "$GLYPHS.new" \
       && mv "$GLYPHS.new" "$STATE_DIR/glyphs"
@@ -495,7 +498,7 @@ uninstall_job() {
 case ${1:-} in
   "") prc_super_init || exit 1; run_pass ;;
   refresh) shift; refresh "$@" ;;
-  glyph) glyph_of "${2:-}" ;;
+  glyph) case ${2:-} in -h|--help) usage ;; *) glyph_of "${2:-}" ;; esac ;;
   vacuum)
     case ${2:-} in
       "") prc_super_init || exit 1; vacuum_preview ;;

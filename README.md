@@ -60,6 +60,10 @@ A custom local reviewer (`settings.localReview`) keeps the contract in
 
 - `sd watch` writes a glyph per worktree to `~/.claude/tab-status/<worktree>.pr`
   (`$STATUS_DIR`), which agent-rig's `tab-status` reads.
+- `sd watch glyph [<path>]` prints the glyph for the worktree holding `<path>`
+  (default `.`) while it's still on the branch checked, from
+  `$SHEEPDOG_STATE_DIR/glyphs`. It is exact by path and fast (no super, no
+  GitHub), for a shell prompt or a tab title.
 - The launchd job is labelled `com.sheepdog.watch`. `sd watch install` and
   `uninstall` also retire its earlier labels, `com.agent-rig.pr-watch` and
   `com.pr-tend.pr-watch`.
