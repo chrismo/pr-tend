@@ -91,7 +91,8 @@
 #             else the default branch) and enroll; with a PR already open, fix
 #             up its title, body and base instead. Warns when the local review
 #             doesn't cover HEAD; the draft stays a draft until it does.
-#             Refuses while the parent (sd-parent) isn't on the remote
+#             Refuses while the parent (sd-parent) isn't on the remote, has
+#             merged (restack first), was closed, or can't be looked up
 #   trigger   post settings.botCommand on the PR so the review bot runs, and
 #             pin bot at HEAD; nothing when already pinned there. HEAD must
 #             be on the remote (the bot reviews what GitHub has); the local
@@ -965,9 +966,13 @@ ship() {
   parent=$(git config --get "branch.$b.sd-parent" || true)
   parent=${parent:-$(prc_val "$state" sync.default)}
   if [[ $parent != "$(prc_val "$state" sync.default)" ]]; then
-    if [[ $(prc_val "$state" 'coalesce(parent.merged, false)') == true ]]; then
-      die "parent $parent has merged: sd act restack first, which lands $b on $(prc_val "$state" sync.target) and rewrites sd-parent"
-    fi
+    # Like RESTACK_GATE: a parent whose state is unknown or closed is nobody's
+    # to ship onto; a merged one means restack first; a missing one, ship it.
+    case $(prc_val "$state" 'parent.merged is null ? "unknown" : on(parent.pr.state == "CLOSED") ? "closed" : on(parent.merged) ? "merged" : "open"') in
+      unknown) die "can't tell whether $parent merged: $(prc_val "$state" 'sj(coalesce(errors, []), "; ")')" ;;
+      closed) die "parent $parent (#$(prc_val "$state" parent.pr.number)) was closed without merging: decide what $b targets (git config branch.$b.sd-parent <branch>), then ship" ;;
+      merged) die "parent $parent has merged: sd act restack first, which lands $b on $(prc_val "$state" sync.target) and rewrites sd-parent" ;;
+    esac
     git -C "$wt" show-ref -q --verify "refs/remotes/$remote/$parent" \
       || die "parent $parent isn't on $remote: ship it first (sd act ship $parent)"
   fi

@@ -33,6 +33,7 @@ if [[ $1 == pr ]]; then
 fi
 b=""
 for a; do [[ $a == branch=* ]] && b=${a#branch=}; done
+[[ -e $GH/fail-$b ]] && { echo "gh: boom for $b" >&2; exit 1; }
 if [[ -f $GH/$b.json ]]; then cat "$GH/$b.json"
 else echo '{"data":{"viewer":{"login":"me"},"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"nodes":[]}}}}'
 fi
@@ -192,6 +193,41 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   [[ "$output" == *"A has merged"*"sd act restack"* ]]
   [ ! -e "$FX/claude.args" ]
   [ -z "$(remote feat)" ]
+  [ -z "$(calls)" ]
+}
+
+@test "ship: a parent that has merged but is still on the remote: restack first, nothing pushed" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
+  a_head=$(git rev-parse A)
+  git switch -q feat && git config branch.feat.sd-parent A
+  jq -n --arg h "$a_head" '{data: {viewer: {login: "me"}, repository: {defaultBranchRef: {name: "main"},
+    pullRequests: {nodes: [{number: 1, state: "MERGED", baseRefName: "main", headRefName: "A", headRefOid: $h, isCrossRepository: false}]}}}}' > "$GH/A.json"
+  run "$SD_ACT" ship
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"A has merged"*"sd act restack"* ]]
+  [ -z "$(remote feat)" ]
+  [ -z "$(calls)" ]
+}
+
+@test "ship: a parent closed without merging is refused: decide what the branch targets" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
+  a_head=$(git rev-parse A)
+  git switch -q feat && git config branch.feat.sd-parent A
+  jq -n --arg h "$a_head" '{data: {viewer: {login: "me"}, repository: {defaultBranchRef: {name: "main"},
+    pullRequests: {nodes: [{number: 1, state: "CLOSED", baseRefName: "main", headRefName: "A", headRefOid: $h, isCrossRepository: false}]}}}}' > "$GH/A.json"
+  run "$SD_ACT" ship
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"A (#1) was closed without merging"*"sd-parent"* ]]
+  [ -z "$(calls)" ]
+}
+
+@test "ship: a parent whose PR can't be looked up is refused, never shipped onto" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
+  git switch -q feat && git config branch.feat.sd-parent A
+  touch "$GH/fail-A"
+  run "$SD_ACT" ship
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"can't tell whether A merged"* ]]
   [ -z "$(calls)" ]
 }
 
