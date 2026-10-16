@@ -123,7 +123,7 @@ glyph_of() {
   local dir=${1:-.} top branch
   [[ -d $dir ]] || dir=$(dirname "$dir")
   top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || return 0
-  branch=$(git -C "$top" symbolic-ref -q --short HEAD) || return 0
+  branch=$(git -C "$top" symbolic-ref -q --short HEAD) || branch=$(rebase_head "$top") || return 0
   awk -F'\t' -v p="$top" -v b="$branch" '$1 == p && $2 == b { print $3; exit }' "$STATE_DIR/glyphs" 2>/dev/null || true
 }
 
@@ -290,20 +290,26 @@ fetch() {
   fi
 }
 
+# rebase_head <worktree>: the branch a rebase paused there is rebasing.
+rebase_head() {
+  local gd head
+  gd=$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null) || return 1
+  head=$(cat "$gd/rebase-merge/head-name" 2>/dev/null || cat "$gd/rebase-apply/head-name" 2>/dev/null) || return 1
+  [[ $head == refs/heads/* ]] || return 1
+  echo "${head#refs/heads/}"
+}
+
 # load_worktrees <repo>: worktree_of[<branch>] is the worktree it's checked out
 # in, counting one paused mid-rebase of it (listed as detached), and not one
 # whose directory is gone (rm -rf leaves git listing it).
 load_worktrees() {
-  local key val wt_path gd head
+  local key val wt_path head
   declare -gA worktree_of=()
   while read -r key val; do
     case $key in
       worktree) wt_path=$val ;;
       branch) if [[ -d $wt_path ]]; then worktree_of[${val#refs/heads/}]=$wt_path; fi ;;
-      detached)
-        gd=$(git -C "$wt_path" rev-parse --absolute-git-dir 2>/dev/null) || continue
-        head=$(cat "$gd/rebase-merge/head-name" 2>/dev/null || cat "$gd/rebase-apply/head-name" 2>/dev/null) || continue
-        if [[ $head == refs/heads/* ]]; then worktree_of[${head#refs/heads/}]=$wt_path; fi ;;
+      detached) if head=$(rebase_head "$wt_path"); then worktree_of[$head]=$wt_path; fi ;;
     esac
   done < <(git -C "$1" worktree list --porcelain)
 }
@@ -325,7 +331,9 @@ enrolled_branches() {
 
 run_pass() {
   mkdir -p "$STATE_DIR" "$STATUS_DIR"
-  WRITTEN=$(mktemp) GLYPHS=$(mktemp)
+  # The index's temp file sits beside it, so the mv is a rename a prompt never
+  # sees half done.
+  WRITTEN=$(mktemp) GLYPHS=$(mktemp "$STATE_DIR/glyphs.XXXXXX")
   trap 'rm -f "$WRITTEN" "$GLYPHS"' EXIT
   local -a repos branches
   local repo name b lines="" out
@@ -395,8 +403,8 @@ refresh() {
   prc_super_init || exit 1
   name=$(basename "$repo")
   mkdir -p "$STATE_DIR" "$STATUS_DIR"
-  WRITTEN=/dev/null GLYPHS=$(mktemp)
-  trap 'rm -f "$GLYPHS"' EXIT
+  WRITTEN=/dev/null GLYPHS=$(mktemp "$STATE_DIR/glyphs.XXXXXX") GLYPHS_NEW=$(mktemp "$STATE_DIR/glyphs.XXXXXX")
+  trap 'rm -f "$GLYPHS" "$GLYPHS_NEW"' EXIT
   out=$(fetch "$repo" "$name") || { show <<<"$out"; exit 1; }
   VACUUM_AFTER=$(cd "$repo" && prc_get settings.vacuumAfter "" true) || VACUUM_AFTER=0
   [[ -z $out ]] || show <<<"$out"
@@ -405,8 +413,8 @@ refresh() {
   # Unlocked like the state file: a pass that finishes between this read and
   # the mv loses to the older index until the next pass.
   if [[ -s $GLYPHS ]]; then
-    { awk -F'\t' -v p="${worktree_of[$b]}" '$1 != p' "$STATE_DIR/glyphs" 2>/dev/null; cat "$GLYPHS"; } > "$GLYPHS.new" \
-      && mv "$GLYPHS.new" "$STATE_DIR/glyphs"
+    { awk -F'\t' -v p="${worktree_of[$b]}" '$1 != p' "$STATE_DIR/glyphs" 2>/dev/null; cat "$GLYPHS"; } > "$GLYPHS_NEW" \
+      && mv "$GLYPHS_NEW" "$STATE_DIR/glyphs"
   fi
   show <<<"$line"
   return $rc
@@ -498,7 +506,13 @@ uninstall_job() {
 case ${1:-} in
   "") prc_super_init || exit 1; run_pass ;;
   refresh) shift; refresh "$@" ;;
-  glyph) case ${2:-} in -h|--help) usage ;; *) glyph_of "${2:-}" ;; esac ;;
+  glyph)
+    (( $# <= 2 )) || die "usage: sd watch glyph [<path>]"
+    case ${2:-} in
+      -h|--help) usage ;;
+      -*) die "unknown option: $2" ;;
+      *) glyph_of "${2:-}" ;;
+    esac ;;
   vacuum)
     case ${2:-} in
       "") prc_super_init || exit 1; vacuum_preview ;;

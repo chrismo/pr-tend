@@ -1148,6 +1148,27 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   [[ "$output" == *"Usage: sd watch"* ]] || false
 }
 
+@test "glyph: a worktree paused mid-rebase still shows its branch's glyph" {
+  echo a > f && git add f && git commit -qm a
+  git switch -q main
+  echo b > f && git add f && git commit -qm b
+  git switch -q feat
+  ! git rebase -q main 2>/dev/null
+  ps_fixture feat '.sync.up_to_date = false | .sync.conflict = true'
+  pass
+  [ "$("$SD_WATCH" glyph)" = "❌" ]
+  git rebase --abort
+}
+
+@test "glyph: an unknown option or a second path is refused" {
+  run "$SD_WATCH" glyph --bogus
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown option: --bogus"* ]] || false
+  run "$SD_WATCH" glyph a b
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"usage: sd watch glyph [<path>]"* ]] || false
+}
+
 @test "glyph: before any pass, nothing" {
   run "$SD_WATCH" glyph
   [ "$status" -eq 0 ]
