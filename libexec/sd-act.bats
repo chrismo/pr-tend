@@ -53,6 +53,52 @@ repos() { git config --global --get-all sheepdog.repo || true; }
   [ -z "$(git config branch.feat.sheepdog || true)" ]
 }
 
+# no_prs: an origin with main on it, sd state on PATH, and a gh with no PRs.
+no_prs() {
+  git init -q --bare "$TMP/origin.git"
+  git remote add origin "$TMP/origin.git"
+  git push -q origin HEAD:main 2>/dev/null
+  git fetch -q origin
+  git remote set-head origin main
+  mkdir -p "$TMP/fakebin"
+  cat > "$TMP/fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+echo '{"data":{"viewer":{"login":"me"},"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"nodes":[]}}}}'
+SH
+  chmod +x "$TMP/fakebin/gh"
+  export PATH="$BATS_TEST_DIRNAME:$TMP/fakebin:$PATH" SHEEPDOG_CONFIG="$TMP/global.json"
+}
+
+@test "enroll: a branch made from another's tip, with no PR, records it as the parent (#94)" {
+  git switch -q main && no_prs
+  git switch -qc par && git commit -q --allow-empty -m p1
+  git switch -qc kid && git commit -q --allow-empty -m k1
+  run "$SD_ACT" enroll kid
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"parent: par"* ]]
+  [ "$(git config branch.kid.sd-parent)" = par ]
+  [ "$(git rev-parse refs/sheepdog/kid/base)" = "$(git rev-parse par)" ]
+}
+
+@test "enroll: two candidate parents record neither, and say so" {
+  git switch -q main && no_prs
+  git switch -qc par && git commit -q --allow-empty -m p1
+  git branch twin
+  git switch -qc kid && git commit -q --allow-empty -m k1
+  run "$SD_ACT" enroll kid
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"kid looks stacked on par or twin"*"git config branch.kid.sd-parent"* ]]
+  [ -z "$(git config branch.kid.sd-parent || true)" ]
+}
+
+@test "enroll: a branch made from main alone records no parent" {
+  git switch -q main && no_prs
+  git switch -qc solo && git commit -q --allow-empty -m s1
+  run "$SD_ACT" enroll solo
+  [ "$status" -eq 0 ]
+  [ -z "$(git config branch.solo.sd-parent || true)" ]
+}
+
 @test "enroll: a missing branch fails" {
   run "$SD_ACT" enroll nope
   [ "$status" -ne 0 ]

@@ -18,6 +18,122 @@ setup() {
   git switch -qc feat && git commit -q --allow-empty -m one
 }
 
+# ── stacked_on: a stack sheepdog wasn't told about (#94) ────────────────────
+
+# c <branch> <msg>: a commit on <branch>, left checked out.
+c() { git switch -q "$1" && git commit -q --allow-empty -m "$2"; }
+
+stack_setup() {
+  git switch -q main
+  git update-ref refs/remotes/origin/main main
+  git branch -qD feat
+  git switch -qc par && git commit -q --allow-empty -m p1 && git commit -q --allow-empty -m p2
+  git switch -qc kid && git commit -q --allow-empty -m k1
+}
+
+@test "stacked_on: a branch made from another's tip names it and its tip" {
+  stack_setup
+  run stacked_on kid origin main
+  [ "$status" -eq 0 ]
+  [ "$output" = "par $(git rev-parse par)" ]
+}
+
+@test "stacked_on: the parent moved on since; the base is where they forked" {
+  stack_setup
+  local fork; fork=$(git rev-parse par)
+  c par p3
+  run stacked_on kid origin main
+  [ "$output" = "par $fork" ]
+}
+
+@test "stacked_on: a local parent rewritten since is found by its remote-tracking ref" {
+  stack_setup
+  git update-ref refs/remotes/origin/par par
+  git switch -q par && git commit -q --amend --allow-empty -m p2b
+  run stacked_on kid origin main
+  [ "$output" = "par $(git rev-parse origin/par)" ]
+}
+
+@test "stacked_on: only local branches and their remote-tracking refs are candidates" {
+  stack_setup
+  git update-ref refs/remotes/origin/par par
+  git branch -qD par
+  run stacked_on kid origin main
+  [ "$status" -eq 1 ]
+}
+
+@test "stacked_on: a parent squash-merged but still local is still found" {
+  stack_setup
+  git switch -q main && git merge -q --squash par && git commit -q --allow-empty -m "par (#1)"
+  git update-ref refs/remotes/origin/main main
+  run stacked_on kid origin main
+  [ "$output" = "par $(git rev-parse par)" ]
+}
+
+@test "stacked_on: a branch that merged the default branch in isn't stacked" {
+  git update-ref refs/remotes/origin/main main
+  c main m1 && git update-ref refs/remotes/origin/main main
+  git branch other main
+  git switch -q feat && git merge -q --no-edit main
+  run stacked_on feat origin main
+  [ "$status" -eq 1 ]
+}
+
+@test "stacked_on: sharing only commits already on the default branch isn't stacked" {
+  git update-ref refs/remotes/origin/main main
+  git branch older main
+  c main m1 && git update-ref refs/remotes/origin/main main
+  git switch -qc newer && git commit -q --allow-empty -m n1
+  c main m2
+  run stacked_on newer origin main
+  [ "$status" -eq 1 ]
+  run stacked_on feat origin main
+  [ "$status" -eq 1 ]
+}
+
+@test "stacked_on: unpushed commits on the local default branch aren't a parent" {
+  git update-ref refs/remotes/origin/main main
+  c main m1
+  git switch -qc topic && git commit -q --allow-empty -m t1
+  run stacked_on topic origin main
+  [ "$status" -eq 1 ]
+}
+
+@test "stacked_on: a branch's own child isn't its parent" {
+  stack_setup
+  run stacked_on par origin main
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
+@test "stacked_on: a branch on the default branch alone has none" {
+  git update-ref refs/remotes/origin/main main
+  run stacked_on feat origin main
+  [ "$status" -eq 1 ]
+}
+
+@test "stacked_on: the nearest of a chain wins" {
+  stack_setup
+  git switch -qc grandkid && git commit -q --allow-empty -m g1
+  run stacked_on grandkid origin main
+  [ "$output" = "kid $(git rev-parse kid)" ]
+}
+
+@test "stacked_on: two branches sharing as much is ambiguous, and both are named" {
+  stack_setup
+  git branch twin par
+  run stacked_on kid origin main
+  [ "$status" -eq 2 ]
+  [ "$output" = "par twin" ]
+}
+
+@test "stacked_on: the branch's own remote copy doesn't count" {
+  stack_setup
+  git update-ref refs/remotes/origin/kid kid
+  run stacked_on kid origin main
+  [ "$output" = "par $(git rev-parse par)" ]
+}
+
 @test "pin_write records the pin and the base it was taken against" {
   pin_write feat local HEAD main
   [ "$(git rev-parse refs/sheepdog/feat/local)" = "$(git rev-parse HEAD)" ]

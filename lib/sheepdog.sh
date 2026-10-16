@@ -221,3 +221,37 @@ harness_run() {
   rm -f "$err"
   return "$rc"
 }
+
+# stacked_on <branch> <remote> <default>: the branch <branch> was made from when
+# no one recorded it (a plain git branch from another's tip), found by the
+# commits they share that aren't on <remote>/<default>. Prints "<name> <base>",
+# base being where they forked. Exit 1: none; 2: a tie, the names printed.
+# Git only, and bounded for sd state: candidates are local branches and their
+# remote-tracking refs that hold <branch>'s oldest commit past the default, one
+# rev-list each. A branch holding all of <branch>'s commits is its child, not
+# its parent.
+stacked_on() {
+  local b=$1 remote=$2 def="refs/remotes/$2/$3" oldest total ref name own shared
+  local best="" best_ref="" best_n=0 tie=""
+  local -A local_branch=()
+  oldest=$(git rev-list --reverse "$def..refs/heads/$b" 2>/dev/null) || return 1
+  oldest=${oldest%%$'\n'*}
+  [[ -n $oldest ]] || return 1
+  total=$(git rev-list --count "$def..refs/heads/$b")
+  while read -r name; do local_branch[$name]=1; done < <(git for-each-ref --format='%(refname:short)' refs/heads)
+  while read -r ref; do
+    name=${ref#refs/heads/}; name=${name#refs/remotes/"$remote"/}
+    [[ $name != "$b" && $name != "$3" && -n ${local_branch[$name]:-} ]] || continue
+    own=$(git rev-list --count "refs/heads/$b" "^$def" "^$ref")
+    (( own > 0 )) || continue
+    shared=$(( total - own ))
+    if (( shared > best_n )); then
+      best=$name best_ref=$ref best_n=$shared tie=""
+    elif (( shared == best_n )) && [[ $name != "$best" ]]; then
+      tie+=" $name"
+    fi
+  done < <(git for-each-ref --contains "$oldest" --format='%(refname)' refs/heads "refs/remotes/$remote")
+  [[ -n $best ]] || return 1
+  if [[ -n $tie ]]; then echo "$best$tie"; return 2; fi
+  echo "$best $(git merge-base "refs/heads/$b" "$best_ref")"
+}

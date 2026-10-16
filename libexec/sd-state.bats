@@ -192,6 +192,41 @@ field() { jq -r "$@" <<<"$output"; }
   [ "$(field '.errors | length')" = 0 ]
 }
 
+@test "a branch stacked on another without sheepdog knowing is flagged" {
+  git switch -qc par && commit a.txt a
+  git switch -qc kid && commit b.txt b
+  state kid
+  [[ "$(field '.errors | join(" ")')" == *"stacked on par without sheepdog knowing: sd act enroll records it"* ]]
+  [ "$(field .parent.name)" = main ]
+}
+
+@test "an unrecorded stack with two candidates names both" {
+  git switch -qc par && commit a.txt a
+  git branch twin
+  git switch -qc kid && commit b.txt b
+  state kid
+  [[ "$(field '.errors | join(" ")')" == *"stacked on par or twin without sheepdog knowing"* ]]
+}
+
+@test "a recorded parent, or a PR, means no unrecorded-stack flag" {
+  git switch -qc par && commit a.txt a
+  git switch -qc kid && commit b.txt b
+  git config branch.kid.sd-parent par
+  state kid
+  [[ "$(field '.errors | join(" ")')" != *"without sheepdog knowing"* ]]
+  git config --unset branch.kid.sd-parent
+  pr_fixture kid '.baseRefName = "par"'
+  state kid
+  [[ "$(field '.errors | join(" ")')" != *"without sheepdog knowing"* ]]
+}
+
+@test "a branch made from main alone isn't flagged" {
+  git switch -qc par && commit a.txt a
+  git switch -q main && git switch -qc solo && commit b.txt b
+  state solo
+  [ "$(field '.errors | length')" = 0 ]
+}
+
 @test "a branch name with a slash finds its PR" {
   git switch -qc chrismo/feat && commit a.txt a
   pr_fixture chrismo/feat

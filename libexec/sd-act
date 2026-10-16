@@ -1901,12 +1901,24 @@ ack() {
 # record_lineage <branch>: while the PR's base still names a stacked parent, store
 # it and the base pin; GitHub retargets the PR to the default branch on merge.
 record_lineage() {
-  local b=$1 state parent old_base
+  local b=$1 state parent old_base def remote out rc=0
   state=$(sd-state --json "$b" 2>/dev/null) || return 0
   read -r parent old_base < <(prc_line '
     where coalesce(parent.source == "pr" and parent.name != sync.default, false)
     | values f"{parent.name} {coalesce(sync.old_base, "")}"' "$state") || true
-  [[ -n ${parent:-} ]] || return 0
+  if [[ -z ${parent:-} ]]; then
+    # No PR and no recorded parent: maybe a plain git branch from another's tip (#94).
+    def=$(prc_line 'where pr is null and parent.source == "default" | values sync.default' "$state") || def=
+    [[ -n $def ]] || return 0
+    remote=$(prc_get settings.remote "$b" false) || return 0
+    out=$(stacked_on "$b" "$remote" "$def") || rc=$?
+    case $rc in
+      0) read -r parent old_base <<<"$out" ;;
+      2) echo "sd act: $b looks stacked on ${out// / or }: record one with git config branch.$b.sd-parent <name>" >&2
+         return 0 ;;
+      *) return 0 ;;
+    esac
+  fi
   git config "branch.$b.sd-parent" "$parent"
   echo "parent: $parent"
   if [[ -n $old_base ]]; then
