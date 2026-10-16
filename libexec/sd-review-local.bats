@@ -177,3 +177,32 @@ EOF
   [ -z "$output" ]
   [[ "$stderr" == *".sheepdog/review-prompt.md"* ]]
 }
+
+@test "settings.reviewPrompt: ./ is the worktree's top, wherever the reviewer runs" {
+  mkdir -p .sheepdog sub/.sheepdog
+  printf 'Top guidance.\n' > .sheepdog/review-prompt.md
+  printf 'Sub guidance.\n' > sub/.sheepdog/review-prompt.md
+  git add . && git commit -qm guidance
+  export SHEEPDOG_BASE=$(git rev-parse HEAD) SHEEPDOG_HEAD=$(git rev-parse HEAD)
+  "$SD_CONFIG" set --global settings.reviewPrompt ./.sheepdog/review-prompt.md
+  (cd sub && "$REVIEW" >/dev/null)
+  [ "$(head -1 "$FX/claude.prompt")" = "Top guidance." ]
+}
+
+@test "settings.reviewPrompt: a directory is not a guidance file" {
+  mkdir -p .sheepdog && printf 'x\n' > .sheepdog/review-prompt.md
+  git add . && git commit -qm guidance
+  export SHEEPDOG_BASE=$(git rev-parse HEAD) SHEEPDOG_HEAD=$(git rev-parse HEAD)
+  "$SD_CONFIG" set --global settings.reviewPrompt .sheepdog
+  run --separate-stderr "$REVIEW"
+  [ "$status" -ne 0 ]
+  [ ! -e "$FX/claude.args" ]
+}
+
+@test "settings.reviewPrompt: a missing absolute path fails, no review run" {
+  "$SD_CONFIG" set --global settings.reviewPrompt "$TMP/nope.md"
+  run --separate-stderr "$REVIEW"
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"$TMP/nope.md"* ]]
+  [ ! -e "$FX/claude.args" ]
+}

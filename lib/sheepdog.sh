@@ -38,7 +38,7 @@ commits_not_ours() {
 # rewrite; an absolute one from disk. A named file that is missing is an error,
 # never the default. The same shape fits any step whose guidance is configurable.
 step_guidance() {
-  local path
+  local path top
   path=$(prc_get "settings.$1" "$2" false) || return 1
   if [[ -z $path ]]; then
     cat "$4"
@@ -46,8 +46,11 @@ step_guidance() {
     [[ -f $path ]] || { echo "settings.$1: no such file: $path" >&2; return 1; }
     cat "$path"
   else
-    git show "$3:$path" 2>/dev/null \
+    # From the top, so ./ means the worktree's top wherever the step runs.
+    top=$(git rev-parse --show-toplevel) || return 1
+    [[ $(git -C "$top" cat-file -t "$3:$path" 2>/dev/null) == blob ]] \
       || { echo "settings.$1: no such file in ${3:0:7}: $path" >&2; return 1; }
+    git -C "$top" cat-file blob "$3:$path"
   fi
 }
 
