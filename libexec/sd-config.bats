@@ -1051,6 +1051,14 @@ old_super() {
   [ "$("$SD_CONFIG" get settings.autofix)" = "make fmt" ]
 }
 
+@test "settings.ciFixPrompt: a typed string setting, empty by default" {
+  run "$SD_CONFIG" get settings.ciFixPrompt
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  write_global '{"settings":{"ciFixPrompt":"docs/ci-fix.md"}}'
+  [ "$("$SD_CONFIG" get settings.ciFixPrompt)" = docs/ci-fix.md ]
+}
+
 @test "settings.localReview: a typed string setting, empty by default" {
   run "$SD_CONFIG" get settings.localReview
   [ "$status" -eq 0 ]

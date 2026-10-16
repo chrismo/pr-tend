@@ -237,7 +237,9 @@ notified() { cat "$PS_FIXTURES/notified" 2>/dev/null || true; }
 }
 
 @test "glyph: ❌ outranks 🔧" {
-  ps_fixture feat '.ci.verdict = "red" | .push.ahead = 3'
+  # Human items are ❌ and the push is 🔧. (ci-red would yield to the push while
+  # commits are unpushed, so it can't carry this test.)
+  ps_fixture feat '.threads.owed_human = 1 | .push.ahead = 3'
   pass
   [ "$(glyph repo)" = "❌" ]
 }

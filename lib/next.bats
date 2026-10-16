@@ -210,6 +210,12 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
 @test "red CI: the agent fixes it; names the failing checks" {
   [ "$(step ci-red who '.ci.verdict = "red"' '.ci.failing = ["lint", "test"]')" = agent ]
   [ "$(step ci-red say '.ci.verdict = "red"' '.ci.failing = ["lint", "test"]')" = "fix CI: lint, test" ]
+  [ "$(step ci-red cmd '.ci.verdict = "red"' '.ci.failing = ["lint", "test"]')" = "sd act ci-fix" ]
+}
+
+@test "red CI with unpushed commits, or on an old head: push first, or wait; no fix step" {
+  [ "$(keys '.ci.verdict = "red"' '.ci.failing = ["test"]' '.push.ahead = 1')" = push ]
+  [ "$(keys '.ci.verdict = "red"' '.ci.failing = ["test"]' '.ci.for_head = false')" = ci-wait ]
 }
 
 @test "bot items: sd act address" {
@@ -412,10 +418,16 @@ ON_OPEN_PARENT=('.pr.base = "p"' '.sync.target = "p"'
 }
 
 @test "order follows the loop's Ordering (#79 Design record): restack, agent fixes, push, then waiting" {
+  # ci-red yields to push while commits are unpushed (they may be the fix), so
+  # it shows up only once the push is done.
   [ "$(keys '.fresh = false' '.threads.owed_human = 1' "${STACKED[@]}" \
            '.ci.verdict = "red"' '.threads.owed_bot = 1' '.push.ahead = 1' '.pr.draft = true' \
            '.review.local = {sha: "x", status: "uncovered", uncovered: 1}')" \
-    = "stale human behind ci-red bot push review" ]
+    = "stale human behind bot push review" ]
+  [ "$(keys '.fresh = false' '.threads.owed_human = 1' "${STACKED[@]}" \
+           '.ci.verdict = "red"' '.threads.owed_bot = 1' '.pr.draft = true' \
+           '.review.local = {sha: "x", status: "uncovered", uncovered: 1}')" \
+    = "stale human behind ci-red bot review" ]
 }
 
 @test "a state that isn't a record fails" {
