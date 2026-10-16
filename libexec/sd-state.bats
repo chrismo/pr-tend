@@ -673,12 +673,14 @@ squash_parent_away() {
   state
   [ "$(field .parent.local)" = true ]
   [ "$(field .parent.on_remote)" = false ]
+  [ "$(field .parent.unpushed)" = true ]
   [ "$(field '.errors | length')" = 0 ]
   [ "$(field '.next[0].key')" = ship-parent ]
   [ "$(field '.next[0].cmd')" = "sd act ship parent" ]
   git push -q origin parent 2>/dev/null && git fetch -q
   state
   [ "$(field .parent.on_remote)" = true ]
+  [ "$(field .parent.unpushed)" = false ]
   [ "$(field '.next[0].key')" != ship-parent ]
 }
 
@@ -701,6 +703,7 @@ squash_parent_away() {
   pr_fixture parent
   state
   [ "$(field .parent.on_remote)" = false ]
+  [ "$(field .parent.unpushed)" = false ]
   [[ "$(field '.errors | join(" ")')" == *"no origin/parent ref"* ]]
   [ "$(field '.next[0].key')" = errors ]
 }
@@ -710,6 +713,7 @@ squash_parent_away() {
   git switch -qc feat && commit c.txt c
   git config branch.feat.sd-parent parent
   GH_FAKE_FAIL_FOR=parent state
+  [ "$(field .parent.unpushed)" = false ]
   [[ "$(field '.errors | join(" ")')" == *"no origin/parent ref"* ]]
   [ "$(field '[.next[].key] | index("ship-parent")')" = null ]
 }

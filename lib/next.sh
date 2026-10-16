@@ -42,8 +42,7 @@ values {...s, remote}
       review_required:=on(pr.review_decision == "REVIEW_REQUIRED"),
       stacked:=(on(pr.base != sync.default) and (on(parent.pr.state == "OPEN") or on(parent.merged))),
       parent_closed:=(on(pr.base != sync.default) and on(parent.pr.state == "CLOSED")),
-      parent_unpushed:=(on(parent.name != sync.default) and on(parent.local) and on(parent.on_remote == false)
-                        and on(parent.merged == false) and nul(parent.pr)),
+      parent_unpushed:=on(parent.unpushed),
       restack:=(sync.old_base is null ? f"git rebase {remote}/{sync.target}"
                 : f"git rebase --onto {remote}/{sync.target} {sync.old_base[0:12]}"),
       need_review:=((on(pr.state == "OPEN") or trails(review.local) or trails(review.bot) or trails(review.accepted)

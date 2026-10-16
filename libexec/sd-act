@@ -664,13 +664,12 @@ autofix() {
 }
 
 # no_base_why <branch> <state>: why sd state found no base: its errors, else a
-# parent that exists only here, which sd state reports as a step (#105; the
-# same test as next.sh's parent_unpushed, and RESTACK_GATE's why).
+# parent that exists only here (parent.unpushed), which sd state reports as a
+# step, not an error (#105).
 no_base_why() {
   local remote; remote=$(prc_get settings.remote "$1" false) || remote=origin
   prc_val "$2" "len(coalesce(errors, [])) > 0 ? sj(errors, \"; \")
-    : on(parent.local) and on(parent.on_remote == false) and on(parent.merged == false) and nul(parent.pr)
-      ? f\"parent {parent.name} isn't on $remote yet: ship it first (sd act ship {parent.name})\" : \"\""
+    : on(parent.unpushed) ? f\"parent {parent.name} isn't on $remote yet: ship it first (sd act ship {parent.name})\" : \"\""
 }
 
 # ── review ───────────────────────────────────────────────────────────────────
@@ -1314,11 +1313,12 @@ describe_file() { echo "$(cd "$(git rev-parse --git-common-dir)" && pwd)/sheepdo
 # describe_base <state>: the prompt's line on what the PR targets, so the body
 # doesn't describe a merged parent as pending (#105). The description is
 # stored with sync.target: a new target (a parent merged under an unchanged
-# HEAD) makes it stale.
+# HEAD) makes it stale. One stored before #105 has none, so it is written
+# again once.
 describe_base() {
   local state=$1 target
   target=$(prc_val "$state" sync.target)
-  if [[ $(prc_val "$state" 'coalesce(parent.merged, false)') == true && $(prc_val "$state" parent.name) != "$target" ]]; then
+  if [[ $(prc_val "$state" 'coalesce(parent.merged, false)') == true ]]; then
     echo "Base: $(prc_val "$state" parent.name) has merged into $target, so this PR targets $target; don't describe the parent as pending."
   elif [[ $target != $(prc_val "$state" sync.default) ]]; then
     echo "Base: this PR is stacked on $target; describe only this branch's change."
@@ -1351,8 +1351,8 @@ describe_run() {
   step_store "$b"
   f=$(describe_file "$b")
   mkdir -p "$(dirname "$f")"
-  prc_json 'values {head, target: s.sync.target, title: r.title, body: coalesce(r.body, "")}' \
-    "{\"head\": \"$head\", \"s\": $state, \"r\": $result}" > "$f"
+  prc_json 'values {head, target, title: r.title, body: coalesce(r.body, "")}' \
+    "{\"head\": \"$head\", \"target\": $(prc_json_string "$(prc_val "$state" sync.target)"), \"r\": $result}" > "$f"
   cat "$f"
 }
 
@@ -1585,8 +1585,7 @@ patch_id() { git diff -U0 "$1" "$2" | git patch-id --stable | cut -d' ' -f1; }
 read -r -d '' RESTACK_GATE <<'EOF' || true
 values {remote, resolve, s, onto: f"{remote}/{s.sync.target}",
         why: len(coalesce(s.errors, [])) > 0 ? sj(s.errors, "; ")
-             : on(s.parent.local) and on(s.parent.on_remote == false) and on(s.parent.merged == false) and nul(s.parent.pr)
-               ? f"parent {s.parent.name} isn't on {remote} yet: ship it first (sd act ship {s.parent.name})" : "",
+             : on(s.parent.unpushed) ? f"parent {s.parent.name} isn't on {remote} yet: ship it first (sd act ship {s.parent.name})" : "",
         from_parent: coalesce([unnest {p: coalesce(s.parent.pr.commits, []), r: replay} | where r in p | values r], [])}
 | values [
     on(s.parent.pr.state == "CLOSED") and on(s.parent.name != s.sync.default)
