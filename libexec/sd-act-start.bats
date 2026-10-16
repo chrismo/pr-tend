@@ -516,6 +516,74 @@ findings_at() {
   grep -qF -- '- file.txt:? (?) b?' "$FX/claude.prompt"
 }
 
+@test "implement: settings.implementPrompt replaces the guidance; the contract and task stay" {
+  started
+  printf 'Work in tiny steps.\n' > "$TMP/implement.md"
+  echo "{\"settings\": {\"implementPrompt\": \"$TMP/implement.md\"}}" > "$SHEEPDOG_CONFIG"
+  "$SD_ACT" implement >/dev/null
+  [ "$(head -1 "$FX/claude.prompt")" = "Work in tiny steps." ]
+  ! grep -q 'Implement the task below' "$FX/claude.prompt" || false
+  grep -q 'do not commit, push, or run gh' "$FX/claude.prompt"
+  grep -q 'Return outcome "done"' "$FX/claude.prompt"
+  grep -q 'add a third line' "$FX/claude.prompt"
+}
+
+@test "implement: .sheepdog/implement.md in the branch's base is the repo's guidance" {
+  mkdir -p .sheepdog && printf 'Repo implement guidance.\n' > .sheepdog/implement.md
+  git add .sheepdog && git commit -qm guidance && git push -q origin main 2>/dev/null
+  started
+  "$SD_ACT" implement >/dev/null
+  [ "$(head -1 "$FX/claude.prompt")" = "Repo implement guidance." ]
+}
+
+@test "implement: a branch with no base pin and no remote still gets its guidance" {
+  git init -q "$TMP/local" && cd "$TMP/local"
+  mkdir -p .sheepdog && printf 'Local repo guidance.\n' > .sheepdog/implement.md
+  printf 'a\nb\n' > file.txt && git add . && git commit -qm init
+  git switch -qc feat && git config branch.feat.sd-task "add c"
+  "$SD_ACT" implement >/dev/null
+  [ "$(head -1 "$FX/claude.prompt")" = "Local repo guidance." ]
+}
+
+@test "implement: with no base to trust, the branch's own .sheepdog/ is ignored" {
+  git init -q -b feat "$TMP/lone" && cd "$TMP/lone"
+  mkdir -p .sheepdog && printf 'Branch-written guidance.\n' > .sheepdog/implement.md
+  printf 'a\nb\n' > file.txt && git add . && git commit -qm init
+  git config branch.feat.sd-task "add c"
+  "$SD_ACT" implement >/dev/null
+  [ "$(head -1 "$FX/claude.prompt")" != "Branch-written guidance." ]
+  grep -q 'Implement the task below' "$FX/claude.prompt"
+}
+
+@test "implement: on the default branch itself, its own .sheepdog/ is not trusted" {
+  git init -q -b main "$TMP/onmain" && cd "$TMP/onmain"
+  printf 'a\nb\n' > file.txt && git add . && git commit -qm init
+  mkdir -p .sheepdog && printf 'Agent-written guidance.\n' > .sheepdog/implement.md
+  git add . && git commit -qm "the agent's commit"
+  git config branch.main.sd-task "add c"
+  "$SD_ACT" implement main >/dev/null
+  grep -q 'Implement the task below' "$FX/claude.prompt"
+}
+
+@test "implement: on the default branch itself, pushed, its own .sheepdog/ is not trusted" {
+  mkdir -p .sheepdog && printf 'Agent-written guidance.\n' > .sheepdog/implement.md
+  git add . && git commit -qm "the agent's commit" && git push -q origin main 2>/dev/null
+  git config branch.main.sd-task "add c"
+  "$SD_ACT" implement main >/dev/null
+  grep -q 'Implement the task below' "$FX/claude.prompt"
+}
+
+@test "implement: settings.reviewFixPrompt replaces a fix round's guidance; the contract stays" {
+  started
+  findings_at HEAD 1
+  printf 'Only fix errors.\n' > "$TMP/fix.md"
+  echo "{\"settings\": {\"reviewFixPrompt\": \"$TMP/fix.md\"}}" > "$SHEEPDOG_CONFIG"
+  "$SD_ACT" implement >/dev/null
+  [ "$(head -1 "$FX/claude.prompt")" = "Only fix errors." ]
+  grep -q 'do not commit, push, or run gh' "$FX/claude.prompt"
+  grep -q 'b should be B' "$FX/claude.prompt"
+}
+
 @test "implement: findings on an older head stay out of the prompt" {
   started
   findings_at HEAD 1

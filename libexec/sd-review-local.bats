@@ -208,3 +208,15 @@ EOF
   [[ "$stderr" == *"$TMP/nope.md"* ]]
   [ ! -e "$FX/claude.args" ]
 }
+
+@test "settings.reviewPrompt empty: .sheepdog/review.md in the base commit replaces the shipped guidance" {
+  git switch -q --detach "$BASE"
+  mkdir -p .sheepdog && printf 'Repo review guidance.\n' > .sheepdog/review.md
+  git add .sheepdog && git commit -qm guidance
+  export SHEEPDOG_BASE=$(git rev-parse HEAD)
+  echo x >> file.txt && git commit -qam change
+  export SHEEPDOG_HEAD=$(git rev-parse HEAD)
+  "$REVIEW" >/dev/null
+  [ "$(head -1 "$FX/claude.prompt")" = "Repo review guidance." ]
+  grep -q 'No findings is a valid' "$FX/claude.prompt"
+}

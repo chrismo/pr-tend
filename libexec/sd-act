@@ -183,7 +183,9 @@
 #
 # Config (sd config show):
 #   settings  remote, verify, autofix, stepTimeout, stepBudget, replyPrefix, botLogin, implementAllow,
-#             ciFixPrompt (a file; the shipped lib/ci-fix-prompt.md by default)
+#             <step>Prompt for implement, reviewFix, review, describe, address,
+#             resolve, ciFix (a file; else .sheepdog/<step>.md in the base
+#             commit, kebab-cased, else the shipped lib/prompts/<step>.md)
 #   harness   model, effort, provider (pi), args
 #
 # State (git config): branch.<b>.sheepdog, .sd-task, .sd-parent, .sd-session,
@@ -288,23 +290,23 @@ read -r -d '' SCHEMA <<'EOF' || true
                     "reply": {"type": "string"}}}}}}
 EOF
 
-read -r -d '' PROMPT <<'EOF' || true
-You are addressing automated code-review feedback on a pull request. The
-working tree is the PR branch, checked out and clean.
-
+# The address step's prompt: guidance (settings.addressPrompt, else
+# .sheepdog/address.md in the base commit, else lib/prompts/address.md), then
+# this contract, which the schema, the posting and the pipeline rely on.
+read -r -d '' ADDRESS_CONTRACT <<'EOF' || true
 For each finding below, pick exactly one action:
 - fixed:    you changed code to address it
 - reply:    no change needed (already handled, or a question you can answer)
 - pushback: you disagree; say why
 - ask:      it needs a decision from the PR's author; say what the question is
 
-Make fixes by editing files. Keep edits to what the findings ask for. Do not
-commit, push, or run gh: the pipeline commits your edits, runs checks, pushes,
-and posts each `reply` on the PR, so keep replies short and specific. A
-/word or @login in a reply is posted with a lookalike glyph so it can't
-trigger a bot or ping anyone; for a path, use a relative one. Return one item per finding id, a one-line commit_message if you
-changed anything (else null), and outcome "done", "needs-input" (anything you
-marked ask) or "gave-up" (you couldn't make sense of it; nothing is posted).
+Do not commit, push, or run gh: the pipeline commits your edits, runs checks,
+pushes, and posts each `reply` on the PR. A /word or @login in a reply is posted
+with a lookalike glyph so it can't trigger a bot or ping anyone; for a path,
+use a relative one. Return one item per finding id, a one-line commit_message
+if you changed anything (else null), and outcome "done", "needs-input"
+(anything you marked ask) or "gave-up" (you couldn't make sense of it; nothing
+is posted).
 EOF
 
 # The owed items' text, from the nodes(ids:) answer: {bots, n}. Anyone else
@@ -464,7 +466,7 @@ address() {
     return
   fi
 
-  local stored_h sid h mode result outcome plan timeout cfg forced verify
+  local stored_h sid h mode result outcome plan timeout cfg forced verify guidance gbase
   stored_h=$(git config --get "branch.$b.sd-harness" || true)
   sid=$(git config --get "branch.$b.sd-session" || true)
   forced=${harness_opt:-$stored_h}
@@ -481,9 +483,12 @@ address() {
   [[ $timeout =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $timeout"
   verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "sd config failed"
   [[ $verify != *$'\n'* ]] || die "verify must be a single command, not a list"
+  gbase=$(guidance_base "$b") || die "can't find $b's base, to read its prompt guidance from"
+  guidance=$(cd "$wt" && step_guidance addressPrompt "$b" "$gbase" "$SD_LIB/prompts/address.md") \
+    || die "can't read the address guidance"
   echo "sd act: $h ($mode session $sid) is addressing $(prc_val "$findings" 'len(this)') item(s) on $b…" >&2
   result=$(cd "$wt" && HARNESS_STEP=address HARNESS_BRANCH=$b harness_run "$h" "$sid" "$mode" "$timeout" \
-             "$PROMPT"$'\n\nPR '"$(prc_val "$state" pr.url)"$'\nFindings:\n'"$(printf '%s\n' "$findings" | prc_super -i json -J -c 'values this' -)" "$SCHEMA" "$cfg") \
+             "$guidance"$'\n\n'"$ADDRESS_CONTRACT"$'\n\nPR '"$(prc_val "$state" pr.url)"$'\nFindings:\n'"$(printf '%s\n' "$findings" | prc_super -i json -J -c 'values this' -)" "$SCHEMA" "$cfg") \
     || die "the $h step failed or returned no usable result (session $sid)"
   git config "branch.$b.sd-session" "$sid"
   git config "branch.$b.sd-harness" "$h"
@@ -983,12 +988,13 @@ start() {
 
 # ── implement: J0 ────────────────────────────────────────────────────────────
 
-read -r -d '' IMPLEMENT_PROMPT <<'EOF' || true
-Implement the task below in this worktree; its branch is checked out for this
-work. Follow the repo's own instructions (AGENTS.md, CLAUDE.md, README) for how
-to work and test here. Edit files, but do not commit, push, or run gh: the
-pipeline commits your edits with your commit_message, runs the repo's checks,
-and opens the PR later.
+# The implement step's prompt: guidance (settings.implementPrompt, else
+# .sheepdog/implement.md in the base commit, else lib/prompts/implement.md),
+# then this contract, which the pipeline relies on. A fix round swaps in the
+# review-fix guidance and contract.
+read -r -d '' IMPLEMENT_CONTRACT <<'EOF' || true
+Edit files, but do not commit, push, or run gh: the pipeline commits your edits
+with your commit_message, runs the repo's checks, and opens the PR later.
 
 Return outcome "done" when the task is implemented, with a one-line
 commit_message; "needs-input" when you need a decision from the task's author
@@ -996,14 +1002,9 @@ commit_message; "needs-input" when you need a decision from the task's author
 you can't make sense of it (say why in summary).
 EOF
 
-read -r -d '' REVIEW_FIX_PROMPT <<'EOF' || true
-Fix the local review's findings below in this worktree; its branch is checked
-out. The reviewer was a separate, read-only session with no context on why the
-code looks the way it does; you have that context. Fix each finding that is
-right. Leave any you judge wrong, and say which and why in summary. Follow the
-repo's own instructions (AGENTS.md, CLAUDE.md, README) for how to work and test
-here. Edit files, but do not commit, push, or run gh: the pipeline commits your
-edits with your commit_message and runs the repo's checks.
+read -r -d '' REVIEW_FIX_CONTRACT <<'EOF' || true
+Edit files, but do not commit, push, or run gh: the pipeline commits your edits
+with your commit_message and runs the repo's checks.
 
 Return outcome "done" with a one-line commit_message once you have fixed what
 you agree with. If you agree with none, change nothing and return "done": the
@@ -1011,6 +1012,24 @@ findings then go to the branch's owner. Return "needs-input" when you need a
 decision from the owner (put the question in summary), or "gave-up" when you
 can't make sense of them (say why in summary).
 EOF
+
+# guidance_base <branch>: the commit a step reads repo guidance (.sheepdog/,
+# relative prompt paths) from, which the branch's agent can't rewrite: the
+# base pin, else where the branch forked from the default branch, the remote's
+# or else the local one, unless the branch is the default branch: sheepdog
+# pushes it, so neither ref is clear of its commits. Nothing when none
+# qualifies: the branch's own commits are never trusted for its guidance.
+guidance_base() {
+  local remote def ref
+  git rev-parse -q --verify "refs/sheepdog/$1/base" && return
+  remote=$(prc_get settings.remote "$1" false) || return 1
+  if def=$(start_default "$remote") && [[ $def != "$1" ]]; then
+    for ref in "refs/remotes/$remote/$def" "refs/heads/$def"; do
+      git show-ref -q --verify "$ref" && git merge-base "refs/heads/$1" "$ref" && return
+    done
+  fi
+  return 0
+}
 
 read -r -d '' IMPLEMENT_SCHEMA <<'EOF' || true
 {"type": "object", "required": ["outcome", "commit_message", "summary"],
@@ -1021,7 +1040,7 @@ EOF
 
 # implement_run <branch> <worktree>
 implement_run() {
-  local b=$1 wt=$2 task verify before prompt result outcome summary msg extra rule rec state listed="" allow=$HARNESS_CLAUDE_ALLOW
+  local b=$1 wt=$2 task verify before prompt result outcome summary msg extra rule rec state gbase guidance listed="" allow=$HARNESS_CLAUDE_ALLOW
   local -a rules=()
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
   task=$(git config --get "branch.$b.sd-task" || true)
@@ -1049,10 +1068,13 @@ implement_run() {
   fi
   while IFS= read -r rule; do [[ -z $rule ]] || rules+=("$rule"); done <<<"$extra"
   step_session "$b" implement
+  gbase=$(guidance_base "$b") || die "can't find $b's base, to read its prompt guidance from"
   if [[ -n $listed ]]; then
-    prompt="$REVIEW_FIX_PROMPT"$'\n\nFindings:\n'"$listed"$'\n\nThe task this branch was made for, for context:\n'"${task:-(none recorded)}"
+    guidance=$(step_guidance reviewFixPrompt "$b" "$gbase" "$SD_LIB/prompts/review-fix.md") || die "can't read the review-fix guidance"
+    prompt="$guidance"$'\n\n'"$REVIEW_FIX_CONTRACT"$'\n\nFindings:\n'"$listed"$'\n\nThe task this branch was made for, for context:\n'"${task:-(none recorded)}"
   else
-    prompt="$IMPLEMENT_PROMPT"$'\n\nTask:\n'"$task"
+    guidance=$(step_guidance implementPrompt "$b" "$gbase" "$SD_LIB/prompts/implement.md") || die "can't read the implement guidance"
+    prompt="$guidance"$'\n\n'"$IMPLEMENT_CONTRACT"$'\n\nTask:\n'"$task"
   fi
   [[ -z $verify ]] || prompt+=$'\n\nThe repo\'s checks, which the pipeline runs after you: '"$verify"
   if [[ $STEP_H == claude ]] && (( ${#rules[@]} )); then
@@ -1211,7 +1233,8 @@ ci_fix() {
   fi
   step_session "$b" ci-fix
   base=$(prc_val "$state" 'coalesce(sync.old_base, "")')
-  [[ -n $base ]] || base=$(git rev-parse "refs/heads/$b")
+  # With no base from sd state, the trusted one guidance_base finds (maybe none).
+  [[ -n $base ]] || base=$(guidance_base "$b") || die "can't find $b's base, to read its prompt guidance from"
   task=$(git config --get "branch.$b.sd-task" || true)
 
   # Zero tokens first: verify, autofix, verify. A fix there is the whole step.
@@ -1233,7 +1256,7 @@ ci_fix() {
   s=$(agent_rules "$wt" "$b") || die "sd config failed"
   rules=(); [[ -z $s ]] || mapfile -t rules <<<"$s"
   verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "sd config failed"
-  prompt=$(cd "$wt" && step_guidance ciFixPrompt "$b" "$base" "$SD_LIB/ci-fix-prompt.md") || die "can't read the ci-fix guidance"
+  prompt=$(cd "$wt" && step_guidance ciFixPrompt "$b" "$base" "$SD_LIB/prompts/ci-fix.md") || die "can't read the ci-fix guidance"
   prompt+=$'\n\nTask: '"${task:-(none recorded)}"
   prompt+=$'\n\nFailing checks on '"${sha:0:7}: $failing"
   [[ -z $logs ]] || prompt+=$'\n\n'"$logs"
@@ -1290,17 +1313,11 @@ ci_fix() {
 
 # ── describe ─────────────────────────────────────────────────────────────────
 
-read -r -d '' DESCRIBE_PROMPT <<'EOF' || true
-Write the pull request title and description for this branch's change: the
-commits and diff below, made for the task. You are read-only here; look at the
-worktree when the diff needs context.
-
-Title: one line, at most 70 characters, what the change does, imperative, no
-trailing period. Body, in Markdown: what changed and why, in a short paragraph
-or a few bullets; how it was tested, when the diff shows it; what a reviewer
-should look at first or decide. Mention what's out of scope only when the task
-asked for more than the diff does. No "This PR", no file-by-file restatement of
-the diff, no sign-off, no attribution footer.
+# The describe step's prompt: guidance (settings.describePrompt, else
+# .sheepdog/describe.md in the base commit, else lib/prompts/describe.md), then
+# this contract.
+read -r -d '' DESCRIBE_CONTRACT <<'EOF' || true
+You are read-only here; look at the worktree when the diff needs context.
 EOF
 
 read -r -d '' DESCRIBE_SCHEMA <<'EOF' || true
@@ -1331,7 +1348,7 @@ describe_base() {
 # session (minted if none), read-only. Stores {head, target, title, body} where ship
 # finds it, and prints it.
 describe_run() {
-  local b=$1 wt=$2 state=$3 base head task commits diff result f
+  local b=$1 wt=$2 state=$3 base head task commits diff result f guidance
   base=$(prc_val "$state" 'coalesce(sync.old_base, "")')
   [[ -n $base ]] || die "can't find $b's base: $(no_base_why "$b" "$state")"
   head=$(git rev-parse "refs/heads/$b")
@@ -1340,10 +1357,12 @@ describe_run() {
   commits=$(git log --format='- %s' "$base..$head")
   diff=$(git diff "$base" "$head")
   local where; where=$(describe_base "$state")
+  guidance=$(cd "$wt" && step_guidance describePrompt "$b" "$base" "$SD_LIB/prompts/describe.md") \
+    || die "can't read the describe guidance"
   echo "sd act: $STEP_H ($STEP_MODE session $STEP_SID) is describing $b…" >&2
   result=$(cd "$wt" && HARNESS_CLAUDE_ALLOW=$HARNESS_READONLY_ALLOW && HARNESS_PI_TOOLS=read \
              && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" \
-                  "$DESCRIBE_PROMPT"$'\n\nTask: '"${task:-(none recorded)}"$'\n\n'"$where"$'\n\nCommits ('"${base:0:7}..${head:0:7}"$'):\n'"$commits"$'\n\nDiff:\n'"$diff" \
+                  "$guidance"$'\n\n'"$DESCRIBE_CONTRACT"$'\n\nTask: '"${task:-(none recorded)}"$'\n\n'"$where"$'\n\nCommits ('"${base:0:7}..${head:0:7}"$'):\n'"$commits"$'\n\nDiff:\n'"$diff" \
                   "$DESCRIBE_SCHEMA" "$STEP_CFG") \
     || die "the $STEP_H describe step failed or returned no usable result (session $STEP_SID)"
   [[ $(prc_val "$result" 'case when is(coalesce(title, null), <string>) then grep("\\S", title) else false end' 2>/dev/null) == true ]] \
@@ -1710,14 +1729,14 @@ restack_rollback() { # <worktree> <branch> <old-head>
 
 RESOLVE_CAP=3
 
-read -r -d '' RESOLVE_PROMPT <<'EOF' || true
-sd act restack is rebasing this branch and the rebase stopped on conflicts.
-Resolve them in the worktree: edit each conflicting file so it keeps this
-branch's intent on top of what came in from the target, remove every conflict
-marker, and save. Do not run git add, git rebase --continue, or commit: the
-pipeline does that after you, and it will stop again if another commit
-conflicts. If no sensible resolution exists, answer with outcome "gave-up" and
-say why; nothing you changed will be kept.
+# The resolve step's prompt: guidance (settings.resolvePrompt, else
+# .sheepdog/resolve.md in the base commit, else lib/prompts/resolve.md), then
+# this contract, which the restack's rollback and refusals rely on.
+read -r -d '' RESOLVE_CONTRACT <<'EOF' || true
+Do not run git add, git rebase --continue, or commit: the pipeline does that
+after you, and it will stop again if another commit conflicts. If no sensible
+resolution exists, answer with outcome "gave-up" and say why; nothing you
+changed will be kept.
 
 Before resolving, judge whether the commit being replayed (named below, among
 all the commits this rebase replays) is this branch's work, from its subject,
@@ -1737,10 +1756,14 @@ EOF
 # has stopped; the agent resolves each stop in the branch's session, the
 # pipeline adds and continues. Any failure rolls the branch back and returns 1.
 resolve_conflicts() {
-  local b=$1 wt=$2 old_base=$3 old_head=$4 onto=$5 stops=0 files hunks task result outcome replayed replaying replaying_stat
+  local b=$1 wt=$2 old_base=$3 old_head=$4 onto=$5 stops=0 files hunks task result outcome replayed replaying replaying_stat guidance
   task=$(git config --get "branch.$b.sd-task" || true)
   replayed=$(git log --reverse --no-merges --topo-order --format='%h %s' "$old_base..$old_head")
   step_session "$b" implement
+  if ! guidance=$(cd "$wt" && step_guidance resolvePrompt "$b" "$old_base" "$SD_LIB/prompts/resolve.md"); then
+    restack_rollback "$wt" "$b" "$old_head"
+    die "can't read the resolve guidance; rolled back to ${old_head:0:7}"
+  fi
   while :; do
     if (( ++stops > RESOLVE_CAP )); then
       restack_rollback "$wt" "$b" "$old_head"
@@ -1758,7 +1781,7 @@ resolve_conflicts() {
     replaying_stat=$(git -C "$wt" show --stat --format= REBASE_HEAD)
     echo "sd act: $STEP_H ($STEP_MODE session $STEP_SID) is resolving conflicts in: ${files//$'\n'/, } (stop $stops)…" >&2
     if ! result=$(cd "$wt" && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" \
-                    "$RESOLVE_PROMPT"$'\n\nBranch: '"$b"$', rebasing onto '"$onto"$'\nTask: '"${task:-(none recorded)}"$'\nReplaying: '"$replaying"$'\n'"$replaying_stat"$'\n\n'"Commits being replayed, oldest first:"$'\n'"$replayed"$'\n\nConflicting files:\n'"$files"$'\n\nConflict hunks:\n'"$hunks" \
+                    "$guidance"$'\n\n'"$RESOLVE_CONTRACT"$'\n\nBranch: '"$b"$', rebasing onto '"$onto"$'\nTask: '"${task:-(none recorded)}"$'\nReplaying: '"$replaying"$'\n'"$replaying_stat"$'\n\n'"Commits being replayed, oldest first:"$'\n'"$replayed"$'\n\nConflicting files:\n'"$files"$'\n\nConflict hunks:\n'"$hunks" \
                     "$RESOLVE_SCHEMA" "$STEP_CFG"); then
       restack_rollback "$wt" "$b" "$old_head"
       echo "sd act: the $STEP_H step failed or returned no usable result (session $STEP_SID); rolled back to ${old_head:0:7}" >&2

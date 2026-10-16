@@ -251,3 +251,42 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$stderr" == *'"subtype":"init"'* ]]
 }
+
+# step_guidance's tests: a repo whose base commit can hold .sheepdog/ files.
+guidance_repo() {
+  export SHEEPDOG_CONFIG="$TMP/global.json"
+  printf 'shipped\n' > "$TMP/default.md"
+}
+
+@test "step_guidance: empty setting, no convention file: the shipped default" {
+  guidance_repo
+  [ "$(step_guidance reviewPrompt feat HEAD "$TMP/default.md")" = shipped ]
+}
+
+@test "step_guidance: empty setting: .sheepdog/<name>.md in the base commit, kebab-cased" {
+  guidance_repo
+  mkdir -p .sheepdog && printf 'repo review-fix\n' > .sheepdog/review-fix.md
+  git add .sheepdog && git commit -qm guidance
+  base=$(git rev-parse HEAD)
+  printf 'branch rewrite\n' > .sheepdog/review-fix.md && git commit -qam rewrite
+  [ "$(step_guidance reviewFixPrompt feat "$base" "$TMP/default.md")" = "repo review-fix" ]
+}
+
+@test "step_guidance: a set path wins over the convention file" {
+  guidance_repo
+  mkdir -p .sheepdog && printf 'convention\n' > .sheepdog/review.md && printf 'named\n' > .sheepdog/mine.md
+  git add .sheepdog && git commit -qm guidance
+  printf '{"settings": {"reviewPrompt": ".sheepdog/mine.md"}}\n' > "$SHEEPDOG_CONFIG"
+  [ "$(step_guidance reviewPrompt feat HEAD "$TMP/default.md")" = named ]
+}
+
+@test "step_guidance: no trusted base: the convention is skipped, a relative path refused" {
+  guidance_repo
+  mkdir -p .sheepdog && printf 'branch-written\n' > .sheepdog/review.md
+  git add .sheepdog && git commit -qm guidance
+  [ "$(step_guidance reviewPrompt feat "" "$TMP/default.md")" = shipped ]
+  printf '{"settings": {"reviewPrompt": ".sheepdog/review.md"}}\n' > "$SHEEPDOG_CONFIG"
+  run step_guidance reviewPrompt feat "" "$TMP/default.md"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no base commit"* ]]
+}
