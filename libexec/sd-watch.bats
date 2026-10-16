@@ -460,6 +460,7 @@ state_files() { find "$SHEEPDOG_STATE_DIR/branches" -name '*.json' 2>/dev/null; 
   pass
   [[ "$(notified)" == *"repo 12/doc|merged (#7)"* ]] || false
   [ -z "$(state_files | grep doc)" ]
+  [ -z "$(find "$SHEEPDOG_STATE_DIR/branches" -mindepth 2 -type d)" ]
 }
 
 @test "gone: GitHub not answering keeps the state, and the next pass tries again" {
@@ -497,14 +498,55 @@ state_files() { find "$SHEEPDOG_STATE_DIR/branches" -name '*.json' 2>/dev/null; 
   [ ! -e "$PS_FIXTURES/gh-calls" ]
 }
 
-@test "gone: a branch that still exists but isn't enrolled keeps its state" {
-  ps_fixture feat
+@test "gone: a branch that still exists but was unenrolled has its state dropped, quietly" {
+  ps_fixture feat '.ci.verdict = "pending"'
   pass
   git config --unset branch.feat.sheepdog
   gh_pull '{"state": "closed", "merged": true}'
   pass
-  [ -n "$(state_files)" ]
+  [ -z "$(state_files)" ]
   [ ! -e "$PS_FIXTURES/gh-calls" ]
+  gone feat
+  pass
+  [ -z "$(notified)" ]
+}
+
+@test "gone: a merge already notified doesn't ask GitHub or add a line when the branch goes" {
+  ps_fixture feat '.pr.state = "MERGED"'
+  pass
+  gone feat
+  gh_pull '{"state": "closed", "merged": true}'
+  pass
+  [ ! -e "$PS_FIXTURES/gh-calls" ]
+  ! grep -q "already gone" "$SHEEPDOG_STATE_DIR/last-pass"
+  [ -z "$(state_files)" ]
+}
+
+@test "gone: a merge notification that fails is tried once more, then given up on" {
+  cat > "$TMP/fakebin/notify" <<'SH'
+#!/usr/bin/env bash
+echo "$2" >> "$PS_FIXTURES/attempts"
+exit 1
+SH
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  gone feat
+  gh_pull '{"state": "closed", "merged": true}'
+  pass
+  [ -n "$(state_files)" ]
+  pass
+  pass
+  [ "$(grep -c merged "$PS_FIXTURES/attempts")" = 2 ]
+  [ -z "$(state_files)" ]
+}
+
+@test "gone: a PR still open is ⚠️, not 🚫" {
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  gone feat
+  gh_pull '{"state": "open", "merged": false}'
+  pass
+  grep -q "feat.*⚠️.*branch is gone; #7 is open, not merged" "$SHEEPDOG_STATE_DIR/last-pass"
 }
 
 # ── notification policy (#52) ────────────────────────────────────────────────
