@@ -262,7 +262,8 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   local st=('.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true' '.push.remote_made = false')
   [ "$(keys "${st[@]}")" = take ]
   [ "$(step take who "${st[@]}")" = you ]
-  [ "$(step take say "${st[@]}")" = "origin/feat has 1 commit this branch took but didn't make, reset away here: take them back (git merge --ff-only origin/feat), or drop them by hand" ]
+  [ "$(step take say "${st[@]}")" = "origin/feat has 1 commit this branch took but didn't make, reset away here: take it back (git merge --ff-only origin/feat), or drop it by hand" ]
+  [ "$(step take say "${st[@]}" '.push.behind = 2')" = "origin/feat has 2 commits this branch took but didn't make, reset away here: take them back (git merge --ff-only origin/feat), or drop them by hand" ]
   [ "$(keys "${st[@]}" '.pr.draft = true' '.pr.merge_state = "DRAFT"')" = take ]
 }
 
@@ -270,8 +271,17 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(keys '.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true' '.push.remote_made = true' '.push.dirty = true')" = reset-dirty ]
   [ "$(step reset-dirty who '.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true' '.push.remote_made = true' '.push.dirty = true')" = you ]
   [ "$(step reset-dirty say '.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true' '.push.remote_made = true' '.push.dirty = true')" = "origin/feat has 1 commit reset away here, and the worktree has uncommitted changes: commit them (then sd act push replaces the remote commit), or remove them (git reset --hard; git clean for untracked files)" ]
+  [[ "$(step reset-dirty say '.push.ahead = 0' '.push.behind = 2' '.push.remote_ours = true' '.push.remote_made = true' '.push.dirty = true')" == "origin/feat has 2 commits reset away here, and the worktree has uncommitted changes: commit them (then sd act push replaces the remote commits),"* ]]
   [ "$(keys '.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true' '.push.remote_made = true' '.push.dirty = false')" = push ]
   [ "$(keys '.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true' '.push.remote_made = true' '.push.dirty = null')" = push ]
+}
+
+@test "take or reset-dirty holds the pipeline: no bot trigger or CI wait after it, since nothing reaches GitHub until chrismo acts (#86)" {
+  local remote_ahead=('.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true'
+                      '.ci.sha = "r1"' '.ci.for_head = false' '.bot = {command: "/review-bot"}')
+  [ "$(keys "${remote_ahead[@]}" '.push.remote_made = false')" = take ]
+  [ "$(keys "${remote_ahead[@]}" '.push.remote_made = true' '.push.dirty = true')" = reset-dirty ]
+  [ "$(keys "${remote_ahead[@]}" '.push.remote_made = true' '.push.dirty = false')" = "push" ]
 }
 
 @test "rewritten history of our own: sd act push, which leases" {

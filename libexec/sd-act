@@ -1488,7 +1488,7 @@ push_branch() {
       # and reset away is in the reflog too, and it was someone else's work.
       # Every commit being dropped must have been made here (made_here).
       if ! made_here "refs/heads/$b..$rsha"; then
-        echo "sd act: $remote/$b has $(plural "$behind" commit) you don't; this branch had them but didn't make them all, so take them back with: git merge --ff-only $remote/$b" >&2
+        echo "sd act: $remote/$b has $(plural "$behind" commit) you don't; this branch had them but didn't make them all, so take them back (git merge --ff-only $remote/$b), or drop them by hand" >&2
         return 1
       fi
       # A soft or mixed reset looks the same as a deliberate drop, except the
