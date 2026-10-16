@@ -4,7 +4,7 @@ bats_require_minimum_version 1.5.0
 
 # Test suite for ci/super-stress: every converted SuperDB filter, run many
 # times on fixture input; a panic or an output that differs between runs is
-# a failure. Needs super 0.3.0 at the pinned asdf path, like pr-config.
+# a failure. Needs super 0.3.0 at the pinned asdf path, like sd config.
 
 STRESS="$BATS_TEST_DIRNAME/super-stress"
 

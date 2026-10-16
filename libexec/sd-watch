@@ -1,14 +1,14 @@
 #!/usr/bin/env bash5
 #
-# pr-watch - observe-only pass over every enrolled branch.
+# sd watch - observe-only pass over every enrolled branch.
 #
-# Usage: pr-watch [status | install | uninstall]
+# Usage: sd watch [status | install | uninstall]
 #
-#   (none)     for each repo in global git config pr-tend.repo: fetch, then
-#              pr-state every branch with branch.<name>.pr-tend=true. Writes a
+#   (none)     for each repo in global git config sheepdog.repo: fetch, then
+#              sd state every branch with branch.<name>.sheepdog=true. Writes a
 #              glyph for the branch's worktree (shown by tab-status), notifies
 #              on reasons chrismo is needed that are new since the last pass,
-#              and records the pass. Also deletes refs/pr-tend/<b>/* whose
+#              and records the pass. Also deletes refs/sheepdog/<b>/* whose
 #              branch no longer exists (pins outlive a branch -D).
 #   status     print the last pass
 #   install    launchd job: a pass every settings.interval seconds (default 300)
@@ -19,24 +19,25 @@
 # Notified: CI red, restack conflict, human items, foreign push, merged,
 # ready to merge.
 #
-# Env:    PR_TEND_STATE_DIR (~/.local/state/pr-tend), STATUS_DIR (~/.claude/tab-status)
-#         PR_WATCH_TIMEOUT (120): seconds a fetch or pr-state may take
-# Config: read with lib/pr-config.sh, no branch file (global file over
+# Env:    SHEEPDOG_STATE_DIR (~/.local/state/sheepdog), STATUS_DIR (~/.claude/tab-status)
+#         SHEEPDOG_WATCH_TIMEOUT (120): seconds a fetch or sd state may take
+# Config: read with lib/config.sh, no branch file (global file over
 #         built-in defaults): settings.notify, .interval, .remote.
 #         notify — shell command, run with <title> <message> appended
 #         (default: a macOS notification)
 
 set -euo pipefail
 
-source "$(dirname "$(realpath "$0")")/../lib/pr-tend.sh"
-source "$(dirname "$(realpath "$0")")/../lib/pr-config.sh"
+source "$(dirname "$(realpath "$0")")/../lib/sheepdog.sh"
+source "$(dirname "$(realpath "$0")")/../lib/config.sh"
 
-STATE_DIR=${PR_TEND_STATE_DIR:-$HOME/.local/state/pr-tend}
+STATE_DIR=${SHEEPDOG_STATE_DIR:-$HOME/.local/state/sheepdog}
 STATUS_DIR=${STATUS_DIR:-$HOME/.claude/tab-status}
-LABEL=com.pr-tend.pr-watch
-OLD_LABEL=com.agent-rig.pr-watch  # before the move out of agent-rig; retired on install/uninstall
-LAUNCH_AGENTS=${PR_WATCH_LAUNCH_AGENTS:-$HOME/Library/LaunchAgents}
-TIMEOUT=${PR_WATCH_TIMEOUT:-120}
+LABEL=com.sheepdog.watch
+# Earlier labels: a machine still running one would run two watchers.
+OLD_LABELS=(com.agent-rig.pr-watch com.pr-tend.pr-watch)
+LAUNCH_AGENTS=${SHEEPDOG_WATCH_LAUNCH_AGENTS:-$HOME/Library/LaunchAgents}
+TIMEOUT=${SHEEPDOG_WATCH_TIMEOUT:-120}
 
 read -r -d '' CLASSIFY <<'EOF' || true
 values {next: kind(next) == "array" ? next : []}
@@ -44,7 +45,7 @@ values {next: kind(next) == "array" ? next : []}
           red: coalesce([unnest next | where key in ["ci-red", "conflict", "human", "foreign"] | values {key, msg: say}], []),
           waiting: len(coalesce([unnest next | where who != "wait"], [])) == 0}
 | values case
-    when len(next) == 0 then {glyph: "⚠️", reasons: [], note: "pr-state gave no next steps"}
+    when len(next) == 0 then {glyph: "⚠️", reasons: [], note: "sd state gave no next steps"}
     when k == ["merged"] then {glyph: "🏁", reasons: [{key: "merged", msg: next[0].say}]}
     when k == ["closed"] then {glyph: "🚫", reasons: []}
     when len(red) > 0 then {glyph: "❌", reasons: red}
@@ -57,12 +58,12 @@ EOF
 # Notifier stdout would land in the pass record (check runs inside $(...)).
 notify() {
   local cmd
-  cmd=$(prc_get settings.notify "" true) || echo "pr-watch: pr-config failed; using the default notifier" >&2
+  cmd=$(prc_get settings.notify "" true) || echo "sd watch: sd config failed; using the default notifier" >&2
   if [[ -n $cmd ]]; then
-    sh -c "$cmd"' "$@"' _ "$1" "$2" </dev/null >&2 || echo "pr-watch: notify failed: $cmd" >&2
+    sh -c "$cmd"' "$@"' _ "$1" "$2" </dev/null >&2 || echo "sd watch: notify failed: $cmd" >&2
   else
     osascript -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv)' \
-      -e 'end run' "$1" "$2" </dev/null >/dev/null || echo "pr-watch: notify failed: osascript" >&2
+      -e 'end run' "$1" "$2" </dev/null >/dev/null || echo "sd watch: notify failed: osascript" >&2
   fi
 }
 
@@ -78,16 +79,16 @@ write_glyph() { # write_glyph <worktree-or-empty> <branch> <glyph>
 check() {
   local repo=$1 name=$2 b=$3 wt=$4 json cls glyph state_file prev line errf
   errf=$(mktemp)
-  if ! json=$(cd "$repo" && with_timeout "$TIMEOUT" pr-state --json "$b" 2>"$errf" </dev/null); then
+  if ! json=$(cd "$repo" && with_timeout "$TIMEOUT" sd-state --json "$b" 2>"$errf" </dev/null); then
     write_glyph "$wt" "$b" ⚠️
-    printf '%s\t%s\t⚠️\tpr-state failed: %s\n' "$name" "$b" "$(head -1 "$errf")"
+    printf '%s\t%s\t⚠️\tsd state failed: %s\n' "$name" "$b" "$(head -1 "$errf")"
     rm -f "$errf"
     return
   fi
   rm -f "$errf"
   if ! cls=$(prc_json "$CLASSIFY" "$json" 2>/dev/null) || [[ -z $cls ]]; then
     write_glyph "$wt" "$b" ⚠️
-    printf '%s\t%s\t⚠️\tunparseable pr-state output\n' "$name" "$b"
+    printf '%s\t%s\t⚠️\tunparseable sd state output\n' "$name" "$b"
     return
   fi
   glyph=$(prc_line 'values glyph' "$cls")
@@ -108,15 +109,15 @@ check() {
     "$(prc_line 'values sj(coalesce([unnest [...reasons, {msg: coalesce(note, null)}] | where msg is not null | values msg], []), "; ")' "$cls")"
 }
 
-# sweep_pins <repo>: delete refs/pr-tend/<b>/* whose branch no longer exists.
+# sweep_pins <repo>: delete refs/sheepdog/<b>/* whose branch no longer exists.
 # Refs outlive `git branch -D` (config doesn't); the pin's last path component
 # is its kind (base, local, bot, accepted), the rest is the branch name.
 sweep_pins() {
   local ref b
   while read -r ref; do
-    b=${ref#refs/pr-tend/}; b=${b%/*}
+    b=${ref#refs/sheepdog/}; b=${b%/*}
     git -C "$1" rev-parse -q --verify "refs/heads/$b" >/dev/null 2>&1 || echo "delete $ref"
-  done < <(git -C "$1" for-each-ref --format='%(refname)' refs/pr-tend/) \
+  done < <(git -C "$1" for-each-ref --format='%(refname)' refs/sheepdog/) \
     | git -C "$1" update-ref --stdin
 }
 
@@ -126,18 +127,18 @@ run_pass() {
   trap 'rm -f "$WRITTEN"' EXIT
   local -a repos branches
   local repo name remote b lines="" key val wt_path fetch_err
-  mapfile -t repos < <(git config --global --get-all pr-tend.repo || true)
+  mapfile -t repos < <(git config --global --get-all sheepdog.repo || true)
 
   for repo in "${repos[@]}"; do
     [[ -d $repo ]] || continue
     name=$(basename "$repo")
-    mapfile -t branches < <(git -C "$repo" config --get-regexp '^branch\..*\.pr-tend$' 2>/dev/null \
-      | awk '$2 == "true" { sub(/^branch\./, "", $1); sub(/\.pr-tend$/, "", $1); print $1 }')
+    mapfile -t branches < <(git -C "$repo" config --get-regexp '^branch\..*\.sheepdog$' 2>/dev/null \
+      | awk '$2 == "true" { sub(/^branch\./, "", $1); sub(/\.sheepdog$/, "", $1); print $1 }')
     sweep_pins "$repo"
     (( ${#branches[@]} )) || continue
 
     if ! remote=$(cd "$repo" && prc_get settings.remote "" true); then
-      lines+="$name"$'\t-\t⚠️\t'"pr-config failed"$'\n'
+      lines+="$name"$'\t-\t⚠️\t'"sd config failed"$'\n'
       continue
     fi
     if ! fetch_err=$(with_timeout "$TIMEOUT" git -C "$repo" fetch --prune --quiet "$remote" 2>&1 </dev/null); then
@@ -173,10 +174,10 @@ xml() { local v=${1//&/\&amp;}; v=${v//</\&lt;}; printf '%s' "${v//>/\&gt;}"; }
 install_job() {
   local plist prog interval tmp
   plist=$(plist_path)
-  prog="$HOME/.local/bin/pr-watch"
-  [[ -x $prog ]] || prog=$(realpath "$0")
-  interval=$(prc_get settings.interval "" true) || { echo "pr-watch: pr-config failed" >&2; exit 1; }
-  [[ $interval =~ ^[1-9][0-9]*$ ]] || { echo "pr-watch: settings.interval must be whole seconds: $interval" >&2; exit 1; }
+  prog="$HOME/.local/bin/sd"
+  [[ -x $prog ]] || prog=$(realpath "$(dirname "$(realpath "$0")")/../bin/sd")
+  interval=$(prc_get settings.interval "" true) || { echo "sd watch: sd config failed" >&2; exit 1; }
+  [[ $interval =~ ^[1-9][0-9]*$ ]] || { echo "sd watch: settings.interval must be whole seconds: $interval" >&2; exit 1; }
   mkdir -p "$LAUNCH_AGENTS" "$STATE_DIR"
   tmp=$(mktemp)
   cat > "$tmp" <<EOF
@@ -185,7 +186,7 @@ install_job() {
 <plist version="1.0">
 <dict>
   <key>Label</key><string>$LABEL</string>
-  <key>ProgramArguments</key><array><string>$(xml "$prog")</string></array>
+  <key>ProgramArguments</key><array><string>$(xml "$prog")</string><string>watch</string></array>
   <key>StartInterval</key><integer>$interval</integer>
   <key>RunAtLoad</key><true/>
   <key>EnvironmentVariables</key>
@@ -197,22 +198,24 @@ install_job() {
 </dict>
 </plist>
 EOF
-  plutil -lint -s "$tmp" || { rm -f "$tmp"; echo "pr-watch: generated plist is invalid" >&2; exit 1; }
+  plutil -lint -s "$tmp" || { rm -f "$tmp"; echo "sd watch: generated plist is invalid" >&2; exit 1; }
   mv "$tmp" "$plist"
-  retire_old_label
+  retire_old_labels
   launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
   launchctl bootstrap "gui/$(id -u)" "$plist"
   echo "installed $plist (every ${interval}s)"
 }
 
-# A machine that installed under the old label would otherwise run two watchers.
-retire_old_label() {
-  launchctl bootout "gui/$(id -u)/$OLD_LABEL" 2>/dev/null || true
-  rm -f "$LAUNCH_AGENTS/$OLD_LABEL.plist"
+retire_old_labels() {
+  local l
+  for l in "${OLD_LABELS[@]}"; do
+    launchctl bootout "gui/$(id -u)/$l" 2>/dev/null || true
+    rm -f "$LAUNCH_AGENTS/$l.plist"
+  done
 }
 
 uninstall_job() {
-  retire_old_label
+  retire_old_labels
   launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
   rm -f "$(plist_path)"
   echo "uninstalled $LABEL"
@@ -225,5 +228,5 @@ case ${1:-} in
   install) prc_super_init || exit 1; install_job ;;
   uninstall) uninstall_job ;;
   -h|--help) sed -n '3,/^$/s/^# \{0,1\}//p' "$0" ;;
-  *) echo "pr-watch: unknown command: $1" >&2; exit 1 ;;
+  *) echo "sd watch: unknown command: $1" >&2; exit 1 ;;
 esac

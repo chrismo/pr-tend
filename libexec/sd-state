@@ -1,17 +1,17 @@
 #!/usr/bin/env bash5
 #
-# pr-state - where a branch's PR stands.
+# sd state - where a branch's PR stands.
 #
-# Usage: pr-state [--json | --long] [<branch>]
+# Usage: sd state [--json | --long] [<branch>]
 #
 # Reports, for <branch> (default: the current one):
 #   pr        the branch's PR (an open one wins over closed/merged)
-#   parent    pr-parent config, else the PR base, else the default branch;
+#   parent    sd-parent config, else the PR base, else the default branch;
 #             a merged parent retargets sync to the default branch
 #   sync      ahead of / behind the parent? would `rebase --onto` conflict?
 #   push      local vs remote branch; whether the remote SHA is ours (reflog)
 #   ci        checks on the PR head commit
-#   review    coverage of HEAD by refs/pr-tend/<branch>/{local,bot,accepted};
+#   review    coverage of HEAD by refs/sheepdog/<branch>/{local,bot,accepted};
 #             a pin's <kind>-base ref is the base it was taken against, so a
 #             restack doesn't make a reviewed change look changed
 #   threads   what's owed, marked ! (blocks: unresolved threads, reviews
@@ -21,8 +21,8 @@
 #   session   pipeline enrollment, harness, session id, takeover lock
 #   fresh     false when GitHub's PR / parent-PR head differs from the local
 #             remote-tracking ref, i.e. sync and push answers need a fetch
-#   stored    what pr-tend keeps for the branch: handled ids, refs/pr-tend/<b>/*
-#   next      what to do, in order: {key, who, say, cmd} (lib/pr-next.sh)
+#   stored    what sheepdog keeps for the branch: handled ids, refs/sheepdog/<b>/*
+#   next      what to do, in order: {key, who, say, cmd} (lib/next.sh)
 #
 # Output:
 #   default   the one-liner (led by the PR's url, not the branch), then NEXT:
@@ -35,19 +35,19 @@
 # fetch. One gh GraphQL call, two for a non-default parent. A gh failure is
 # recorded in .errors and the git facts are still reported.
 #
-# Config: read with lib/pr-config.sh (branch file over global file over
+# Config: read with lib/config.sh (branch file over global file over
 # built-in defaults), under settings: remote (origin), botLogin (bots that
 # post as users, counted as bots; a [bot] suffix is optional), botIgnore (bots
 # whose posts are never owed, e.g. github-actions preview links), botIgnoreBody
 # (regexes: bot reviews and PR comments whose body matches are never owed).
-# State: branch.<name>.pr-{parent,tend,harness,session,lock}, branch.<name>.pr-handled
+# State: branch.<name>.pr-{parent,tend,harness,session,lock}, branch.<name>.sd-handled
 # (multi-valued: node ids of bot reviews/comments already dealt with).
 
 set -euo pipefail
 
-source "$(dirname "$(realpath "$0")")/../lib/pr-config.sh"
-source "$(dirname "$(realpath "$0")")/../lib/pr-next.sh"
-source "$(dirname "$(realpath "$0")")/../lib/pr-tend.sh"
+source "$(dirname "$(realpath "$0")")/../lib/config.sh"
+source "$(dirname "$(realpath "$0")")/../lib/next.sh"
+source "$(dirname "$(realpath "$0")")/../lib/sheepdog.sh"
 
 read -r -d '' QUERY <<'EOF' || true
 query($owner: String!, $repo: String!, $branch: String!) {
@@ -78,7 +78,7 @@ query($owner: String!, $repo: String!, $branch: String!) {
 }
 EOF
 
-die() { echo "pr-state: $*" >&2; exit 1; }
+die() { echo "sd state: $*" >&2; exit 1; }
 
 json=false long=false
 branch=""
@@ -99,7 +99,7 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository"
 [[ -n $branch ]] || branch=$(git branch --show-current)
 [[ -n $branch ]] || die "detached HEAD; name a branch"
 head=$(git rev-parse -q --verify "refs/heads/$branch^{commit}") || die "no such branch: $branch"
-remote=$(prc_get settings.remote "$branch" false) || die "pr-config failed"
+remote=$(prc_get settings.remote "$branch" false) || die "sd config failed"
 
 errors=()
 cfg() { git config --get "branch.$branch.$1" || true; }
@@ -111,10 +111,10 @@ patch_id() { git diff -U0 "$1" "$2" | git patch-id --stable | cut -d' ' -f1; }
 jstr() { prc_json_string "$1"; }
 jnull() { if [[ -n $1 ]]; then jstr "$1"; else echo null; fi; }
 jlist() { { git config --get-all "$1" || true; } | prc_strings; }
-bots=$(prc_get settings.botLogin "$branch" false json) || die "pr-config failed"
-ignore=$(prc_get settings.botIgnore "$branch" false json) || die "pr-config failed"
-ignore_body=$(prc_get settings.botIgnoreBody "$branch" false json) || die "pr-config failed"
-bot_command=$(prc_get settings.botCommand "$branch" false) || die "pr-config failed"
+bots=$(prc_get settings.botLogin "$branch" false json) || die "sd config failed"
+ignore=$(prc_get settings.botIgnore "$branch" false json) || die "sd config failed"
+ignore_body=$(prc_get settings.botIgnoreBody "$branch" false json) || die "sd config failed"
+bot_command=$(prc_get settings.botCommand "$branch" false) || die "sd config failed"
 [[ $(prc_val "$ignore_body" 'len(coalesce([unnest this | where is_error(regexp(this, ""))], [])) == 0' 2>/dev/null) == true ]] \
   || die "botIgnoreBody has an invalid regex: $ignore_body"
 
@@ -153,7 +153,7 @@ if [[ -z $default_branch ]]; then
   [[ -n $default_branch ]] || default_branch=main
 fi
 
-parent=$(cfg pr-parent) parent_source=config
+parent=$(cfg sd-parent) parent_source=config
 if [[ -z $parent ]]; then
   if [[ $pr != null ]]; then
     parent=$(prc_val "$pr" baseRefName) parent_source=pr
@@ -184,7 +184,7 @@ if [[ -z $target_ref ]]; then
 else
   sync_ahead=$(count "$target_ref..$head")
   behind=$(count "$head..$target_ref")
-  base_pin=$(ref "refs/pr-tend/$branch/base")
+  base_pin=$(ref "refs/sheepdog/$branch/base")
   merged_head=$(prc_val "$parent_pr" 'coalesce(headRefOid, "")')
   if [[ -n $base_pin ]] && is_ancestor "$base_pin" "$head"; then
     old_base=$base_pin
@@ -250,7 +250,7 @@ stale_json='[]'
 # ── O6 review pins ───────────────────────────────────────────────────────────
 
 pin_status() {
-  local pin; pin=$(ref "refs/pr-tend/$branch/$1")
+  local pin; pin=$(ref "refs/sheepdog/$branch/$1")
   if [[ -z $pin ]]; then
     echo '{"sha": null, "status": "none"}'
   elif [[ $pin == "$head" ]]; then
@@ -259,7 +259,7 @@ pin_status() {
     printf '{"sha": "%s", "status": "uncovered", "uncovered": %s}\n' "$pin" "$(count "$pin..$head")"
   else
     local against=${target_ref:-$head} status=unknown pin_base head_base
-    pin_base=$(ref "refs/pr-tend/$branch/$1-base")
+    pin_base=$(ref "refs/sheepdog/$branch/$1-base")
     [[ -n $pin_base ]] || pin_base=$(git merge-base "$pin" "$against" || true)
     head_base=${old_base:-$(git merge-base "$head" "$against" || true)}
     if [[ -n $pin_base && -n $head_base ]]; then
@@ -381,7 +381,7 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
     session: {enrolled: s.enrolled == "true", harness: nn(s.harness), id: nn(s.session), locked: s.lock != ""},
     stored: {handled: s.handled,
              refs: unflatten(coalesce([
-               unnest {p: f"refs/pr-tend/{s.branch}/", r: s.refs}
+               unnest {p: f"refs/sheepdog/{s.branch}/", r: s.refs}
                | values {key: [split(r, " ")[0][len(p):]], value: split(r, " ")[1]}
              ], []))},
     errors: s.errors
@@ -390,7 +390,7 @@ EOF
 
 errors_json='[]'
 (( ${#errors[@]} == 0 )) || errors_json=$(printf '%s\n' "${errors[@]}" | prc_strings)
-refs_json=$(git for-each-ref --format='%(refname) %(objectname)' "refs/pr-tend/$branch/" | prc_strings)
+refs_json=$(git for-each-ref --format='%(refname) %(objectname)' "refs/sheepdog/$branch/" | prc_strings)
 args=$(printf '{"branch": %s, "head": %s, "pr": %s, "parent": %s, "parent_source": %s, "parent_pr": %s, "parent_merged": %s,
   "target": %s, "default_branch": %s, "sync_ahead": %s, "behind": %s, "up_to_date": %s, "old_base": %s, "conflict": %s,
   "remote_sha": %s, "ahead": %s, "push_behind": %s, "diverged": %s, "remote_ours": %s, "theirs": %s, "stale": %s,
@@ -400,11 +400,11 @@ args=$(printf '{"branch": %s, "head": %s, "pr": %s, "parent": %s, "parent_source
   "$(jstr "$target")" "$(jstr "$default_branch")" "$sync_ahead" "$behind" "$up_to_date" "$(jnull "$old_base")" "$conflict" \
   "$(jnull "$remote_sha")" "$ahead" "$push_behind" "$diverged" "$remote_ours" "$theirs" "$stale_json" \
   "${review[local]}" "${review[bot]}" "${review[accepted]}" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" \
-  "$ignore" "$ignore_body" "$(jlist "branch.$branch.pr-handled")" "$refs_json" \
-  "$(jstr "$(cfg pr-tend)")" "$(jstr "$(cfg pr-harness)")" "$(jstr "$(cfg pr-session)")" "$(jstr "$(cfg pr-lock)")" "$errors_json")
+  "$ignore" "$ignore_body" "$(jlist "branch.$branch.sd-handled")" "$refs_json" \
+  "$(jstr "$(cfg sheepdog)")" "$(jstr "$(cfg sd-harness)")" "$(jstr "$(cfg sd-session)")" "$(jstr "$(cfg sd-lock)")" "$errors_json")
 state=$(prc_json "$ASSEMBLE" "$args") || die "couldn't assemble the state"
-next=$(printf '%s\n' "$state" | prn_next "$remote") || die "pr-next failed"
-state=$(prc_json 'values {...s, next}' "{\"s\": $state, \"next\": $next}") || die "pr-next failed"
+next=$(printf '%s\n' "$state" | prn_next "$remote") || die "lib/next.sh failed"
+state=$(prc_json 'values {...s, next}' "{\"s\": $state, \"next\": $next}") || die "lib/next.sh failed"
 
 if $json; then
   echo "$state"

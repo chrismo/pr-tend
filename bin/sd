@@ -1,0 +1,32 @@
+#!/usr/bin/env bash5
+#
+# sd - sheepdog, the PR pipeline: it tends a branch's PR until it can merge.
+#
+# Usage: sd <verb> [<args>]
+#
+# Verbs:
+#   state         where a branch's PR stands, and what's next
+#   act           the pipeline's verbs: start, push, enroll, address, ship...
+#   watch         the watcher: one pass, or install it as a launchd job
+#   config        harness and settings
+#   review-local  the default local reviewer (sd act review runs it)
+#   migrate       move pr-tend state to sheepdog's names (one-time)
+#
+# sd <verb> --help for each verb's own usage.
+
+set -euo pipefail
+
+LIBEXEC="$(cd "$(dirname "$(realpath "$0")")/../libexec" && pwd)"
+
+usage() { sed -n '3,/^$/s/^# \{0,1\}//p' "$0"; }
+
+case ${1:-} in
+  "") usage >&2; exit 1 ;;
+  help|-h|--help) usage; exit 0 ;;
+esac
+
+verb=$1; shift
+[[ $verb =~ ^[a-z][a-z-]*$ && -x $LIBEXEC/sd-$verb ]] || { echo "sd: unknown verb: $verb" >&2; exit 1; }
+
+# The verbs call each other by name, as git's do: sd-act runs sd-state.
+PATH="$LIBEXEC:$PATH" exec "$LIBEXEC/sd-$verb" "$@"

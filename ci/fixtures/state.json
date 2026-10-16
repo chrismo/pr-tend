@@ -212,13 +212,13 @@
       "key": "errors",
       "who": "you",
       "say": "1 error: the steps below may be wrong",
-      "cmd": "pr-state --json"
+      "cmd": "sd state --json"
     },
     {
       "key": "human",
       "who": "you",
       "say": "reply to 3 human items",
-      "cmd": "pr-state --long"
+      "cmd": "sd state --long"
     },
     {
       "key": "ci-red",
@@ -230,13 +230,13 @@
       "key": "bot",
       "who": "agent",
       "say": "address 5 bot items",
-      "cmd": "pr-act address"
+      "cmd": "sd act address"
     },
     {
       "key": "bot-trigger",
       "who": "run",
       "say": "trigger the review bot (/review-bot)",
-      "cmd": "pr-act trigger"
+      "cmd": "sd act trigger"
     }
   ]
 }

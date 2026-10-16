@@ -6,8 +6,8 @@
 CI_TEST="$BATS_TEST_DIRNAME/test"
 
 setup() {
-  TMP="$(mktemp -d "${TMPDIR:-/tmp}/pr-tend-ci.XXXXXX")"
-  export PR_TEND_TEST_RESULTS="$TMP/results"
+  TMP="$(mktemp -d "${TMPDIR:-/tmp}/sheepdog-ci.XXXXXX")"
+  export SHEEPDOG_TEST_RESULTS="$TMP/results"
 }
 
 teardown() {
@@ -24,18 +24,30 @@ suite() {
   suite two true
   run "$CI_TEST" "$TMP/one.bats" "$TMP/two.bats"
   [ "$status" -eq 0 ]
-  grep -q "<testsuite name=\"one.bats\" file=\"one.bats\"" "$PR_TEND_TEST_RESULTS/report.xml"
-  grep -q "<testsuite name=\"two.bats\" file=\"two.bats\"" "$PR_TEND_TEST_RESULTS/report.xml"
+  grep -q "<testsuite name=\"one.bats\" file=\"one.bats\"" "$SHEEPDOG_TEST_RESULTS/report.xml"
+  grep -q "<testsuite name=\"two.bats\" file=\"two.bats\"" "$SHEEPDOG_TEST_RESULTS/report.xml"
 }
 
 @test "a failing suite still gets its file, and the failure is the exit status" {
   suite bad false
   run "$CI_TEST" "$TMP/bad.bats"
   [ "$status" -ne 0 ]
-  grep -q "<testsuite name=\"bad.bats\" file=\"bad.bats\"" "$PR_TEND_TEST_RESULTS/report.xml"
+  grep -q "<testsuite name=\"bad.bats\" file=\"bad.bats\"" "$SHEEPDOG_TEST_RESULTS/report.xml"
 }
 
 @test "runs under bash 5 via the bash5 shebang" {
   run head -1 "$CI_TEST"
   [ "$output" = "#!/usr/bin/env bash5" ]
+}
+
+@test "with no args, the default globs cover every suite in the repo" {
+  local defaults f
+  defaults=$(sed -n 's/^(( \$# )) || set -- //p' "$CI_TEST")
+  [ -n "$defaults" ]
+  cd "$BATS_TEST_DIRNAME/.."
+  # shellcheck disable=SC2086 # the globs are meant to expand
+  defaults=" $(echo $defaults) "
+  while IFS= read -r f; do
+    [[ $defaults == *" ${f#./} "* ]] || { echo "not run by default: $f"; false; }
+  done < <(find . -name '*.bats' -not -path './.git/*')
 }

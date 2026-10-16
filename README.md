@@ -9,10 +9,10 @@ Commands:
 
 | Command     | What it does                                              |
 |-------------|-----------------------------------------------------------|
-| `pr-state`  | Read-only status of a branch's PR, and what to do next    |
-| `pr-act`    | Start a branch, then take its next step (address, push…)  |
-| `pr-watch`  | Periodic pass over your branches; optional launchd job    |
-| `pr-config` | Show and validate settings                                |
+| `sd state`  | Read-only status of a branch's PR, and what to do next    |
+| `sd act`    | Start a branch, then take its next step (address, push…)  |
+| `sd watch`  | Periodic pass over your branches; optional launchd job    |
+| `sd config` | Show and validate settings                                |
 
 Design notes, still a working draft: [`docs/pr-workflow/design.md`](docs/pr-workflow/design.md).
 
@@ -28,9 +28,9 @@ exactly. `claude` and/or `pi` for the agent steps.
 
 ## Interfaces with other tools
 
-- `pr-watch` writes a glyph per worktree to `~/.claude/tab-status/<worktree>.pr`
+- `sd watch` writes a glyph per worktree to `~/.claude/tab-status/<worktree>.pr`
   (`$STATUS_DIR`), which agent-rig's `tab-status` reads.
-- The launchd job is labelled `com.pr-tend.pr-watch`. `pr-watch install` and
+- The launchd job is labelled `com.sheepdog.watch`. `sd watch install` and
   `uninstall` also retire `com.agent-rig.pr-watch`, its label before the move
   out of agent-rig.
 

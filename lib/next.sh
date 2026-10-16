@@ -1,5 +1,5 @@
-# What to do next on a branch, from its pr-state JSON. Source it after
-# lib/pr-config.sh; needs bash 5 and SuperDB.
+# What to do next on a branch, from its sd state JSON. Source it after
+# lib/config.sh; needs bash 5 and SuperDB.
 #
 # A step is {key, who, say, cmd}. who is who does it once it's automated:
 #   you    chrismo's judgment     agent  a model step
@@ -11,7 +11,7 @@
 # Behind the default branch alone is no step: it moves too often to chase.
 # A conflict with it is, and so is a restack after the parent merged.
 # Only bot items are ever marked i, so owed_bot - info is the blocking bot count.
-# on() and n() come from lib/pr-config.sh's PRC_FNS: a null or missing
+# on() and n() come from lib/config.sh's PRC_FNS: a null or missing
 # field compares to nothing in SuperDB, and they make it false and 0.
 PRN_QUERY='fn plural(k, w): f"{k} {w}{k == 1 ? "" : "s"}"
 fn step(key, who, say, cmd): {key: key, who: who, say: say, cmd: cmd}
@@ -40,10 +40,10 @@ values {...s, remote}
       bot_due:=(coalesce(bot.command, null) is not null and covers(review.local)
                 and not covers(review.bot) and not covers(review.accepted))
 | unnest [
-    on(pr.state == "MERGED") ? step("merged", "run", "merged: drop the branch'"'"'s pins and enrollment, then remove this worktree", "pr-act forget") : null,
+    on(pr.state == "MERGED") ? step("merged", "run", "merged: drop the branch'"'"'s pins and enrollment, then remove this worktree", "sd act forget") : null,
     on(pr.state == "CLOSED") ? step("closed", "you", "PR closed without merging", null) : null,
     open and len(errors) > 0
-      ? step("errors", "you", f"{plural(len(errors), "error")}: the steps below may be wrong", "pr-state --json") : null,
+      ? step("errors", "you", f"{plural(len(errors), "error")}: the steps below may be wrong", "sd state --json") : null,
     open and on(fresh == false)
       ? step("stale", "run", "fetch: GitHub is ahead of your remote refs, so the steps below may be wrong",
            f"git fetch --prune {remote}") : null,
@@ -51,31 +51,31 @@ values {...s, remote}
       ? step("foreign", "you", f"{remote}/{branch} has {plural(push.theirs, "commit")} this copy has never had",
              f"git log HEAD..{remote}/{branch}") : null,
     open and n(threads.owed_human) > 0
-      ? step("human", "you", f"reply to {plural(threads.owed_human, "human item")}", "pr-state --long") : null,
+      ? step("human", "you", f"reply to {plural(threads.owed_human, "human item")}", "sd state --long") : null,
     open and not parent_closed and on(sync.up_to_date == false) and on(sync.conflict)
-      ? step("conflict", "agent", f"restack onto {sync.target} conflicts: resolve it", "pr-act restack --resolve") : null,
+      ? step("conflict", "agent", f"restack onto {sync.target} conflicts: resolve it", "sd act restack --resolve") : null,
     open and not parent_closed and on(sync.up_to_date == false) and not on(sync.conflict) and chase
       ? step("behind", "run", f"restack onto {sync.target} ({sync.behind} behind)",
-             sync.old_base is null ? restack : "pr-act restack")
+             sync.old_base is null ? restack : "sd act restack")
       : has_pr and not parent_closed and not on(sync.conflict) and gh_behind
       ? step("behind", "run", f"restack onto {sync.default} ({n(sync.behind)} behind): GitHub requires branches to be up to date",
-             "pr-act restack") : null,
+             "sd act restack") : null,
     has_pr and on(ci.verdict == "red")
       ? step("ci-red", "agent", f"fix CI: {join(ci.failing, ", ")}", "gh pr checks") : null,
     open and bot_blocking > 0
-      ? step("bot", "agent", f"address {plural(threads.owed_bot, "bot item")}", "pr-act address") : null,
+      ? step("bot", "agent", f"address {plural(threads.owed_bot, "bot item")}", "sd act address") : null,
     open and bot_blocking == 0 and n(threads.info) > 0
-      ? step("read", "you", f"read {plural(threads.info, "bot item")} in pr-state --long, then ack", "pr-act ack") : null,
+      ? step("read", "you", f"read {plural(threads.info, "bot item")} in sd state --long, then ack", "sd act ack") : null,
     open and not foreign and to_push
       ? step("push", "run", push.remote_sha is null ? f"push: not on {remote} yet"
              : on(push.diverged) ? f"force-push {plural(coalesce(sync.ahead, push.ahead), "commit")} (rewritten)"
-             : f"push {plural(push.ahead, "commit")}", "pr-act push") : null,
-    pr is null and len(errors) == 0 ? step("open-pr", "run", "ship: push, open a draft PR", "pr-act ship") : null,
+             : f"push {plural(push.ahead, "commit")}", "sd act push") : null,
+    pr is null and len(errors) == 0 ? step("open-pr", "run", "ship: push, open a draft PR", "sd act ship") : null,
     has_pr and draft_ready and not need_review and not bot_due
       ? step("draft", "run", "CI green and reviewed: mark the PR ready for review", "gh pr ready") : null,
-    open and need_review ? step("review", "agent", "review the changes since the last review", "pr-act review") : null,
+    open and need_review ? step("review", "agent", "review the changes since the last review", "sd act review") : null,
     has_pr and not to_push and not foreign and bot_due
-      ? step("bot-trigger", "run", f"trigger the review bot ({bot.command})", "pr-act trigger") : null,
+      ? step("bot-trigger", "run", f"trigger the review bot ({bot.command})", "sd act trigger") : null,
     has_pr and on(ci.verdict == "inconclusive") ? step("ci-rerun", "run", "rerun cancelled CI", "gh pr checks") : null,
     has_pr and not to_push and (on(ci.verdict == "pending") or on(ci.for_head == false))
       ? step("ci-wait", "wait", on(ci.verdict == "pending") ? "CI running" : "CI hasn'"'"'t reported on HEAD yet",
@@ -83,7 +83,7 @@ values {...s, remote}
     has_pr and parent_closed
       ? step("parent-closed", "you", f"{parent.name} (#{parent.pr.number}) was closed without merging: decide what this PR targets", null) : null,
     has_pr and stacked and on(parent.merged)
-      ? step("retarget", "run", f"{pr.base} already merged: point this PR at {sync.default}", "pr-act retarget") : null,
+      ? step("retarget", "run", f"{pr.base} already merged: point this PR at {sync.default}", "sd act retarget") : null,
     has_pr and stacked and not on(parent.merged)
       ? step("parent-wait", "wait", f"waiting on {parent.name} (#{parent.pr.number}) to merge first", null) : null,
     has_pr and review_required
@@ -99,13 +99,13 @@ values {...s, remote}
 | values coalesce(steps, [])
 | values (len(this) > 1 and this[len(this)-1].key in ["ready", "merge-wait", "blocked"]) ? this[0:len(this)-1] : this'
 
-# prn_next <remote>: pr-state JSON on stdin; prints the steps as a JSON array, first is next.
+# prn_next <remote>: sd state JSON on stdin; prints the steps as a JSON array, first is next.
 prn_next() {
   local state remote kind
   state=$(cat)
   remote=$(prc_json_string "$1") || return
   kind=$(prc_line 'values kind(this)' "$state") || return
-  [[ $kind == record ]] || { echo "pr-next: pr-state JSON must be one record" >&2; return 1; }
+  [[ $kind == record ]] || { echo "lib/next.sh: sd state JSON must be one record" >&2; return 1; }
   prc_json "$PRN_QUERY" "{\"remote\": $remote, \"s\": $state}"
 }
 

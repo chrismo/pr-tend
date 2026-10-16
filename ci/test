@@ -4,9 +4,9 @@
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
-out=${PR_TEND_TEST_RESULTS:-test-results}
+out=${SHEEPDOG_TEST_RESULTS:-test-results}
 mkdir -p "$out"
-(( $# )) || set -- lib/*.bats bin/*.bats ci/*.bats *.bats
+(( $# )) || set -- lib/*.bats bin/*.bats libexec/*.bats ci/*.bats *.bats
 
 bats --jobs "$(getconf _NPROCESSORS_ONLN)" --report-formatter junit --output "$out" "$@"
 status=$?

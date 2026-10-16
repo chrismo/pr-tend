@@ -2,20 +2,20 @@
 
 bats_require_minimum_version 1.5.0
 
-# Test suite for bin/pr-state (read-only: where a branch's PR stands).
+# Test suite for libexec/sd-state (read-only: where a branch's PR stands).
 #
 # Real git: a bare origin, a working clone, and a second clone ("other") that
 # plays everyone else pushing. GitHub is a fake `gh` that answers the one
-# GraphQL query pr-state makes, from $GH_FIXTURES/<branch>.json.
+# GraphQL query sd state makes, from $GH_FIXTURES/<branch>.json.
 
-PR_STATE="$BATS_TEST_DIRNAME/pr-state"
+SD_STATE="$BATS_TEST_DIRNAME/sd-state"
 
 setup() {
   TMP="$(cd "$BATS_TEST_TMPDIR" && pwd -P)"
   export GIT_CONFIG_GLOBAL="$TMP/gitconfig-global"
   export GIT_CONFIG_SYSTEM=/dev/null
-  export PR_TEND_CONFIG="$TMP/global.json"
-  PR_CONFIG="$BATS_TEST_DIRNAME/pr-config"
+  export SHEEPDOG_CONFIG="$TMP/global.json"
+  SD_CONFIG="$BATS_TEST_DIRNAME/sd-config"
   printf '[user]\n\temail = t@example.com\n\tname = Tester\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
 
   export GH_FIXTURES="$TMP/gh"
@@ -92,20 +92,20 @@ thread() { # thread <first-type> <first-login> <last-type> <last-login> [resolve
     "$2" "$4" "${5:-false}" "${6:-false}" "$1" "$2" "$3" "$4"
 }
 
-state() { run "$PR_STATE" --json "$@"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }; }
+state() { run "$SD_STATE" --json "$@"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }; }
 field() { jq -r "$@" <<<"$output"; }
 
 # ── basics ───────────────────────────────────────────────────────────────────
 
 @test "outside a git repo: fails with a message" {
   cd "$TMP"
-  run "$PR_STATE"
+  run "$SD_STATE"
   [ "$status" -ne 0 ]
   [[ "$output" == *"not a git repository"* ]]
 }
 
 @test "runs under bash 5 via the bash5 shebang" {
-  run head -1 "$PR_STATE"
+  run head -1 "$SD_STATE"
   [ "$output" = "#!/usr/bin/env bash5" ]
 }
 
@@ -225,7 +225,7 @@ field() { jq -r "$@" <<<"$output"; }
 @test "parent lookup failing: parent merged is unknown" {
   git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
   git switch -qc feat && commit c.txt c
-  git config branch.feat.pr-parent parent
+  git config branch.feat.sd-parent parent
   GH_FAKE_FAIL_FOR=parent state
   [ "$(field .parent.merged)" = null ]
   [ "$(field .fresh)" = null ]
@@ -234,7 +234,7 @@ field() { jq -r "$@" <<<"$output"; }
 
 @test "summary: errors are flagged" {
   git switch -qc feat && commit a.txt a
-  GH_FAKE_FAIL="gh: down" run "$PR_STATE"
+  GH_FAKE_FAIL="gh: down" run "$SD_STATE"
   [ "$status" -eq 0 ]
   [[ "$output" == *"⚠ 1 error(s)"* ]]
 }
@@ -250,10 +250,10 @@ field() { jq -r "$@" <<<"$output"; }
   [ "$(field .parent.source)" = pr ]
 }
 
-@test "configured pr-parent wins over the PR base" {
+@test "configured sd-parent wins over the PR base" {
   git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
   git switch -qc feat && commit c.txt c
-  git config branch.feat.pr-parent parent
+  git config branch.feat.sd-parent parent
   pr_fixture feat '.baseRefName = "main"'
   state
   [ "$(field .parent.name)" = parent ]
@@ -263,7 +263,7 @@ field() { jq -r "$@" <<<"$output"; }
 @test "parent PR state is looked up for a non-default parent" {
   git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
   git switch -qc feat && commit c.txt c
-  git config branch.feat.pr-parent parent
+  git config branch.feat.sd-parent parent
   pr_fixture parent '.number = 3'
   state
   [ "$(field .parent.pr.number)" = 3 ]
@@ -273,7 +273,7 @@ field() { jq -r "$@" <<<"$output"; }
 @test "parent closed without merging: not merged, and the state says so" {
   git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
   git switch -qc feat && commit c.txt c
-  git config branch.feat.pr-parent parent
+  git config branch.feat.sd-parent parent
   pr_fixture parent '.number = 3' '.state = "CLOSED"'
   state
   [ "$(field .parent.merged)" = false ]
@@ -284,7 +284,7 @@ field() { jq -r "$@" <<<"$output"; }
   git switch -qc feat
   state
   [ "$(field .bot.command)" = null ]
-  "$PR_CONFIG" set --global settings.botCommand "/review-bot"
+  "$SD_CONFIG" set --global settings.botCommand "/review-bot"
   state
   [ "$(field .bot.command)" = /review-bot ]
 }
@@ -340,7 +340,7 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
   git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
   local parent_sha; parent_sha=$(git rev-parse parent)
   git switch -qc feat && commit c.txt c
-  git config branch.feat.pr-parent parent
+  git config branch.feat.sd-parent parent
   # the squash merge lands on main elsewhere (own message, or it hashes identical to parent's commit)
   commit p.txt p "$TMP/other" && git -C "$TMP/other" commit -q --amend -m "Squash parent (#3)"
   git -C "$TMP/other" push -q origin main 2>/dev/null
@@ -357,7 +357,7 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
 @test "sync: the base pin is the old base when it is an ancestor" {
   git switch -qc feat && commit a.txt a
   local pin; pin=$(git rev-parse main)
-  git update-ref refs/pr-tend/feat/base "$pin"
+  git update-ref refs/sheepdog/feat/base "$pin"
   state
   [ "$(field .sync.old_base)" = "$pin" ]
 }
@@ -447,7 +447,7 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
 @test "fresh: parent PR head moved on GitHub since the last fetch" {
   git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
   git switch -qc feat && commit c.txt c
-  git config branch.feat.pr-parent parent
+  git config branch.feat.sd-parent parent
   pr_fixture parent '.headRefOid = "1111111111111111111111111111111111111111"'
   state
   [ "$(field .fresh)" = false ]
@@ -457,7 +457,7 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
 @test "summary: stale refs say to fetch" {
   git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
   pr_fixture feat '.headRefOid = "1111111111111111111111111111111111111111"'
-  run "$PR_STATE"
+  run "$SD_STATE"
   [[ "$output" == *"stale: fetch"* ]]
 }
 
@@ -527,14 +527,14 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
 
 @test "review: pin at HEAD is covered" {
   git switch -qc feat && commit a.txt a
-  git update-ref refs/pr-tend/feat/local HEAD
+  git update-ref refs/sheepdog/feat/local HEAD
   state
   [ "$(field .review.local.status)" = covered ]
 }
 
 @test "review: pin behind HEAD leaves commits uncovered" {
   git switch -qc feat && commit a.txt a
-  git update-ref refs/pr-tend/feat/bot HEAD
+  git update-ref refs/sheepdog/feat/bot HEAD
   commit b.txt b && commit c.txt c
   state
   [ "$(field .review.bot.status)" = uncovered ]
@@ -543,7 +543,7 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
 
 @test "review: a rebase that keeps the change still counts as covered" {
   git switch -qc feat && commit a.txt a
-  git update-ref refs/pr-tend/feat/local HEAD
+  git update-ref refs/sheepdog/feat/local HEAD
   commit b.txt b "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
   git fetch -q && git rebase -q origin/main
   state
@@ -553,8 +553,8 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
 @test "review: a pin's recorded base keeps it covered across a restack past a squash-merged parent" {
   git switch -qc p && commit p.txt p
   git switch -qc feat && commit a.txt a
-  git update-ref refs/pr-tend/feat/local HEAD
-  git update-ref refs/pr-tend/feat/local-base p
+  git update-ref refs/sheepdog/feat/local HEAD
+  git update-ref refs/sheepdog/feat/local-base p
   # p squash-merged: different content, else the squash commit can get p's own SHA (same tree, same second)
   commit p.txt "p, squashed" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
   git fetch -q && git rebase -q --onto origin/main p feat
@@ -565,7 +565,7 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
 @test "review: without a recorded base, the same restack looks like a changed change (why -base exists)" {
   git switch -qc p && commit p.txt p
   git switch -qc feat && commit a.txt a
-  git update-ref refs/pr-tend/feat/local HEAD
+  git update-ref refs/sheepdog/feat/local HEAD
   commit p.txt "p, squashed" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
   git fetch -q && git rebase -q --onto origin/main p feat
   state
@@ -574,7 +574,7 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
 
 @test "review: a rewrite that changes the change is not covered" {
   git switch -qc feat && commit a.txt a
-  git update-ref refs/pr-tend/feat/local HEAD
+  git update-ref refs/sheepdog/feat/local HEAD
   printf 'different\n' > a.txt && git commit -qa --amend --no-edit
   state
   [ "$(field .review.local.status)" = rewritten-changed ]
@@ -582,7 +582,7 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
 
 @test "review: a rewritten pin that can't be compared is unknown, not covered" {
   git switch -q --orphan feat && commit a.txt a
-  git update-ref refs/pr-tend/feat/local HEAD
+  git update-ref refs/sheepdog/feat/local HEAD
   printf 'different\n' > a.txt && git commit -qa --amend --no-edit
   state
   [ "$(field .review.local.status)" = unknown ]
@@ -592,7 +592,7 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
 
 @test "threads: unresolved and last word not ours are owed, split bot vs human" {
   git switch -qc feat && commit a.txt a
-  "$PR_CONFIG" set --global --json settings.botLogin '["marge"]'
+  "$SD_CONFIG" set --global --json settings.botLogin '["marge"]'
   pr_fixture feat ".reviewThreads.nodes = [
     $(thread Bot copilot Bot copilot),
     $(thread User marge User marge),
@@ -644,10 +644,10 @@ note() { # note <id> <type> <login> [body] — a review or top-level comment nod
   [ "$(field '.threads.items[0].outdated')" = null ]
 }
 
-@test "threads: reviews and comments listed in branch pr-handled are not owed" {
+@test "threads: reviews and comments listed in branch sd-handled are not owed" {
   git switch -qc feat && commit a.txt a
-  git config --add branch.feat.pr-handled R1
-  git config --add branch.feat.pr-handled C1
+  git config --add branch.feat.sd-handled R1
+  git config --add branch.feat.sd-handled C1
   pr_fixture feat ".reviews.nodes = [$(note R1 Bot copilot), $(note R2 Bot copilot)]" \
     ".comments.nodes = [$(note C1 Bot copilot)]"
   state
@@ -674,7 +674,7 @@ note() { # note <id> <type> <login> [body] — a review or top-level comment nod
 
 @test "threads: settings.botLogin takes several logins, with or without [bot]" {
   git switch -qc feat && commit a.txt a
-  "$PR_CONFIG" set --global --json settings.botLogin '["marge", "homer[bot]"]'
+  "$SD_CONFIG" set --global --json settings.botLogin '["marge", "homer[bot]"]'
   pr_fixture feat ".reviewThreads.nodes = [$(thread User marge User marge), $(thread User homer User homer)]" \
     ".reviews.nodes = [$(note R1 User 'marge[bot]')]" \
     ".comments.nodes = [$(note C1 User homer), $(note C2 User alice)]"
@@ -685,7 +685,7 @@ note() { # note <id> <type> <login> [body] — a review or top-level comment nod
 
 @test "threads: bots in settings.botIgnore are never owed" {
   git switch -qc feat && commit a.txt a
-  "$PR_CONFIG" set --global --json settings.botIgnore '["github-actions", "vercel[bot]"]'
+  "$SD_CONFIG" set --global --json settings.botIgnore '["github-actions", "vercel[bot]"]'
   pr_fixture feat ".reviewThreads.nodes = [$(thread Bot github-actions Bot github-actions), $(thread Bot copilot Bot copilot)]" \
     ".reviews.nodes = [$(note R1 Bot vercel)]" \
     ".comments.nodes = [$(note C1 Bot 'github-actions[bot]'), $(note C2 Bot copilot)]"
@@ -694,9 +694,9 @@ note() { # note <id> <type> <login> [body] — a review or top-level comment nod
   [ "$(field '[.threads.items[].last] | join(",")')" = "copilot,copilot" ]
 }
 
-@test "threads: git config pr-tend.botLogin is not read" {
+@test "threads: git config sheepdog.botLogin is not read" {
   git switch -qc feat && commit a.txt a
-  git config pr-tend.botLogin marge
+  git config sheepdog.botLogin marge
   pr_fixture feat ".reviews.nodes = [$(note R1 User marge)]"
   state
   [ "$(field .threads.owed_bot)" = 0 ]
@@ -704,8 +704,8 @@ note() { # note <id> <type> <login> [body] — a review or top-level comment nod
 
 @test "threads: botLogin and botIgnore come from the branch file too" {
   git switch -qc feat && commit a.txt a
-  mkdir -p .git/pr-tend
-  echo '{"settings": {"botLogin": ["marge"]}}' > .git/pr-tend/feat.json
+  mkdir -p .git/sheepdog
+  echo '{"settings": {"botLogin": ["marge"]}}' > .git/sheepdog/feat.json
   pr_fixture feat ".reviews.nodes = [$(note R1 User marge)]"
   state
   [ "$(field .threads.owed_bot)" = 1 ]
@@ -713,7 +713,7 @@ note() { # note <id> <type> <login> [body] — a review or top-level comment nod
 
 @test "threads: botLogin and botIgnore come from the config file" {
   git switch -qc feat && commit a.txt a
-  echo '{"settings": {"botLogin": ["marge"], "botIgnore": ["vercel"]}}' > "$PR_TEND_CONFIG"
+  echo '{"settings": {"botLogin": ["marge"], "botIgnore": ["vercel"]}}' > "$SHEEPDOG_CONFIG"
   pr_fixture feat ".reviews.nodes = [$(note R1 User marge), $(note R2 Bot vercel)]"
   state
   [ "$(field '[.threads.items[].id] | join(",")')" = R1 ]
@@ -721,7 +721,7 @@ note() { # note <id> <type> <login> [body] — a review or top-level comment nod
 
 @test "threads: bot reviews and comments whose body matches botIgnoreBody are never owed" {
   git switch -qc feat && commit a.txt a
-  echo '{"settings": {"botIgnoreBody": ["is on the job\\.", "^Deployed"]}}' > "$PR_TEND_CONFIG"
+  echo '{"settings": {"botIgnoreBody": ["is on the job\\.", "^Deployed"]}}' > "$SHEEPDOG_CONFIG"
   pr_fixture feat ".reviews.nodes = [$(note R1 Bot marge 'Marge is on the job. Wait.'), $(note R2 Bot marge 'Real finding')]" \
     ".comments.nodes = [$(note C1 Bot github-actions 'Deployed to preview'), $(note C2 Bot github-actions 'Not Deployed')]"
   state
@@ -730,33 +730,33 @@ note() { # note <id> <type> <login> [body] — a review or top-level comment nod
 
 @test "threads: an invalid botIgnoreBody regex fails loudly" {
   git switch -qc feat && commit a.txt a
-  echo '{"settings": {"botIgnoreBody": ["("]}}' > "$PR_TEND_CONFIG"
+  echo '{"settings": {"botIgnoreBody": ["("]}}' > "$SHEEPDOG_CONFIG"
   pr_fixture feat ".comments.nodes = [$(note C1 Bot copilot)]"
-  run "$PR_STATE" --json
+  run "$SD_STATE" --json
   [ "$status" -ne 0 ]
   [[ "$output" == *"botIgnoreBody"* ]]
 }
 
 @test "config: remote comes from the config file" {
   git remote rename origin upstream
-  echo '{"settings": {"remote": "upstream"}}' > "$PR_TEND_CONFIG"
+  echo '{"settings": {"remote": "upstream"}}' > "$SHEEPDOG_CONFIG"
   git switch -qc feat && commit a.txt a && git push -q upstream feat 2>/dev/null
   state
   [ "$(field .push.remote_sha)" = "$(git rev-parse feat)" ]
 }
 
 @test "config: an unreadable config file fails" {
-  echo 'not json' > "$PR_TEND_CONFIG"
-  run "$PR_STATE" --json
+  echo 'not json' > "$SHEEPDOG_CONFIG"
+  run "$SD_STATE" --json
   [ "$status" -ne 0 ]
-  [[ "$output" == *"pr-config"* ]]
+  [[ "$output" == *"sd config"* ]]
 }
 
 @test "summary: review bodies and comments count as info, threads as blocking" {
   git switch -qc feat && commit a.txt a
   pr_fixture feat ".reviewThreads.nodes = [$(thread Bot copilot Bot copilot)]" \
     ".reviews.nodes = [$(note R1 Bot copilot)]" ".comments.nodes = [$(note C1 Bot copilot)]"
-  run "$PR_STATE"
+  run "$SD_STATE"
   [ "$status" -eq 0 ]
   [[ "$output" == *" · !:1 i:2"* ]] || false
   [[ "$output" != *"threads:"* ]]
@@ -765,7 +765,7 @@ note() { # note <id> <type> <login> [body] — a review or top-level comment nod
 @test "summary: nothing owed still shows both counts" {
   git switch -qc feat && commit a.txt a
   pr_fixture feat
-  run "$PR_STATE"
+  run "$SD_STATE"
   [[ "$output" == *"!:0 i:0"* ]]
 }
 
@@ -847,15 +847,15 @@ review() {
   [ "$(field '.threads.items[0].excerpt | length')" = 100 ]
 }
 
-# ── stored: what pr-tend keeps for the branch ────────────────────────────────
+# ── stored: what sheepdog keeps for the branch ────────────────────────────────
 
-@test "stored: handled ids and the branch's pr-tend refs" {
+@test "stored: handled ids and the branch's sheepdog refs" {
   git switch -qc feat && commit a.txt a
-  git config --add branch.feat.pr-handled R1
-  git config --add branch.feat.pr-handled C1
-  git update-ref refs/pr-tend/feat/local HEAD
-  git update-ref refs/pr-tend/feat/bot HEAD
-  git update-ref refs/pr-tend/other/local HEAD
+  git config --add branch.feat.sd-handled R1
+  git config --add branch.feat.sd-handled C1
+  git update-ref refs/sheepdog/feat/local HEAD
+  git update-ref refs/sheepdog/feat/bot HEAD
+  git update-ref refs/sheepdog/other/local HEAD
   state
   [ "$(field -c .stored.handled)" = '["R1","C1"]' ]
   [ "$(field -c '.stored.refs | keys')" = '["bot","local"]' ]
@@ -864,7 +864,7 @@ review() {
 
 @test "stored: a branch with a slash keeps the rest of the ref name" {
   git switch -qc topic/sub && commit a.txt a
-  git update-ref refs/pr-tend/topic/sub/local HEAD
+  git update-ref refs/sheepdog/topic/sub/local HEAD
   state
   [ "$(field -c '.stored.refs | keys')" = '["local"]' ]
 }
@@ -882,11 +882,11 @@ review() {
   pr_fixture feat ".reviewThreads.nodes = [$(thread Bot copilot Bot copilot)]" \
     '.reviewThreads.nodes[0].first.nodes[0] += {url: "https://example/pr/7#t1", body: "Rename it"}' \
     ".reviews.nodes = [$(review R1 Bot claude COMMENTED 'Looks fine')]"
-  run "$PR_STATE" --long
+  run "$SD_STATE" --long
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 4 ]
   [[ "${lines[0]}" == "https://example/pr/7 open · "*"!:1 i:1"* ]] || false
-  [ "${lines[1]}" = "NEXT  agent  address 2 bot items  → pr-act address" ]
+  [ "${lines[1]}" = "NEXT  agent  address 2 bot items  → sd act address" ]
   [[ "${lines[2]}" =~ ^\ +!\ +thread\ +copilot\ +file.txt:2\ +Rename\ it\ +https://example/pr/7#t1$ ]] || false
   [[ "${lines[3]}" =~ ^\ +i\ +review\ +claude\ +Looks\ fine\ +https://example/pr/7#R1$ ]]
 }
@@ -894,7 +894,7 @@ review() {
 @test "--long: nothing owed is the one-liner and the next steps" {
   git switch -qc feat && commit a.txt a
   pr_fixture feat
-  run "$PR_STATE" --long
+  run "$SD_STATE" --long
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 3 ]
   [[ "${lines[1]}" == "NEXT  run    fetch"* ]] || false
@@ -902,7 +902,7 @@ review() {
 }
 
 @test "--long and --json together is a usage error" {
-  run "$PR_STATE" --long --json
+  run "$SD_STATE" --long --json
   [ "$status" -ne 0 ]
 }
 
@@ -910,10 +910,10 @@ review() {
 
 @test "session: enrollment, harness, session and lock come from branch config" {
   git switch -qc feat
-  git config branch.feat.pr-tend true
-  git config branch.feat.pr-harness pi
-  git config branch.feat.pr-session abc-123
-  git config branch.feat.pr-lock chrismo
+  git config branch.feat.sheepdog true
+  git config branch.feat.sd-harness pi
+  git config branch.feat.sd-session abc-123
+  git config branch.feat.sd-lock chrismo
   state
   [ "$(field .session.enrolled)" = true ]
   [ "$(field .session.harness)" = pi ]
@@ -934,7 +934,7 @@ review() {
   git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
   pr_fixture feat "$(checks '[{__typename:"CheckRun",name:"lint",status:"COMPLETED",conclusion:"FAILURE"}]')" \
     ".reviewThreads.nodes = [$(thread User alice User alice)]"
-  run "$PR_STATE"
+  run "$SD_STATE"
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 2 ]
   [[ "${lines[0]}" == "https://example/pr/7 open · "* ]] || false
@@ -942,7 +942,7 @@ review() {
   [[ "${lines[0]}" != *"#7"* ]] || false
   [[ "${lines[0]}" == *"CI red"* ]] || false
   [[ "${lines[0]}" == *"!:1 i:0"* ]] || false
-  [[ "${lines[1]}" == "NEXT  you    reply to 1 human item  → pr-state --long  (+"*" more)" ]]
+  [[ "${lines[1]}" == "NEXT  you    reply to 1 human item  → sd state --long  (+"*" more)" ]]
 }
 
 @test "next: --json carries the ordered steps" {
@@ -951,13 +951,13 @@ review() {
   commit b.txt b
   state
   [ "$(field '[.next[].key] | join(" ")')" = "bot push" ]  # no ci-wait: CI can't run before the push
-  [ "$(field '.next[1].cmd')" = "pr-act push" ]
+  [ "$(field '.next[1].cmd')" = "sd act push" ]
 }
 
 @test "next: a pushed branch with an open PR and nothing owed is ready to merge" {
   git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
   pr_fixture feat
-  run "$PR_STATE"
+  run "$SD_STATE"
   [ "$status" -eq 0 ]
   [ "${lines[1]}" = "NEXT  you    ready to merge  → gh pr merge" ]
 }
@@ -965,7 +965,7 @@ review() {
 @test "next: uses the configured remote" {
   git remote rename origin up
   git switch -qc feat && commit a.txt a
-  "$PR_CONFIG" set --global settings.remote up >/dev/null
+  "$SD_CONFIG" set --global settings.remote up >/dev/null
   state
   [ "$(field '[.next[] | select(.key == "push") | .say][0]')" = "push: not on up yet" ]
 }
@@ -973,14 +973,14 @@ review() {
 @test "summary: a draft PR's link, then draft" {
   git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
   pr_fixture feat '.isDraft = true'
-  run "$PR_STATE"
+  run "$SD_STATE"
   [ "$status" -eq 0 ]
   [[ "${lines[0]}" == "https://example/pr/7 draft · "* ]]
 }
 
 @test "summary: no PR" {
   git switch -qc feat && commit a.txt a
-  run "$PR_STATE"
+  run "$SD_STATE"
   [ "$status" -eq 0 ]
   [[ "${lines[0]}" == "no PR · "* ]] || false
   [[ "$output" == *"1 unpushed"* ]]

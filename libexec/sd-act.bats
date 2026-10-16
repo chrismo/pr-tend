@@ -2,10 +2,10 @@
 
 bats_require_minimum_version 1.5.0
 
-# Test suite for bin/pr-act (mechanical pipeline verbs). Only enroll/unenroll
+# Test suite for libexec/sd-act (mechanical pipeline verbs). Only enroll/unenroll
 # so far: the config the watcher reads.
 
-PR_ACT="$BATS_TEST_DIRNAME/pr-act"
+SD_ACT="$BATS_TEST_DIRNAME/sd-act"
 
 setup() {
   TMP="$(cd "$BATS_TEST_TMPDIR" && pwd -P)"
@@ -18,51 +18,51 @@ setup() {
   git switch -qc feat
 }
 
-repos() { git config --global --get-all pr-tend.repo || true; }
+repos() { git config --global --get-all sheepdog.repo || true; }
 
 @test "runs under bash 5 via the bash5 shebang" {
-  run head -1 "$PR_ACT"
+  run head -1 "$SD_ACT"
   [ "$output" = "#!/usr/bin/env bash5" ]
 }
 
 @test "no verb: usage on stderr, nonzero" {
-  run "$PR_ACT"
+  run "$SD_ACT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"Usage"* ]]
 }
 
 @test "unknown verb fails" {
-  run "$PR_ACT" frobnicate
+  run "$SD_ACT" frobnicate
   [ "$status" -ne 0 ]
   [[ "$output" == *"unknown verb"* ]]
 }
 
 @test "enroll: marks the current branch and registers the repo" {
-  run "$PR_ACT" enroll
+  run "$SD_ACT" enroll
   [ "$status" -eq 0 ]
   [[ "$output" == *"enrolled feat"* ]]
-  [ "$(git config branch.feat.pr-tend)" = true ]
+  [ "$(git config branch.feat.sheepdog)" = true ]
   [ "$(repos)" = "$TMP/repo" ]
 }
 
 @test "enroll: a named branch" {
   git branch other
-  run "$PR_ACT" enroll other
+  run "$SD_ACT" enroll other
   [ "$status" -eq 0 ]
-  [ "$(git config branch.other.pr-tend)" = true ]
-  [ -z "$(git config branch.feat.pr-tend || true)" ]
+  [ "$(git config branch.other.sheepdog)" = true ]
+  [ -z "$(git config branch.feat.sheepdog || true)" ]
 }
 
 @test "enroll: a missing branch fails" {
-  run "$PR_ACT" enroll nope
+  run "$SD_ACT" enroll nope
   [ "$status" -ne 0 ]
   [[ "$output" == *"no such branch"* ]]
 }
 
 @test "enroll: registers the repo only once" {
-  "$PR_ACT" enroll
+  "$SD_ACT" enroll
   git branch other
-  "$PR_ACT" enroll other
+  "$SD_ACT" enroll other
   [ "$(repos | wc -l | tr -d ' ')" = 1 ]
 }
 
@@ -70,102 +70,102 @@ repos() { git config --global --get-all pr-tend.repo || true; }
   git switch -q main
   git worktree add -q "$TMP/wt" feat
   cd "$TMP/wt"
-  run "$PR_ACT" enroll
+  run "$SD_ACT" enroll
   [ "$status" -eq 0 ]
   [ "$(repos)" = "$TMP/repo" ]
 }
 
 @test "unenroll: clears the mark" {
-  "$PR_ACT" enroll
-  run "$PR_ACT" unenroll
+  "$SD_ACT" enroll
+  run "$SD_ACT" unenroll
   [ "$status" -eq 0 ]
-  [ -z "$(git config branch.feat.pr-tend || true)" ]
+  [ -z "$(git config branch.feat.sheepdog || true)" ]
 }
 
 @test "unenroll: a branch that was never enrolled is fine" {
-  run "$PR_ACT" unenroll
+  run "$SD_ACT" unenroll
   [ "$status" -eq 0 ]
 }
 
-@test "forget: unenrolls and deletes refs/pr-tend/<branch>/*" {
-  "$PR_ACT" enroll
-  git update-ref refs/pr-tend/feat/base HEAD
-  git update-ref refs/pr-tend/feat/local HEAD
-  run "$PR_ACT" forget
+@test "forget: unenrolls and deletes refs/sheepdog/<branch>/*" {
+  "$SD_ACT" enroll
+  git update-ref refs/sheepdog/feat/base HEAD
+  git update-ref refs/sheepdog/feat/local HEAD
+  run "$SD_ACT" forget
   [ "$status" -eq 0 ]
-  [ -z "$(git config branch.feat.pr-tend || true)" ]
-  [ -z "$(git for-each-ref refs/pr-tend/feat/)" ]
+  [ -z "$(git config branch.feat.sheepdog || true)" ]
+  [ -z "$(git for-each-ref refs/sheepdog/feat/)" ]
 }
 
 @test "forget: a named branch; other branches' pins stay" {
   git switch -qc other
-  git update-ref refs/pr-tend/feat/base HEAD
-  git update-ref refs/pr-tend/other/base HEAD
-  run "$PR_ACT" forget feat
+  git update-ref refs/sheepdog/feat/base HEAD
+  git update-ref refs/sheepdog/other/base HEAD
+  run "$SD_ACT" forget feat
   [ "$status" -eq 0 ]
-  [ -z "$(git for-each-ref refs/pr-tend/feat/)" ]
-  [ -n "$(git for-each-ref refs/pr-tend/other/)" ]
+  [ -z "$(git for-each-ref refs/sheepdog/feat/)" ]
+  [ -n "$(git for-each-ref refs/sheepdog/other/)" ]
 }
 
 @test "forget: a branch with nothing stored, even one already deleted, is fine" {
-  run "$PR_ACT" forget
+  run "$SD_ACT" forget
   [ "$status" -eq 0 ]
-  run "$PR_ACT" forget gone
+  run "$SD_ACT" forget gone
   [ "$status" -eq 0 ]
 }
 
 @test "unregister: removes this repo from the watcher's list" {
-  "$PR_ACT" enroll && "$PR_ACT" unenroll
+  "$SD_ACT" enroll && "$SD_ACT" unenroll
   [ "$(repos)" = "$TMP/repo" ]
-  run "$PR_ACT" unregister
+  run "$SD_ACT" unregister
   [ "$status" -eq 0 ]
   [ -z "$(repos)" ]
 }
 
 @test "unregister: refuses while branches are still enrolled; --force overrides" {
-  "$PR_ACT" enroll
-  run "$PR_ACT" unregister
+  "$SD_ACT" enroll
+  run "$SD_ACT" unregister
   [ "$status" -ne 0 ]
   [[ "$output" == *"feat"* ]]
   [ "$(repos)" = "$TMP/repo" ]
-  run "$PR_ACT" unregister --force
+  run "$SD_ACT" unregister --force
   [ "$status" -eq 0 ]
   [ -z "$(repos)" ]
 }
 
 @test "unregister: a path, for a repo whose directory is gone" {
-  "$PR_ACT" enroll
-  git config --global --add pr-tend.repo "$TMP/gone"
-  run "$PR_ACT" unregister "$TMP/gone"
+  "$SD_ACT" enroll
+  git config --global --add sheepdog.repo "$TMP/gone"
+  run "$SD_ACT" unregister "$TMP/gone"
   [ "$status" -eq 0 ]
   [ "$(repos)" = "$TMP/repo" ]
 }
 
 @test "unregister: a repo that isn't registered is fine" {
-  run "$PR_ACT" unregister
+  run "$SD_ACT" unregister
   [ "$status" -eq 0 ]
 }
 
 @test "--help: every verb has a usage line" {
-  run "$PR_ACT" --help
+  run "$SD_ACT" --help
   [ "$status" -eq 0 ]
-  verbs=$(sed -n '/^case \$verb in/,/^esac/s/^  \([a-z-]*\)).*/\1/p' "$PR_ACT")
+  verbs=$(sed -n '/^case \$verb in/,/^esac/s/^  \([a-z-]*\)).*/\1/p' "$SD_ACT")
   [ -n "$verbs" ]
   for v in $verbs; do
-    [[ "$output" =~ pr-act\ $v\  ]] || { echo "missing: $v"; false; }
+    [[ "$output" =~ sd\ act\ $v\  ]] || { echo "missing: $v"; false; }
   done
 }
 
 @test "--help works outside a repo" {
   cd "$TMP"
-  run "$PR_ACT" --help
+  run "$SD_ACT" --help
   [[ "$output" == *"Usage"* ]]
 }
 
 @test "unenroll: a real config error is not swallowed" {
-  "$PR_ACT" enroll
+  "$SD_ACT" enroll
   touch .git/config.lock
-  run "$PR_ACT" unenroll
+  run "$SD_ACT" unenroll
   rm -f .git/config.lock
   [ "$status" -ne 0 ]
 }

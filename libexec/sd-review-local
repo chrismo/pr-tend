@@ -1,18 +1,18 @@
 #!/usr/bin/env bash5
 #
-# pr-review-local - the default local reviewer (A8): one fresh, read-only
+# sd review-local - the default local reviewer (A8): one fresh, read-only
 # model session over a branch's change; findings as JSON on stdout.
 #
-# Usage: PR_TEND_BASE=<sha> PR_TEND_HEAD=<sha> [PR_TEND_TASK=<text>] pr-review-local
+# Usage: SHEEPDOG_BASE=<sha> SHEEPDOG_HEAD=<sha> [SHEEPDOG_TASK=<text>] sd review-local
 #
 # The contract, which any script named by settings.localReview must keep:
-#   input   env PR_TEND_BASE, PR_TEND_HEAD (SHAs); PR_TEND_TASK (the task, so
+#   input   env SHEEPDOG_BASE, SHEEPDOG_HEAD (SHAs); SHEEPDOG_TASK (the task, so
 #           out-of-scope changes can be flagged); cwd = the worktree
 #   output  a JSON list [{file, line, severity, body}] on stdout
 #   exit    0: the review completed (the list may be empty); non-zero: the
-#           reviewer failed, which pr-act review never treats as clean
+#           reviewer failed, which sd act review never treats as clean
 #
-# Harness, model and effort come from `pr-config step review`. Every run is a
+# Harness, model and effort come from `sd config step review`. Every run is a
 # new session (fresh context, never the authoring conversation) with read-only
 # tools: no edits, no gh. The prompt is lib/review-prompt.md plus the task, the
 # commits and the diff. See docs/pr-workflow/design.md, "Local review".
@@ -20,27 +20,27 @@
 set -euo pipefail
 
 LIB="$(dirname "$(realpath "$0")")/../lib"
-source "$LIB/pr-tend.sh"
-source "$LIB/pr-config.sh"
+source "$LIB/sheepdog.sh"
+source "$LIB/config.sh"
 
-die() { echo "pr-review-local: $*" >&2; exit 1; }
+die() { echo "sd review-local: $*" >&2; exit 1; }
 
-[[ -n ${PR_TEND_BASE:-} ]] || die "PR_TEND_BASE is not set (the base SHA)"
-[[ -n ${PR_TEND_HEAD:-} ]] || die "PR_TEND_HEAD is not set (the head SHA)"
+[[ -n ${SHEEPDOG_BASE:-} ]] || die "SHEEPDOG_BASE is not set (the base SHA)"
+[[ -n ${SHEEPDOG_HEAD:-} ]] || die "SHEEPDOG_HEAD is not set (the head SHA)"
 prc_super_init || exit 1
 git rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository"
 branch=$(git branch --show-current 2>/dev/null || true)
 
-cfg=$(prc_step review "$branch" "") || die "pr-config failed"
-h=$(prc_val "$cfg" harness) || die "pr-config failed"
-timeout=$(prc_get settings.stepTimeout "$branch" false) || die "pr-config failed"
+cfg=$(prc_step review "$branch" "") || die "sd config failed"
+h=$(prc_val "$cfg" harness) || die "sd config failed"
+timeout=$(prc_get settings.stepTimeout "$branch" false) || die "sd config failed"
 [[ $timeout =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $timeout"
 
-diff=$(git diff "$PR_TEND_BASE" "$PR_TEND_HEAD") || die "git diff $PR_TEND_BASE $PR_TEND_HEAD failed"
-commits=$(git log --format='- %s' "$PR_TEND_BASE..$PR_TEND_HEAD")
+diff=$(git diff "$SHEEPDOG_BASE" "$SHEEPDOG_HEAD") || die "git diff $SHEEPDOG_BASE $SHEEPDOG_HEAD failed"
+commits=$(git log --format='- %s' "$SHEEPDOG_BASE..$SHEEPDOG_HEAD")
 prompt=$(cat "$LIB/review-prompt.md")
-prompt+=$'\n\nTask: '"${PR_TEND_TASK:-(none recorded)}"
-prompt+=$'\n\nCommits ('"${PR_TEND_BASE:0:7}..${PR_TEND_HEAD:0:7}"$'):\n'"$commits"
+prompt+=$'\n\nTask: '"${SHEEPDOG_TASK:-(none recorded)}"
+prompt+=$'\n\nCommits ('"${SHEEPDOG_BASE:0:7}..${SHEEPDOG_HEAD:0:7}"$'):\n'"$commits"
 prompt+=$'\n\nDiff:\n'"$diff"
 
 read -r -d '' SCHEMA <<'EOF' || true

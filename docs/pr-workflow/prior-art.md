@@ -52,7 +52,7 @@ Two research passes; metadata via `gh api` the same day. Shallow clones in
 | AnandChowdhary/continuous-claude | 1.4k, MIT | bash | Ralph loop, one PR per iteration, `gh pr checks` → merge or discard. |
 | Shopify/roast | 1.25k, MIT, Ruby | pipeline (Ruby DSL) | **Closest philosophically after Sortie.** Workflows of "cogs": `cmd`, `agent`, `ruby`, `chat`, `repeat`, `map`, `call` — deterministic + agent steps interleaved by design. Agent cog drives **both Claude and pi** via CLI (`claude -p --output-format stream-json [--resume --fork-session]`, `pi --mode json -p [--fork]`; read in `lib/roast/cogs/agent/providers/`). Forks the session per step by default (see design doc, To verify). Run-to-completion engine: no watcher, no PR lifecycle, no stacks. Could at most run individual steps; mainly a reference for step / session mechanics. |
 | Ralph (snarktank/ralph, ghuntley) | 21.9k / 1.8k | bash | Fresh process every loop; state in files + git. |
-| Spec Kit / BMAD / Kiro | — | — | Upstream of us (spec → tasks); no CI/review loop. Could feed `pr-act start`. |
+| Spec Kit / BMAD / Kiro | — | — | Upstream of us (spec → tasks); no CI/review loop. Could feed `sd act start`. |
 | Sculptor, container-use, Nimbalyst, Conductor, Terragon | — | — | Desktop apps / isolation / shut down. Not pipelines. |
 
 ### Sortie fit, in detail (from its docs, not run; 2026-10-11)
@@ -63,7 +63,7 @@ Two research passes; metadata via `gh api` the same day. Shallow clones in
 | Claude + **pi** | Claude Code, Copilot, OpenCode, Codex, Kiro, Gemini, generic ACP. **No pi.** |
 | Worktrees, stack-aware restack | Fresh clone per ticket via `after_create` hook (a worktree hook might work). **No stacks.** |
 | Git refs + git config | SQLite |
-| `pr-act start "<task>"` | Tracker ticket (GitHub, GitLab, Gitea, Linear, Jira); a read-only JSON-file tracker for local tasks. |
+| `sd act start "<task>"` | Tracker ticket (GitHub, GitLab, Gitea, Linear, Jira); a read-only JSON-file tracker for local tasks. |
 | Local review before bot | "Self-review" phase (verification commands + agent review turn) before the completion signal is accepted. Similar idea. |
 | Takeover: lock + interactive resume | None. Parking label; remove it or move the ticket to release. |
 | Small | 29 architecture docs + 34 ADRs, very detailed. Possibly heavy, like gh-stack. |
@@ -127,12 +127,12 @@ WebFetch summaries, 2026-10-11 — spot-check quotes before citing):
   outside evidence either way.
 
 Candidate changes these suggested (**decided 2026-10-11** — 1–4 adopted, 5 rejected; see design doc Decisions):
-1. **Deterministic verify before A8:** `pr-tend.verify` (lint / build / test,
+1. **Deterministic verify before A8:** `sheepdog.verify` (lint / build / test,
    output trimmed) runs before the LLM reviewer; optionally exposed to the
    agent in J0's step contract.
 2. **Split caps:** local loops 3; remote CI rounds 2; deterministic autofix
    (formatters, `lint --fix`) before J2.
-3. **Scope judge:** pass `PR_TEND_TASK` to the local review contract so the
+3. **Scope judge:** pass `SHEEPDOG_TASK` to the local review contract so the
    reviewer can flag work outside the task.
 4. **Cheap enforcement alongside reconciliation:** per-step tool deny for
    push / PR create (Claude `--disallowedTools`; pi equivalent unchecked).

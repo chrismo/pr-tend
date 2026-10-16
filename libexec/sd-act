@@ -1,36 +1,36 @@
 #!/usr/bin/env bash5
 #
-# pr-act - verbs that change a branch's PR.
+# sd act - verbs that change a branch's PR.
 #
 # Usage:
-#   pr-act start    [--parent <branch>] [--harness <h>] [--no-implement] <name> [<task>]
-#   pr-act implement [--harness <h>] [<branch>]
-#   pr-act enroll   [<branch>]
-#   pr-act unenroll [<branch>]
-#   pr-act forget   [<branch>]
-#   pr-act unregister [--force] [<path>]
-#   pr-act address  [--force] [--no-publish] [--harness <h>] [<branch>]
-#   pr-act ack      [--id <id>]... [<branch>]
-#   pr-act restack  [--force] [--resolve] [<branch>]
-#   pr-act retarget [<branch>]
-#   pr-act push     [--force] [<branch>]
-#   pr-act verify   [<branch>]
-#   pr-act review   [<branch>]
-#   pr-act describe [<branch>]
-#   pr-act ship     [--force] [<branch>]
-#   pr-act trigger  [--force] [<branch>]
+#   sd act start    [--parent <branch>] [--harness <h>] [--no-implement] <name> [<task>]
+#   sd act implement [--harness <h>] [<branch>]
+#   sd act enroll   [<branch>]
+#   sd act unenroll [<branch>]
+#   sd act forget   [<branch>]
+#   sd act unregister [--force] [<path>]
+#   sd act address  [--force] [--no-publish] [--harness <h>] [<branch>]
+#   sd act ack      [--id <id>]... [<branch>]
+#   sd act restack  [--force] [--resolve] [<branch>]
+#   sd act retarget [<branch>]
+#   sd act push     [--force] [<branch>]
+#   sd act verify   [<branch>]
+#   sd act review   [<branch>]
+#   sd act describe [<branch>]
+#   sd act ship     [--force] [<branch>]
+#   sd act trigger  [--force] [<branch>]
 #
 # Examples:
-#   cd "$(pr-act start fix-login "Fix the login redirect")"   worktree, then the agent builds it
-#   pr-act start --no-implement --parent fix-login fix-login-tests
-#   pr-act enroll                      pr-watch starts tracking this branch
-#   pr-act address --no-publish        the agent fixes locally; nothing pushed or posted
-#   pr-act address --harness pi
-#   pr-act ack                         after reading pr-state --long: the i items are done
-#   pr-act restack && pr-act push      catch up with the parent, then publish
-#   pr-act restack --resolve           the same, with the agent resolving conflicts
-#   pr-act review                      verify, then the local reviewer; clean pins local
-#   pr-act ship                        describe, push, open a draft PR, enroll
+#   cd "$(sd act start fix-login "Fix the login redirect")"   worktree, then the agent builds it
+#   sd act start --no-implement --parent fix-login fix-login-tests
+#   sd act enroll                      sd watch starts tracking this branch
+#   sd act address --no-publish        the agent fixes locally; nothing pushed or posted
+#   sd act address --harness pi
+#   sd act ack                         after reading sd state --long: the i items are done
+#   sd act restack && sd act push      catch up with the parent, then publish
+#   sd act restack --resolve           the same, with the agent resolving conflicts
+#   sd act review                      verify, then the local reviewer; clean pins local
+#   sd act ship                        describe, push, open a draft PR, enroll
 #
 # Verbs:
 #   start     a worktree beside this one, on the branch <name> (an existing
@@ -46,29 +46,29 @@
 #             globs, pipes or quotes), and settings.implementAllow's rules; pi
 #             runs nothing. "needs-input" prints the agent's question and
 #             leaves the edits uncommitted. Spends tokens
-#   enroll    mark the branch for pr-watch, and register this repo; for a
+#   enroll    mark the branch for sd watch, and register this repo; for a
 #             stacked PR, store its parent and base before a merge erases them
 #   unenroll  clear the mark
 #   forget    the branch is done (merged, abandoned): unenroll it and delete
-#             its refs/pr-tend/<branch>/* pins, which outlive a branch -D
+#             its refs/sheepdog/<branch>/* pins, which outlive a branch -D
 #   unregister  take this repo (or <path>, e.g. one that's gone) off the
 #             watcher's list; refuses while any branch is still enrolled
 #   address   hand owed bot feedback to an agent, then commit, verify, push,
 #             reply and resolve; items the agent marks "ask" are left for chrismo
 #   ack       mark owed bot review bodies and comments read, with no reply:
-#             every i item, or only the --id ones (ids from pr-state --json)
+#             every i item, or only the --id ones (ids from sd state --json)
 #   restack   rebase --onto the parent (the default branch once the parent
 #             merged), check the branch's own change came through unchanged,
 #             else roll back; never pushes. Once the branch lands on the
-#             default branch, pr-parent is rewritten to it. A conflict is
+#             default branch, sd-parent is rewritten to it. A conflict is
 #             refused, or with --resolve handed to the agent (J1): it edits
 #             the conflicting files in the branch's session, the pipeline
 #             adds and continues, up to 3 stops. A resolved rebase skips the
 #             unchanged-change check (a resolution changes the diff), so its
-#             result is unreviewed: verify runs, then pr-act review is next
+#             result is unreviewed: verify runs, then sd act review is next
 #   retarget  after the parent merged: point the PR at the default branch
 #             (gh pr edit --base; GitHub usually did it already when the
-#             parent's branch was deleted) and rewrite pr-parent to it
+#             parent's branch was deleted) and rewrite sd-parent to it
 #   push      publish: a plain push for new commits; rewritten history is
 #             force-pushed with a lease, only over a remote head of our own.
 #             Never over commits this copy has never had, --force or not
@@ -77,14 +77,14 @@
 #             for the fix step. A command that changes the tree fails too.
 #             Gates local review and everything after it
 #   review    verify, then the local reviewer (settings.localReview, default
-#             bin/pr-review-local) over the branch's own change, base..HEAD.
+#             libexec/sd-review-local) over the branch's own change, base..HEAD.
 #             Clean: pin local at HEAD. Findings: printed as JSON, nothing
 #             pinned. A failed reviewer is never clean. Spends tokens
 #   describe  the agent writes the PR title and body (J6) from the task, the
 #             commits and the diff, read-only, in the branch's session; stored
 #             for HEAD. Spends tokens
 #   ship      describe unless a description for HEAD is stored, check HEAD
-#             didn't move, push, then open a draft PR on the parent (pr-parent,
+#             didn't move, push, then open a draft PR on the parent (sd-parent,
 #             else the default branch) and enroll; with a PR already open, fix
 #             up its title, body and base instead. Warns when the local review
 #             doesn't cover HEAD; the draft stays a draft until it does
@@ -111,22 +111,22 @@
 #   --harness <h>   claude (default) or pi; remembered for the branch (also
 #                   start, implement)
 #
-# Config (pr-config show):
+# Config (sd config show):
 #   settings  remote, verify, stepTimeout, replyPrefix, botLogin, implementAllow
 #   harness   model, effort, provider (pi), args
 #
-# State (git config): branch.<b>.pr-tend, .pr-task, .pr-parent, .pr-session,
-# .pr-harness, .pr-handled;
-# pr-tend.repo (global) lists the enrolled repos.
+# State (git config): branch.<b>.sheepdog, .sd-task, .sd-parent, .sd-session,
+# .sd-harness, .sd-handled;
+# sheepdog.repo (global) lists the enrolled repos.
 #
 # <branch> defaults to the current one. See docs/pr-workflow/design.md, "Act".
 
 set -euo pipefail
 
-source "$(dirname "$(realpath "$0")")/../lib/pr-tend.sh"
-source "$(dirname "$(realpath "$0")")/../lib/pr-config.sh"
+source "$(dirname "$(realpath "$0")")/../lib/sheepdog.sh"
+source "$(dirname "$(realpath "$0")")/../lib/config.sh"
 
-die() { echo "pr-act: $*" >&2; exit 1; }
+die() { echo "sd act: $*" >&2; exit 1; }
 help() { sed -n '3,/^$/s/^# \{0,1\}//p' "$0"; }
 usage() { help >&2; exit 1; }
 
@@ -156,7 +156,7 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository"
 task_arg=""
 if [[ $verb == start ]]; then
   (( ${#positionals[@]} >= 1 && ${#positionals[@]} <= 2 )) \
-    || die "usage: pr-act start [--parent <branch>] [--harness <h>] [--no-implement] <name> [<task>]"
+    || die "usage: sd act start [--parent <branch>] [--harness <h>] [--no-implement] <name> [<task>]"
   branch=${positionals[0]} task_arg=${positionals[1]:-}
 fi
 positional=$branch
@@ -173,7 +173,7 @@ values [
   : on(pr.state != "OPEN") ? {hard: f"PR #{pr.number} is {lower(pr.state)}"}
   : nul(threads.owed_bot) ? {hard: f"can't read the PR from GitHub: {sj(coalesce(errors, []), "; ")}"}
   : null,
-  on(session.locked) ? {soft: f"taken over (branch.{branch}.pr-lock is set)"} : null,
+  on(session.locked) ? {soft: f"taken over (branch.{branch}.sd-lock is set)"} : null,
   on(sync.conflict) ? {soft: "restack due, and it would conflict"}
   : nul(sync.up_to_date) ? {soft: f"sync with {coalesce(sync.target, "the parent")} unknown"}
   : null,
@@ -315,7 +315,7 @@ soft_gate() {
   local soft
   soft=$(gate_get "$1" soft)
   if $force || [[ -z $soft ]]; then return 0; fi
-  { echo "pr-act: not $2:"
+  { echo "sd act: not $2:"
     sed 's/^/  - /' <<<"$soft"
     echo "(--force to run anyway)"; } >&2
   exit 1
@@ -338,11 +338,11 @@ address() {
   wt=$(worktree_for "$b")
   [[ -n $wt ]] || die "$b isn't checked out in any worktree"
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
-  remote=$(prc_get settings.remote "$b" false) || die "pr-config failed"
+  remote=$(prc_get settings.remote "$b" false) || die "sd config failed"
   git -C "$wt" fetch --quiet "$remote" || die "fetch from $remote failed"
-  state=$(cd "$wt" && pr-state --json "$b") || die "pr-state failed"
+  state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
 
-  gate=$(prc_json "$GATE" "$state") || die "can't parse pr-state's answer"
+  gate=$(prc_json "$GATE" "$state") || die "can't parse sd state's answer"
   line=$(gate_get "$gate" hard | head -1)
   [[ -z $line ]] || die "$line"
   owed=$(prc_json 'values coalesce([unnest threads.items | where kind == "bot"], [])' "$state")
@@ -351,13 +351,13 @@ address() {
     return
   fi
   soft_gate "$gate" "addressing $b"
-  gate_get "$gate" warn | sed 's/^/pr-act: warning: /' >&2
+  gate_get "$gate" warn | sed 's/^/sd-act: warning: /' >&2
 
   local -a id_args=()
-  (( $(prc_val "$owed" 'len(this)') <= 100 )) || echo "pr-act: warning: over 100 owed items; taking the first 100" >&2
+  (( $(prc_val "$owed" 'len(this)') <= 100 )) || echo "sd act: warning: over 100 owed items; taking the first 100" >&2
   while IFS= read -r line; do id_args+=(-f "ids[]=$line"); done < <(prc_line 'unnest this | head 100 | values id' "$owed")
   nodes=$(gql -f query="$NODES_Q" "${id_args[@]}") || die "couldn't fetch the findings' text"
-  bots=$(prc_get settings.botLogin "$b" false json) || die "pr-config failed"
+  bots=$(prc_get settings.botLogin "$b" false json) || die "sd config failed"
   findings=$(prc_json "$FINDINGS_Q" "{\"bots\": $bots, \"n\": $nodes}") || die "couldn't read the findings' text"
   [[ $findings != '[]' ]] || die "none of the owed items could be fetched"
   local held
@@ -370,28 +370,28 @@ address() {
   fi
 
   local stored_h sid h mode result outcome plan timeout cfg forced verify
-  stored_h=$(git config --get "branch.$b.pr-harness" || true)
-  sid=$(git config --get "branch.$b.pr-session" || true)
+  stored_h=$(git config --get "branch.$b.sd-harness" || true)
+  sid=$(git config --get "branch.$b.sd-session" || true)
   forced=${harness_opt:-$stored_h}
-  cfg=$(prc_step address "$b" "$forced") || die "pr-config failed"
+  cfg=$(prc_step address "$b" "$forced") || die "sd config failed"
   h=$(prc_val "$cfg" harness)
   if [[ -n $sid ]]; then
     [[ $h == "${stored_h:-claude}" ]] \
-      || die "branch.$b.pr-session belongs to ${stored_h:-claude}; unset it to start a $h session"
+      || die "branch.$b.sd-session belongs to ${stored_h:-claude}; unset it to start a $h session"
     mode=resume
   else
     sid=$(uuidgen | tr 'A-F' 'a-f') mode=new
   fi
-  timeout=$(prc_get settings.stepTimeout "$b" false) || die "pr-config failed"
+  timeout=$(prc_get settings.stepTimeout "$b" false) || die "sd config failed"
   [[ $timeout =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $timeout"
-  verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "pr-config failed"
+  verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "sd config failed"
   [[ $verify != *$'\n'* ]] || die "verify must be a single command, not a list"
-  echo "pr-act: $h ($mode session $sid) is addressing $(prc_val "$findings" 'len(this)') item(s) on $b…" >&2
+  echo "sd act: $h ($mode session $sid) is addressing $(prc_val "$findings" 'len(this)') item(s) on $b…" >&2
   result=$(cd "$wt" && harness_run "$h" "$sid" "$mode" "$timeout" \
              "$PROMPT"$'\n\nPR '"$(prc_val "$state" pr.url)"$'\nFindings:\n'"$(printf '%s\n' "$findings" | prc_super -i json -J -c 'values this' -)" "$SCHEMA" "$cfg") \
     || die "the $h step failed or returned no usable result (session $sid)"
-  git config "branch.$b.pr-session" "$sid"
-  git config "branch.$b.pr-harness" "$h"
+  git config "branch.$b.sd-session" "$sid"
+  git config "branch.$b.sd-harness" "$h"
 
   # pi has no schema enforcement, so check the shape here too.
   outcome=$(prc_val "$result" 'coalesce(outcome, "")')
@@ -421,23 +421,23 @@ address() {
 
   push_branch "$b" "$remote" || die "not pushed, so nothing posted"
   local prefix id action at reply line failed=0 pr_id body=""
-  prefix=$(prc_get settings.replyPrefix "$b" false) || die "pr-config failed"
+  prefix=$(prc_get settings.replyPrefix "$b" false) || die "sd config failed"
   while IFS= read -r id && IFS= read -r action && IFS= read -r at; do
     reply=""
     while IFS= read -r line && [[ $line != $'\x1e' ]]; do reply+=$line$'\n'; done
     gql -f query='mutation($thread: ID!, $body: String!) {
           addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $thread, body: $body}) { comment { id } } }' \
         -f thread="$id" -f body="$prefix${reply%$'\n'}" >/dev/null \
-      || { echo "pr-act: replying to $at failed" >&2; failed=1; continue; }
+      || { echo "sd act: replying to $at failed" >&2; failed=1; continue; }
     if [[ $action != pushback ]]; then
       gql -f query='mutation($thread: ID!) { resolveReviewThread(input: {threadId: $thread}) { thread { id } } }' \
           -f thread="$id" >/dev/null \
-        || { echo "pr-act: resolving $at failed" >&2; failed=1; }
+        || { echo "sd act: resolving $at failed" >&2; failed=1; }
     fi
   done < <(prc_line "$REPLIES" "$plan")
 
   # Review bodies and PR comments can't be replied to or resolved: answer them
-  # in one PR comment and remember them in branch.<b>.pr-handled. Link, don't
+  # in one PR comment and remember them in branch.<b>.sd-handled. Link, don't
   # quote: quoted text can carry what other bots act on (/commands, @mentions).
   local pj
   pj=$(prc_json_string "$prefix") || die "settings.replyPrefix isn't usable"
@@ -453,10 +453,10 @@ address() {
                | prc_line 'values data.resource.id') \
        && gql -f query='mutation($subject: ID!, $body: String!) { addComment(input: {subjectId: $subject, body: $body}) { clientMutationId } }' \
               -f subject="$pr_id" -f body="$body" >/dev/null; then
-      while IFS= read -r id; do git config --add "branch.$b.pr-handled" "$id"; done \
+      while IFS= read -r id; do git config --add "branch.$b.sd-handled" "$id"; done \
         < <(prc_line 'unnest this | where this.type != "thread" and action != "ask" | values id' "$plan")
     else
-      echo "pr-act: posting the PR comment failed" >&2; failed=1
+      echo "sd act: posting the PR comment failed" >&2; failed=1
     fi
   fi
   return "$failed"
@@ -474,10 +474,10 @@ VERIFY_CMD=""
 # follows. A command that exits 0 but changes the tree (a formatter) fails too.
 verify_run() {
   local wt=$1 b=$2 timeout out rc=0 n before
-  VERIFY_CMD=$(cd "$wt" && prc_get settings.verify "$b" false) || die "pr-config failed"
+  VERIFY_CMD=$(cd "$wt" && prc_get settings.verify "$b" false) || die "sd config failed"
   [[ $VERIFY_CMD != *$'\n'* ]] || die "verify must be a single command, not a list"
   [[ -n $VERIFY_CMD ]] || return 0
-  timeout=$(prc_get settings.stepTimeout "$b" false) || die "pr-config failed"
+  timeout=$(prc_get settings.stepTimeout "$b" false) || die "sd config failed"
   [[ $timeout =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $timeout"
   out=$(mktemp)
   before=$(git -C "$wt" status --porcelain)
@@ -512,17 +512,17 @@ review() {
   wt=$(worktree_for "$b")
   [[ -n $wt ]] || die "$b isn't checked out in any worktree"
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
-  state=$(cd "$wt" && pr-state --json "$b") || die "pr-state failed"
+  state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
   base=$(prc_val "$state" 'coalesce(sync.old_base, "")')
   [[ -n $base ]] || die "can't find $b's base: $(prc_val "$state" 'sj(coalesce(errors, []), "; ")')"
   head=$(git rev-parse "refs/heads/$b")
   verify_run "$wt" "$b" || die "verify failed ($VERIFY_CMD); not reviewing"
-  reviewer=$(prc_get settings.localReview "$b" false) || die "pr-config failed"
-  [[ -n $reviewer ]] || reviewer="$(dirname "$(realpath "$0")")/pr-review-local"
-  timeout=$(prc_get settings.stepTimeout "$b" false) || die "pr-config failed"
+  reviewer=$(prc_get settings.localReview "$b" false) || die "sd config failed"
+  [[ -n $reviewer ]] || reviewer="$(dirname "$(realpath "$0")")/sd-review-local"
+  timeout=$(prc_get settings.stepTimeout "$b" false) || die "sd config failed"
   [[ $timeout =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $timeout"
-  task=$(git config --get "branch.$b.pr-task" || true)
-  findings=$(cd "$wt" && PR_TEND_BASE=$base PR_TEND_HEAD=$head PR_TEND_TASK=$task \
+  task=$(git config --get "branch.$b.sd-task" || true)
+  findings=$(cd "$wt" && SHEEPDOG_BASE=$base SHEEPDOG_HEAD=$head SHEEPDOG_TASK=$task \
                with_timeout "$timeout" sh -c "$reviewer" </dev/null) \
     || die "the reviewer failed ($reviewer); nothing pinned"
   n=$(prc_line 'where kind(this) == "array" | values len(this)' "$findings" 2>/dev/null) && [[ -n $n ]] \
@@ -531,7 +531,7 @@ review() {
     pin_write "$b" local "$head" "$base"
     echo "clean: $b at ${head:0:7} reviewed against ${base:0:7}; pinned local"
   else
-    echo "pr-act: $(plural "$n" finding) on $b; nothing pinned" >&2
+    echo "sd act: $(plural "$n" finding) on $b; nothing pinned" >&2
     printf '%s\n' "$findings"
   fi
 }
@@ -539,29 +539,29 @@ review() {
 # ── agent sessions ───────────────────────────────────────────────────────────
 
 # step_session <branch> <step>: the harness and session a step runs in: the
-# branch's session (branch.<b>.pr-session) resumed, else a new one. Sets
+# branch's session (branch.<b>.sd-session) resumed, else a new one. Sets
 # STEP_CFG, STEP_H, STEP_SID, STEP_MODE, STEP_TIMEOUT.
 step_session() {
   local b=$1 step=$2 stored_h
-  stored_h=$(git config --get "branch.$b.pr-harness" || true)
-  STEP_CFG=$(prc_step "$step" "$b" "${harness_opt:-$stored_h}") || die "pr-config failed"
+  stored_h=$(git config --get "branch.$b.sd-harness" || true)
+  STEP_CFG=$(prc_step "$step" "$b" "${harness_opt:-$stored_h}") || die "sd config failed"
   STEP_H=$(prc_val "$STEP_CFG" harness)
-  STEP_SID=$(git config --get "branch.$b.pr-session" || true)
+  STEP_SID=$(git config --get "branch.$b.sd-session" || true)
   if [[ -n $STEP_SID ]]; then
     [[ $STEP_H == "${stored_h:-claude}" ]] \
-      || die "branch.$b.pr-session belongs to ${stored_h:-claude}; unset it to start a $STEP_H session"
+      || die "branch.$b.sd-session belongs to ${stored_h:-claude}; unset it to start a $STEP_H session"
     STEP_MODE=resume
   else
     STEP_SID=$(uuidgen | tr 'A-F' 'a-f') STEP_MODE=new
   fi
-  STEP_TIMEOUT=$(prc_get settings.stepTimeout "$b" false) || die "pr-config failed"
+  STEP_TIMEOUT=$(prc_get settings.stepTimeout "$b" false) || die "sd config failed"
   [[ $STEP_TIMEOUT =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $STEP_TIMEOUT"
 }
 
 # step_store <branch>: after a step ran, remember its session and harness.
 step_store() {
-  git config "branch.$1.pr-session" "$STEP_SID"
-  git config "branch.$1.pr-harness" "$STEP_H"
+  git config "branch.$1.sd-session" "$STEP_SID"
+  git config "branch.$1.sd-harness" "$STEP_H"
 }
 
 # ── start: A0 ───────────────────────────────────────────────────────────────
@@ -594,32 +594,32 @@ start_hook() {
   local src=$1 dst=$2 b=$3 script cmd rc=0
   script="$(cd "$(git rev-parse --git-common-dir)" && pwd)/worktree-setup"
   if [[ -x $script ]]; then
-    echo "pr-act: running $script" >&2
+    echo "sd act: running $script" >&2
     (cd "$dst" && WT_SRC=$src WT_DST=$dst WT_BRANCH=$b "$script") >&2 || rc=$?
   else
     cmd=$(git config --get wt.setup || true)
     [[ -n $cmd ]] || return 0
-    echo "pr-act: running wt.setup: $cmd" >&2
+    echo "sd act: running wt.setup: $cmd" >&2
     (cd "$dst" && WT_SRC=$src WT_DST=$dst WT_BRANCH=$b sh -c "$cmd") >&2 || rc=$?
   fi
-  (( rc == 0 )) || echo "pr-act: the setup hook failed (exit $rc); the worktree is kept at $dst" >&2
+  (( rc == 0 )) || echo "sd act: the setup hook failed (exit $rc); the worktree is kept at $dst" >&2
   return $rc
 }
 
 start() {
   local b=$branch remote src dst from="" base="" default rc=0
   git check-ref-format --branch "$b" >/dev/null 2>&1 || die "not a valid branch name: $b"
-  $no_implement || [[ -n $task_arg ]] || die "no task: pr-act start $b \"<task>\" (or --no-implement)"
+  $no_implement || [[ -n $task_arg ]] || die "no task: sd act start $b \"<task>\" (or --no-implement)"
   src=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a worktree"
   dst="$(dirname "$src")/$b"
   [[ ! -e $dst ]] || die "$dst already exists"
-  remote=$(prc_get settings.remote "$b" false) || die "pr-config failed"
+  remote=$(prc_get settings.remote "$b" false) || die "sd config failed"
   git fetch --quiet --prune "$remote" || die "fetch from $remote failed"
 
   if git show-ref -q --verify "refs/heads/$b"; then
     git worktree add "$dst" "$b" >&2 || die "git worktree add failed"
   elif git show-ref -q --verify "refs/remotes/$remote/$b"; then
-    echo "pr-act: tracking $remote/$b" >&2
+    echo "sd act: tracking $remote/$b" >&2
     git worktree add --track -b "$b" "$dst" "$remote/$b" >&2 || die "git worktree add failed"
   else
     if [[ -n $parent_opt ]]; then
@@ -631,19 +631,19 @@ start() {
       from=$(start_point "$remote" "$default") || die "no $remote/$default or $default to start from"
     fi
     base=$(git rev-parse "$from^{commit}")
-    echo "pr-act: branching $b off ${from#refs/*/} (${base:0:7})" >&2
+    echo "sd act: branching $b off ${from#refs/*/} (${base:0:7})" >&2
     # From the SHA, not the ref: a remote-tracking start point would become the upstream.
     git worktree add -b "$b" "$dst" "$base" >&2 || die "git worktree add failed"
   fi
 
-  if [[ -n $task_arg ]]; then git config "branch.$b.pr-task" "$task_arg"; fi
-  if [[ -n $parent_opt ]]; then git config "branch.$b.pr-parent" "$parent_opt"; fi
-  if [[ -n $base ]]; then git update-ref -m "pr-act start" "refs/pr-tend/$b/base" "$base"; fi
+  if [[ -n $task_arg ]]; then git config "branch.$b.sd-task" "$task_arg"; fi
+  if [[ -n $parent_opt ]]; then git config "branch.$b.sd-parent" "$parent_opt"; fi
+  if [[ -n $base ]]; then git update-ref -m "sd act start" "refs/sheepdog/$b/base" "$base"; fi
   enroll_mark "$b" >&2
 
   if ! start_hook "$src" "$dst" "$b"; then
     rc=1
-    $no_implement || echo "pr-act: fix it, then: pr-act implement $b" >&2
+    $no_implement || echo "sd act: fix it, then: sd act implement $b" >&2
   elif ! $no_implement; then
     (implement_run "$b" "$dst") >&2 || rc=$?
   fi
@@ -678,15 +678,15 @@ implement_run() {
   local b=$1 wt=$2 task verify before prompt result outcome summary msg extra rule allow=$HARNESS_CLAUDE_ALLOW
   local -a rules=()
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
-  task=$(git config --get "branch.$b.pr-task" || true)
-  [[ -n $task ]] || die "no task recorded for $b: git config branch.$b.pr-task \"<task>\""
-  verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "pr-config failed"
-  extra=$(cd "$wt" && prc_get settings.implementAllow "$b" false) || die "pr-config failed"
+  task=$(git config --get "branch.$b.sd-task" || true)
+  [[ -n $task ]] || die "no task recorded for $b: git config branch.$b.sd-task \"<task>\""
+  verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "sd config failed"
+  extra=$(cd "$wt" && prc_get settings.implementAllow "$b" false) || die "sd config failed"
   # A rule's * is a wildcard, so only plain words become an exact rule.
   if [[ $verify =~ ^[A-Za-z0-9_./:=@+-]+( [A-Za-z0-9_./:=@+-]+)*$ ]]; then
     rules+=("Bash($verify)")
   elif [[ -n $verify && -z $extra ]]; then
-    echo "pr-act: warning: verify ($verify) isn't plain words, so the agent may not run it; allow what it may run in settings.implementAllow" >&2
+    echo "sd act: warning: verify ($verify) isn't plain words, so the agent may not run it; allow what it may run in settings.implementAllow" >&2
   fi
   while IFS= read -r rule; do [[ -z $rule ]] || rules+=("$rule"); done <<<"$extra"
   step_session "$b" implement
@@ -699,7 +699,7 @@ implement_run() {
   else
     prompt+=$'\n\nYou can\'t run commands here beyond read-only git.'
   fi
-  echo "pr-act: $STEP_H ($STEP_MODE session $STEP_SID) is implementing $b…" >&2
+  echo "sd act: $STEP_H ($STEP_MODE session $STEP_SID) is implementing $b…" >&2
   result=$(cd "$wt" && HARNESS_CLAUDE_ALLOW=$allow \
              && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" "$prompt" "$IMPLEMENT_SCHEMA" "$STEP_CFG") \
     || die "the $STEP_H implement step failed or returned no usable result (session $STEP_SID)"
@@ -709,7 +709,7 @@ implement_run() {
   summary=$(prc_val "$result" 'coalesce(summary, "")')
   case $outcome in
     done) ;;
-    needs-input) die "the agent needs input on $b: $summary"$'\n'"Edits (if any) are left uncommitted in $wt; answer in session $STEP_SID, then pr-act implement" ;;
+    needs-input) die "the agent needs input on $b: $summary"$'\n'"Edits (if any) are left uncommitted in $wt; answer in session $STEP_SID, then sd act implement" ;;
     gave-up) die "the agent gave up on $b: $summary. Edits (if any) are left uncommitted in $wt" ;;
     *) die "the agent returned outcome \"$outcome\"; edits (if any) are left uncommitted in $wt" ;;
   esac
@@ -724,7 +724,7 @@ implement_run() {
   echo "$b: $summary"
   git -C "$wt" log --format='  %h %s' "$before..refs/heads/$b"
   verify_run "$wt" "$b" || die "verify failed ($VERIFY_CMD); the commit is kept in $wt"
-  echo "next: pr-act review"
+  echo "next: sd act review"
 }
 
 implement() {
@@ -754,7 +754,7 @@ read -r -d '' DESCRIBE_SCHEMA <<'EOF' || true
  "properties": {"title": {"type": "string", "minLength": 1}, "body": {"type": "string"}}}
 EOF
 
-describe_file() { echo "$(cd "$(git rev-parse --git-common-dir)" && pwd)/pr-tend/${1//\//__}.describe.json"; }
+describe_file() { echo "$(cd "$(git rev-parse --git-common-dir)" && pwd)/sheepdog/${1//\//__}.describe.json"; }
 
 # describe_run <branch> <worktree> <state>: the describe step in the branch's
 # session (minted if none), read-only. Stores {head, title, body} where ship
@@ -765,10 +765,10 @@ describe_run() {
   [[ -n $base ]] || die "can't find $b's base: $(prc_val "$state" 'sj(coalesce(errors, []), "; ")')"
   head=$(git rev-parse "refs/heads/$b")
   step_session "$b" describe
-  task=$(git config --get "branch.$b.pr-task" || true)
+  task=$(git config --get "branch.$b.sd-task" || true)
   commits=$(git log --format='- %s' "$base..$head")
   diff=$(git diff "$base" "$head")
-  echo "pr-act: $STEP_H ($STEP_MODE session $STEP_SID) is describing $b…" >&2
+  echo "sd act: $STEP_H ($STEP_MODE session $STEP_SID) is describing $b…" >&2
   result=$(cd "$wt" && HARNESS_CLAUDE_ALLOW=$HARNESS_READONLY_ALLOW && HARNESS_PI_TOOLS=read \
              && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" \
                   "$DESCRIBE_PROMPT"$'\n\nTask: '"${task:-(none recorded)}"$'\n\nCommits ('"${base:0:7}..${head:0:7}"$'):\n'"$commits"$'\n\nDiff:\n'"$diff" \
@@ -788,7 +788,7 @@ describe() {
   wt=$(worktree_for "$b")
   [[ -n $wt ]] || die "$b isn't checked out in any worktree"
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
-  state=$(cd "$wt" && pr-state --json "$b") || die "pr-state failed"
+  state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
   describe_run "$b" "$wt" "$state"
 }
 
@@ -800,19 +800,19 @@ ship() {
   wt=$(worktree_for "$b")
   [[ -n $wt ]] || die "$b isn't checked out in any worktree"
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
-  if ! $force && [[ -n $(git config --get "branch.$b.pr-lock" || true) ]]; then
-    die "not shipping $b: taken over (branch.$b.pr-lock is set; --force to ship anyway)"
+  if ! $force && [[ -n $(git config --get "branch.$b.sd-lock" || true) ]]; then
+    die "not shipping $b: taken over (branch.$b.sd-lock is set; --force to ship anyway)"
   fi
-  remote=$(prc_get settings.remote "$b" false) || die "pr-config failed"
+  remote=$(prc_get settings.remote "$b" false) || die "sd config failed"
   git -C "$wt" fetch --quiet --prune "$remote" || die "fetch from $remote failed"
-  state=$(cd "$wt" && pr-state --json "$b") || die "pr-state failed"
+  state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
   pr_state=$(prc_val "$state" 'coalesce(pr.state, "none")')
   case $pr_state in
     none|OPEN) ;;
     *) die "PR #$(prc_val "$state" pr.number) is $(tr '[:upper:]' '[:lower:]' <<<"$pr_state"); nothing to ship" ;;
   esac
   prc_line 'where not (coalesce(review.local.status, "none") in ["covered", "rewritten-same"])
-    | values "pr-act: warning: the local review doesn'"'"'t cover HEAD (pr-act review); the PR stays a draft until it does"' "$state" >&2
+    | values "sd act: warning: the local review doesn'"'"'t cover HEAD (sd act review); the PR stays a draft until it does"' "$state" >&2
   head=$(git rev-parse "refs/heads/$b")
   f=$(describe_file "$b")
   if [[ ! -f $f || $(prc_line 'values head' "$(<"$f")" 2>/dev/null) != "$head" ]]; then
@@ -822,7 +822,7 @@ ship() {
   fi
   title=$(prc_line 'values title' "$(<"$f")") body=$(prc_line 'values body' "$(<"$f")")
   push_branch "$b" "$remote" || exit 1
-  parent=$(git config --get "branch.$b.pr-parent" || true)
+  parent=$(git config --get "branch.$b.sd-parent" || true)
   parent=${parent:-$(prc_val "$state" sync.default)}
   if [[ $pr_state == none ]]; then
     url=$(gh pr create --draft --base "$parent" --head "$b" --title "$title" --body "$body") \
@@ -847,18 +847,18 @@ values {s: this, why: sj(coalesce(errors, []), "; ")}
     when on(s.pr.state != "OPEN") then {hard: f"PR #{s.pr.number} is {lower(s.pr.state)}"}
     when on(s.review.bot.status == "covered") then {done: f"the bot was already triggered on {s.head[0:7]}"}
     when nul(s.push.remote_sha) or n(s.push.ahead) > 0 or on(s.push.diverged)
-      then {hard: f"{s.branch} isn't on the remote at HEAD; the bot reviews what GitHub has: pr-act push first"}
+      then {hard: f"{s.branch} isn't on the remote at HEAD; the bot reviews what GitHub has: sd act push first"}
     when not (coalesce(s.review.local.status, "") in ["covered", "rewritten-same"])
-      then {soft: "the local review doesn't cover HEAD (pr-act review)"}
+      then {soft: "the local review doesn't cover HEAD (sd act review)"}
     else {} end
 EOF
 
 trigger() {
   local b=$branch state command gate line head base pr_id
-  command=$(prc_get settings.botCommand "$b" false) || die "pr-config failed"
+  command=$(prc_get settings.botCommand "$b" false) || die "sd config failed"
   [[ -n $command ]] || die "no settings.botCommand configured: the comment that makes the review bot run"
-  state=$(pr-state --json "$b") || die "pr-state failed"
-  gate=$(prc_json "$TRIGGER_GATE" "$state") || die "can't parse pr-state's answer"
+  state=$(sd-state --json "$b") || die "sd state failed"
+  gate=$(prc_json "$TRIGGER_GATE" "$state") || die "can't parse sd state's answer"
   line=$(gate_get "$gate" hard); [[ -z $line ]] || die "$line"
   line=$(gate_get "$gate" done); if [[ -n $line ]]; then echo "$line"; return; fi
   line=$(gate_get "$gate" soft)
@@ -884,7 +884,7 @@ plural() { if (( $1 == 1 )); then echo "1 $2"; else echo "$1 $2s"; fi; }
 # head is in the branch's reflog (we put it there).
 push_branch() {
   local b=$1 remote=$2 rsha ahead behind reflog theirs
-  git fetch --quiet --prune "$remote" || { echo "pr-act: fetch from $remote failed" >&2; return 1; }
+  git fetch --quiet --prune "$remote" || { echo "sd act: fetch from $remote failed" >&2; return 1; }
   rsha=$(git rev-parse -q --verify "refs/remotes/$remote/$b^{commit}" || true)
   if [[ -z $rsha ]]; then
     push_ref "$b" "$remote" "" -u || return
@@ -896,7 +896,7 @@ push_branch() {
   if (( ahead == 0 && behind == 0 )); then
     echo "nothing to push on $b"
   elif (( ahead == 0 )); then
-    echo "pr-act: $remote/$b has $(plural "$behind" commit) you don't; take them with: git merge --ff-only $remote/$b" >&2
+    echo "sd act: $remote/$b has $(plural "$behind" commit) you don't; take them with: git merge --ff-only $remote/$b" >&2
     return 1
   elif (( behind == 0 )); then
     push_ref "$b" "$remote" "$rsha" || return
@@ -906,7 +906,7 @@ push_branch() {
     reflog=$(git reflog show --format=%H "refs/heads/$b")
     if ! grep -qx "$rsha" <<<"$reflog"; then
       theirs=$(commits_not_ours "$reflog" "$rsha")
-      echo "pr-act: $remote/$b has $(plural "$theirs" commit) this copy has never had; not pushing over it." \
+      echo "sd act: $remote/$b has $(plural "$theirs" commit) this copy has never had; not pushing over it." \
            "Look: git log $b..$remote/$b, then rebase onto or merge $remote/$b and push again" >&2
       return 1
     fi
@@ -922,9 +922,9 @@ push_ref() {
   if ! err=$(git push --quiet "$@" "$remote" "refs/heads/$b:refs/heads/$b" 2>&1); then
     now=$(git ls-remote "$remote" "refs/heads/$b" 2>/dev/null | cut -f1)
     if [[ $now != "$expected" ]]; then
-      echo "pr-act: $remote/$b moved while pushing; nothing pushed. Run it again to see what changed" >&2
+      echo "sd act: $remote/$b moved while pushing; nothing pushed. Run it again to see what changed" >&2
     else
-      echo "pr-act: push to $remote failed: ${err//$'\n'/ }" >&2
+      echo "sd act: push to $remote failed: ${err//$'\n'/ }" >&2
     fi
     return 1
   fi
@@ -933,10 +933,10 @@ push_ref() {
 push() {
   local remote
   git rev-parse -q --verify "refs/heads/$branch" >/dev/null || die "no such branch: $branch"
-  if ! $force && [[ -n $(git config --get "branch.$branch.pr-lock" || true) ]]; then
-    die "not pushing $branch: taken over (branch.$branch.pr-lock is set; --force to push anyway)"
+  if ! $force && [[ -n $(git config --get "branch.$branch.sd-lock" || true) ]]; then
+    die "not pushing $branch: taken over (branch.$branch.sd-lock is set; --force to push anyway)"
   fi
-  remote=$(prc_get settings.remote "$branch" false) || die "pr-config failed"
+  remote=$(prc_get settings.remote "$branch" false) || die "sd config failed"
   push_branch "$branch" "$remote" || exit 1
 }
 
@@ -945,7 +945,7 @@ push() {
 # -U0: an upstream edit next to the branch's lines must not read as a change.
 patch_id() { git diff -U0 "$1" "$2" | git patch-id --stable | cut -d' ' -f1; }
 
-# Over {remote, resolve, s: the pr-state JSON}.
+# Over {remote, resolve, s: the sd state JSON}.
 read -r -d '' RESTACK_GATE <<'EOF' || true
 values {remote, resolve, s, why: sj(coalesce(s.errors, []), "; "), onto: f"{remote}/{s.sync.target}"}
 | values [
@@ -959,9 +959,9 @@ values {remote, resolve, s, why: sj(coalesce(s.errors, []), "; "), onto: f"{remo
     : on(s.sync.up_to_date) ? {done: f"{s.branch} is already on {onto}"}
     : nul(s.sync.conflict) ? {hard: f"can't tell whether restacking {s.branch} would conflict: {why}"}
     : on(s.sync.conflict) and not resolve
-      ? {hard: f"restacking {s.branch} onto {onto} would conflict; resolve it by hand: git rebase --onto {onto} {s.sync.old_base[0:12]}, or let the agent: pr-act restack --resolve"}
+      ? {hard: f"restacking {s.branch} onto {onto} would conflict; resolve it by hand: git rebase --onto {onto} {s.sync.old_base[0:12]}, or let the agent: sd act restack --resolve"}
     : null,
-    on(s.session.locked) ? {soft: f"taken over (branch.{s.branch}.pr-lock is set)"} : null
+    on(s.session.locked) ? {soft: f"taken over (branch.{s.branch}.sd-lock is set)"} : null
   ]
 | values coalesce([unnest this | where this is not null], [])
 EOF
@@ -971,12 +971,12 @@ restack() {
   wt=$(worktree_for "$b")
   [[ -n $wt ]] || die "$b isn't checked out in any worktree"
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
-  remote=$(prc_get settings.remote "$b" false) || die "pr-config failed"
+  remote=$(prc_get settings.remote "$b" false) || die "sd config failed"
   git -C "$wt" fetch --quiet --prune "$remote" || die "fetch from $remote failed"
-  state=$(cd "$wt" && pr-state --json "$b") || die "pr-state failed"
+  state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
 
   gate=$(prc_json "$RESTACK_GATE" "{\"remote\": $(prc_json_string "$remote"), \"resolve\": $resolve, \"s\": $state}") \
-    || die "can't parse pr-state's answer"
+    || die "can't parse sd state's answer"
   line=$(gate_get "$gate" hard | head -1)
   [[ -z $line ]] || die "$line"
   line=$(gate_get "$gate" done)
@@ -993,7 +993,7 @@ restack() {
     if ! $resolve; then
       restack_rollback "$wt" "$b" "$old_head"
       die "the rebase onto $remote/$target stopped on a conflict partway through; rolled back to ${old_head:0:7}." \
-          "Resolve it by hand: git rebase --onto $remote/$target ${old_base:0:12}, or let the agent: pr-act restack --resolve"
+          "Resolve it by hand: git rebase --onto $remote/$target ${old_base:0:12}, or let the agent: sd act restack --resolve"
     fi
     resolve_conflicts "$b" "$wt" "$old_head" "$remote/$target" || exit 1
     resolved=true
@@ -1006,12 +1006,12 @@ restack() {
     die "$b's change came out different on $remote/$target (part of it may be there already); rolled back to ${old_head:0:7}." \
         "Compare: git range-diff ${old_base:0:12}..${old_head:0:12} ${new_base:0:12}..${new_head:0:12}"
   fi
-  git update-ref -m "pr-act restack" "refs/pr-tend/$b/base" "$new_base"
-  echo "restacked $b onto $remote/$target ($(plural "$(git rev-list --count "$new_base..$new_head")" commit)); not pushed: pr-act push"
+  git update-ref -m "sd act restack" "refs/sheepdog/$b/base" "$new_base"
+  echo "restacked $b onto $remote/$target ($(plural "$(git rev-list --count "$new_base..$new_head")" commit)); not pushed: sd act push"
   parent_to_default "$b" "$state"
   if $resolved; then
-    echo "conflicts resolved by the agent, so $b's change is unreviewed: pr-act review next"
-    verify_run "$wt" "$b" || die "verify failed ($VERIFY_CMD) on the resolved branch; it is kept at ${new_head:0:7}, unpushed. Fix, then pr-act verify"
+    echo "conflicts resolved by the agent, so $b's change is unreviewed: sd act review next"
+    verify_run "$wt" "$b" || die "verify failed ($VERIFY_CMD) on the resolved branch; it is kept at ${new_head:0:7}, unpushed. Fix, then sd act verify"
   fi
 }
 
@@ -1025,7 +1025,7 @@ restack_rollback() { # <worktree> <branch> <old-head>
 RESOLVE_CAP=3
 
 read -r -d '' RESOLVE_PROMPT <<'EOF' || true
-pr-act restack is rebasing this branch and the rebase stopped on conflicts.
+sd act restack is rebasing this branch and the rebase stopped on conflicts.
 Resolve them in the worktree: edit each conflicting file so it keeps this
 branch's intent on top of what came in from the target, remove every conflict
 marker, and save. Do not run git add, git rebase --continue, or commit: the
@@ -1044,27 +1044,27 @@ EOF
 # adds and continues. Any failure rolls the branch back and returns 1.
 resolve_conflicts() {
   local b=$1 wt=$2 old_head=$3 onto=$4 stops=0 files hunks task result outcome
-  task=$(git config --get "branch.$b.pr-task" || true)
+  task=$(git config --get "branch.$b.sd-task" || true)
   step_session "$b" implement
   while :; do
     if (( ++stops > RESOLVE_CAP )); then
       restack_rollback "$wt" "$b" "$old_head"
-      echo "pr-act: the rebase onto $onto stopped $stops times (cap $RESOLVE_CAP); rolled back to ${old_head:0:7}" >&2
+      echo "sd act: the rebase onto $onto stopped $stops times (cap $RESOLVE_CAP); rolled back to ${old_head:0:7}" >&2
       return 1
     fi
     files=$(git -C "$wt" diff --name-only --diff-filter=U)
     if [[ -z $files ]]; then
       restack_rollback "$wt" "$b" "$old_head"
-      echo "pr-act: the rebase stopped without conflicting files; rolled back to ${old_head:0:7}" >&2
+      echo "sd act: the rebase stopped without conflicting files; rolled back to ${old_head:0:7}" >&2
       return 1
     fi
     hunks=$(git -C "$wt" diff)
-    echo "pr-act: $STEP_H ($STEP_MODE session $STEP_SID) is resolving conflicts in: ${files//$'\n'/, } (stop $stops)…" >&2
+    echo "sd act: $STEP_H ($STEP_MODE session $STEP_SID) is resolving conflicts in: ${files//$'\n'/, } (stop $stops)…" >&2
     if ! result=$(cd "$wt" && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" \
                     "$RESOLVE_PROMPT"$'\n\nBranch: '"$b"$', rebasing onto '"$onto"$'\nTask: '"${task:-(none recorded)}"$'\nConflicting files:\n'"$files"$'\n\nConflict hunks:\n'"$hunks" \
                     "$RESOLVE_SCHEMA" "$STEP_CFG"); then
       restack_rollback "$wt" "$b" "$old_head"
-      echo "pr-act: the $STEP_H step failed or returned no usable result (session $STEP_SID); rolled back to ${old_head:0:7}" >&2
+      echo "sd act: the $STEP_H step failed or returned no usable result (session $STEP_SID); rolled back to ${old_head:0:7}" >&2
       return 1
     fi
     step_store "$b"
@@ -1072,34 +1072,34 @@ resolve_conflicts() {
     outcome=$(prc_val "$result" 'coalesce(outcome, "")')
     if [[ $outcome != done ]]; then
       restack_rollback "$wt" "$b" "$old_head"
-      echo "pr-act: the agent gave up: $(prc_val "$result" 'coalesce(summary, "")'); rolled back to ${old_head:0:7}" >&2
+      echo "sd act: the agent gave up: $(prc_val "$result" 'coalesce(summary, "")'); rolled back to ${old_head:0:7}" >&2
       return 1
     fi
     if (cd "$wt" && grep -lE '^(<<<<<<< |>>>>>>> )' $files 2>/dev/null | grep -q .); then
       restack_rollback "$wt" "$b" "$old_head"
-      echo "pr-act: conflict markers left in: $(cd "$wt" && grep -lE '^(<<<<<<< |>>>>>>> )' $files | tr '\n' ' '); rolled back to ${old_head:0:7}" >&2
+      echo "sd act: conflict markers left in: $(cd "$wt" && grep -lE '^(<<<<<<< |>>>>>>> )' $files | tr '\n' ' '); rolled back to ${old_head:0:7}" >&2
       return 1
     fi
     git -C "$wt" add -A
     if GIT_EDITOR=true git -C "$wt" rebase --continue >/dev/null 2>&1; then return 0; fi
     if [[ ! -e $(git -C "$wt" rev-parse --git-path rebase-merge) && ! -e $(git -C "$wt" rev-parse --git-path rebase-apply) ]]; then
       restack_rollback "$wt" "$b" "$old_head"
-      echo "pr-act: git rebase --continue failed; rolled back to ${old_head:0:7}" >&2
+      echo "sd act: git rebase --continue failed; rolled back to ${old_head:0:7}" >&2
       return 1
     fi
   done
 }
 
 # parent_to_default <branch> <state>: once the branch is on the default branch,
-# a pr-parent naming the merged parent only makes every later pass look up a
+# a sd-parent naming the merged parent only makes every later pass look up a
 # dead PR. Rewrite it when the target is the default branch.
 parent_to_default() {
   local b=$1 default target
   { read -r default; read -r target; } < <(prc_line 'values sync.default, sync.target' "$2")
   [[ $target == "$default" ]] || return 0
-  [[ -n $(git config --get "branch.$b.pr-parent" || true) ]] || return 0
-  git config "branch.$b.pr-parent" "$default"
-  echo "pr-parent of $b is now $default"
+  [[ -n $(git config --get "branch.$b.sd-parent" || true) ]] || return 0
+  git config "branch.$b.sd-parent" "$default"
+  echo "sd-parent of $b is now $default"
 }
 
 # ── retarget ─────────────────────────────────────────────────────────────────
@@ -1121,8 +1121,8 @@ EOF
 
 retarget() {
   local b=$branch state gate line default number
-  state=$(pr-state --json "$b") || die "pr-state failed"
-  gate=$(prc_json "$RETARGET_GATE" "$state") || die "can't parse pr-state's answer"
+  state=$(sd-state --json "$b") || die "sd state failed"
+  gate=$(prc_json "$RETARGET_GATE" "$state") || die "can't parse sd state's answer"
   line=$(gate_get "$gate" hard)
   [[ -z $line ]] || die "$line"
   default=$(prc_val "$state" sync.default)
@@ -1151,22 +1151,22 @@ ack() {
   local b=$branch state check out id why what ids_json="" sep=""
   local -a picked=() shown=() bad=()
   local -A found=()
-  state=$(pr-state --json "$b") || die "pr-state failed"
+  state=$(sd-state --json "$b") || die "sd state failed"
   check=$(prc_line 'values nul(threads.owed_bot) ? f"can'"'"'t read the PR from GitHub: {sj(coalesce(errors, []), "; ")}" : "ok"' "$state") \
-    || die "can't parse pr-state's answer"
+    || die "can't parse sd state's answer"
   [[ $check == ok ]] || die "$check"
   for id in "${ids[@]}"; do ids_json+=$sep$(prc_json_string "$id") || exit 1; sep=,; done
   out=$(prc_line "$ACK_Q" "{\"ids\": [$ids_json], \"s\": $state}") \
-    || die "can't parse pr-state's answer"
+    || die "can't parse sd state's answer"
   while IFS='|' read -r id why what; do
     [[ -n $id ]] || continue
     found[$id]=1
     if [[ -n $why ]]; then bad+=("$id $why"); else picked+=("$id"); shown+=("$what"); fi
   done <<<"$out"
   for id in "${ids[@]}"; do [[ -n ${found[$id]:-} ]] || bad+=("$id isn't owed on $b"); done
-  if (( ${#bad[@]} )); then printf 'pr-act: %s\n' "${bad[@]}" >&2; exit 1; fi
+  if (( ${#bad[@]} )); then printf 'sd act: %s\n' "${bad[@]}" >&2; exit 1; fi
   if (( ! ${#picked[@]} )); then echo "nothing to ack on $b"; return; fi
-  for id in "${picked[@]}"; do git config --add "branch.$b.pr-handled" "$id"; done
+  for id in "${picked[@]}"; do git config --add "branch.$b.sd-handled" "$id"; done
   echo "acked ${#picked[@]} on $b:"
   printf '  %s\n' "${shown[@]}"
 }
@@ -1175,27 +1175,27 @@ ack() {
 # it and the base pin; GitHub retargets the PR to the default branch on merge.
 record_lineage() {
   local b=$1 state parent old_base
-  state=$(pr-state --json "$b" 2>/dev/null) || return 0
+  state=$(sd-state --json "$b" 2>/dev/null) || return 0
   read -r parent old_base < <(prc_line '
     where coalesce(parent.source == "pr" and parent.name != sync.default, false)
     | values f"{parent.name} {coalesce(sync.old_base, "")}"' "$state") || true
   [[ -n ${parent:-} ]] || return 0
-  git config "branch.$b.pr-parent" "$parent"
+  git config "branch.$b.sd-parent" "$parent"
   echo "parent: $parent"
   if [[ -n $old_base ]]; then
-    git update-ref "refs/pr-tend/$b/base" "$old_base"
+    git update-ref "refs/sheepdog/$b/base" "$old_base"
     echo "base pinned at ${old_base:0:7}"
   fi
 }
 
-# enroll_mark <branch>: mark it for pr-watch and register this repo.
+# enroll_mark <branch>: mark it for sd watch and register this repo.
 enroll_mark() {
   local b=$1 main_worktree
   git rev-parse -q --verify "refs/heads/$b" >/dev/null || die "no such branch: $b"
-  git config "branch.$b.pr-tend" true
+  git config "branch.$b.sheepdog" true
   main_worktree=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-  if ! grep -qxF "$main_worktree" <<<"$(git config --global --get-all pr-tend.repo || true)"; then
-    git config --global --add pr-tend.repo "$main_worktree"
+  if ! grep -qxF "$main_worktree" <<<"$(git config --global --get-all sheepdog.repo || true)"; then
+    git config --global --add sheepdog.repo "$main_worktree"
   fi
   echo "enrolled $b"
 }
@@ -1208,22 +1208,22 @@ enroll_branch() {
 case $verb in
   enroll) enroll_branch "$branch" ;;
   unenroll)
-    git config --unset "branch.$branch.pr-tend" || (( $? == 5 ))  # 5: wasn't set
+    git config --unset "branch.$branch.sheepdog" || (( $? == 5 ))  # 5: wasn't set
     ;;
   forget)
-    git config --unset "branch.$branch.pr-tend" || (( $? == 5 ))
-    git for-each-ref --format='delete %(refname)' "refs/pr-tend/$branch/" | git update-ref --stdin
+    git config --unset "branch.$branch.sheepdog" || (( $? == 5 ))
+    git for-each-ref --format='delete %(refname)' "refs/sheepdog/$branch/" | git update-ref --stdin
     echo "forgot $branch"
     ;;
   unregister)
     path=${positional:-$(git worktree list --porcelain | sed -n '1s/^worktree //p')}
     if ! $force && [[ -d $path ]]; then
-      mapfile -t enrolled < <(git -C "$path" config --get-regexp '^branch\..*\.pr-tend$' 2>/dev/null \
-        | awk '$2 == "true" { sub(/^branch\./, "", $1); sub(/\.pr-tend$/, "", $1); print $1 }')
+      mapfile -t enrolled < <(git -C "$path" config --get-regexp '^branch\..*\.sheepdog$' 2>/dev/null \
+        | awk '$2 == "true" { sub(/^branch\./, "", $1); sub(/\.sheepdog$/, "", $1); print $1 }')
       (( ${#enrolled[@]} == 0 )) \
-        || die "not unregistering $path: still enrolled: ${enrolled[*]} (pr-act unenroll them, or --force)"
+        || die "not unregistering $path: still enrolled: ${enrolled[*]} (sd act unenroll them, or --force)"
     fi
-    git config --global --unset-all pr-tend.repo "^$(sed 's/[][\\.*^$]/\\&/g' <<<"$path")\$" || (( $? == 5 ))
+    git config --global --unset-all sheepdog.repo "^$(sed 's/[][\\.*^$]/\\&/g' <<<"$path")\$" || (( $? == 5 ))
     echo "unregistered $path"
     ;;
   start) start ;;

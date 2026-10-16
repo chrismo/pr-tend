@@ -1,30 +1,30 @@
 #!/usr/bin/env bash5
 #
-# pr-config - harness and settings for the PR pipeline.
+# sd config - harness and settings for the PR pipeline.
 #
 # Usage:
-#   pr-config get   [--no-branch] [--json] <path> [<branch>]
-#   pr-config step  [--harness <h>] <step> [<branch>]
-#   pr-config set   [--global | --branch <b>] [--json] <path> <value>
-#   pr-config unset [--global | --branch <b>] <path>
-#   pr-config show  [--no-branch] [<branch>]
-#   pr-config files [--no-branch] [<branch>]
-#   pr-config init  --global [--force]
-#   pr-config init  [--force] [<branch>]
+#   sd config get   [--no-branch] [--json] <path> [<branch>]
+#   sd config step  [--harness <h>] <step> [<branch>]
+#   sd config set   [--global | --branch <b>] [--json] <path> <value>
+#   sd config unset [--global | --branch <b>] <path>
+#   sd config show  [--no-branch] [<branch>]
+#   sd config files [--no-branch] [<branch>]
+#   sd config init  --global [--force]
+#   sd config init  [--force] [<branch>]
 #
 # Examples:
-#   pr-config get settings.verify                    one value
-#   pr-config step address                           what a step runs with (JSON)
-#   pr-config set --global harnesses.claude.model opus
-#   pr-config set --json settings.botLogin '["marge"]'
-#   pr-config unset steps.address.harness            inherit it again
-#   pr-config show                                   everything, merged
-#   pr-config files                                  where the files are
+#   sd config get settings.verify                    one value
+#   sd config step address                           what a step runs with (JSON)
+#   sd config set --global harnesses.claude.model opus
+#   sd config set --json settings.botLogin '["marge"]'
+#   sd config unset steps.address.harness            inherit it again
+#   sd config show                                   everything, merged
+#   sd config files                                  where the files are
 #
 # Layers (top wins):
-#   branch    <main repo>/.git/pr-tend/<branch>.json, shared by all worktrees
-#             (pr-config files prints the paths)
-#   global    ~/.config/pr-tend/config.json ($PR_TEND_CONFIG, $XDG_CONFIG_HOME)
+#   branch    <main repo>/.git/sheepdog/<branch>.json, shared by all worktrees
+#             (sd config files prints the paths)
+#   global    ~/.config/sheepdog/config.json ($SHEEPDOG_CONFIG, $XDG_CONFIG_HOME)
 #   defaults  harness claude; settings.remote origin, stepTimeout 1800,
 #             interval 300, replyPrefix "🤖 "; the other settings empty
 #
@@ -45,14 +45,14 @@
 
 set -euo pipefail
 
-# shellcheck source=../lib/pr-config.sh
-source "$(dirname "$(realpath "$0")")/../lib/pr-config.sh"
+# shellcheck source=../lib/config.sh
+source "$(dirname "$(realpath "$0")")/../lib/config.sh"
 
-die() { echo "pr-config: $*" >&2; exit 1; }
+die() { echo "sd config: $*" >&2; exit 1; }
 help() { sed -n '3,/^$/s/^# \{0,1\}//p' "$0"; }
 usage() { help >&2; exit 1; }
 needs() { # needs <what>: say what's missing, then only this verb's usage lines
-  { echo "pr-config: $verb needs $*"; echo "Usage:"; help | grep "^  pr-config $verb "; } >&2
+  { echo "sd config: $verb needs $*"; echo "Usage:"; help | grep "^  sd config $verb "; } >&2
   exit 1
 }
 
@@ -93,7 +93,7 @@ set -- "${args[@]}"
 prc_super_init || exit 1
 nobranch=${opt[--no-branch]:-false}
 
-# `|| exit $?` turns errexit off inside each prc_ call, as in pr-act and pr-watch.
+# `|| exit $?` turns errexit off inside each prc_ call, as in sd act and sd watch.
 case $verb in
   get)
     (( $# == 1 || $# == 2 )) || needs "<path> [<branch>]"

@@ -1,6 +1,6 @@
 # pr-tend
 
-The PR pipeline: `pr-state`, `pr-act`, `pr-watch`, `pr-config`. Split out of
+The PR pipeline: `sd state`, `sd act`, `sd watch`, `sd config`. Split out of
 agent-rig on 2026-10-13 with its history; commits before that date are
 agent-rig commits filtered down to these paths.
 
@@ -10,12 +10,12 @@ Edit this repo, never `~/.local/bin/` — those are symlinks made by `./install.
 
 pr-tend tends its own PRs, so code changes go through them:
 
-- Branch, then `pr-act push`, `gh pr create`, `pr-act enroll`. Follow
-  `pr-state`'s NEXT from there.
+- Branch, then `sd act push`, `gh pr create`, `sd act enroll`. Follow
+  `sd state`'s NEXT from there.
 - Dependent work stacks on the parent's branch (`gh pr create --base
   <parent>`). Enroll while the PR still targets the parent: enroll records
   the lineage that GitHub's retarget on merge erases. Keep it current with
-  `pr-act restack && pr-act push`.
+  `sd act restack && sd act push`.
 - chrismo merges: squash, delete the branch.
 - Docs-only and issue-tracking edits may go straight to `main`.
 - `docs/pr-workflow/` is being consumed, not kept: when work from it is built or
@@ -62,7 +62,7 @@ PATH="/opt/homebrew/opt/bash/bin:$PATH" bats ...   # if 3.2 comes first
 
 **Stress-test a changed SuperDB query.** super 0.3.0 has panicked
 intermittently on one construct, so `ci/super-stress` runs every named query
-(the `read -r -d '' NAME <<'EOF'` heredocs in `bin/pr-*` and `lib/pr-next.sh`'s
+(the `read -r -d '' NAME <<'EOF'` heredocs in `bin/pr-*` and `lib/next.sh`'s
 `PRN_QUERY`) 200 times over `ci/fixtures/` and fails on a panic or a differing
 output. Run it after touching one; CI runs it too. SuperDB's edges (missing
 fields are errors, `has()` lies on fused types, dynamic `grep` is not a
@@ -90,5 +90,5 @@ rwx logs --task test <run-id>
 One 16-CPU task, not Captain shards: `bats --jobs` balances tests across CPUs
 better than Captain balances 11 files across runners (37 s vs 77 s, 2026-10-14).
 
-Linux has no `plutil`, so the five pr-watch tests that validate the launchd
+Linux has no `plutil`, so the five sd watch tests that validate the launchd
 plist skip there (`needs_plutil`). They still run on macOS.
