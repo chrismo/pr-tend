@@ -38,7 +38,8 @@ commit() { echo "$1" >> file.txt && git commit -qam "$1"; }
 # upstream <message>: someone else commits to feat on origin.
 upstream() {
   (cd "$TMP/other" && git fetch -q origin && git checkout -q -B feat origin/feat \
-     && echo "$1" >> other.txt && git add other.txt && git commit -qm "$1" && git push -q origin feat 2>/dev/null)
+     && echo "$1" >> other.txt && git add other.txt && git -c user.email=them@example.com -c user.name=Them commit -qm "$1" \
+     && git push -q origin feat 2>/dev/null)
 }
 
 remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
@@ -93,6 +94,156 @@ inherit_main() { git branch -q --set-upstream-to=origin/main "${1:-feat}"; }
   [ "$status" -eq 1 ]
   [ "$(remote feat)" = "$theirs" ]
   [ "$(tracks feat)" = origin/main ]
+}
+
+@test "a pushed commit reset away locally: the remote head is ours, so it's force-pushed with a lease (#86)" {
+  commit oops
+  "$SD_ACT" push >/dev/null
+  git reset -q --hard HEAD~1
+  run "$SD_ACT" push
+  [ "$status" -eq 0 ]
+  [ "$(remote feat)" = "$(git rev-parse feat)" ]
+  [[ "$output" == "force-pushed feat to origin (dropped 1 commit; the remote head "*" was ours)" ]]
+}
+
+@test "a soft reset (changes still in the worktree) is not a drop: refused, nothing pushed (#86)" {
+  commit oops
+  "$SD_ACT" push >/dev/null
+  pushed=$(remote feat)
+  git reset -q --soft HEAD~1
+  run "$SD_ACT" push
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"uncommitted or untracked changes"*"commit them"*"git reset --hard"* ]] || false
+  [ "$(remote feat)" = "$pushed" ]
+  git commit -qm "oops, redone"
+  run "$SD_ACT" push
+  [ "$status" -eq 0 ]
+  [ "$(remote feat)" = "$(git rev-parse feat)" ]
+}
+
+@test "a mixed reset of a commit that added a file leaves it untracked: still not a drop (#86)" {
+  echo new > new.txt && git add new.txt && git commit -qm "add new"
+  "$SD_ACT" push >/dev/null
+  pushed=$(remote feat)
+  git reset -q HEAD~1
+  [ "$(git status --porcelain)" = "?? new.txt" ]
+  run "$SD_ACT" push
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"git clean"* ]] || false
+  [ "$(remote feat)" = "$pushed" ]
+  rm new.txt
+  run "$SD_ACT" push
+  [ "$status" -eq 0 ]
+  [[ "$output" == "force-pushed feat to origin (dropped 1 commit;"* ]]
+}
+
+@test "someone else's fast-forward taken, then reset away: not ours to drop, refused (#86)" {
+  inherit_main
+  upstream theirs
+  theirs=$(remote feat)
+  git fetch -q origin && git merge -q --ff-only origin/feat
+  [ "$(git rev-parse feat)" = "$theirs" ]
+  git reset -q --hard ORIG_HEAD
+  run "$SD_ACT" push
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"didn't make them all"*"git merge --ff-only origin/feat"* ]] || false
+  [ "$(remote feat)" = "$theirs" ]
+}
+
+@test "someone's fast-forward taken, a commit on top, pushed, then both reset away: not ours to drop (#86)" {
+  inherit_main
+  upstream theirs
+  git fetch -q origin && git merge -q --ff-only origin/feat
+  commit mine
+  "$SD_ACT" push >/dev/null
+  pushed=$(remote feat)
+  git reset -q --hard HEAD~2
+  run "$SD_ACT" push
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"didn't make them all"* ]] || false
+  [ "$(remote feat)" = "$pushed" ]
+}
+
+@test "someone's commit taken with a fast-forward rebase, then reset away: not ours to drop (#86)" {
+  inherit_main
+  upstream theirs
+  theirs=$(remote feat)
+  git fetch -q origin && git rebase -q origin/feat
+  [ "$(git rev-parse feat)" = "$theirs" ]
+  git reset -q --hard HEAD~1
+  run "$SD_ACT" push
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"didn't make them all"* ]] || false
+  [ "$(remote feat)" = "$theirs" ]
+}
+
+@test "someone's commit taken, then replayed by a restack and pushed, then reset away: still theirs, refused (#86)" {
+  inherit_main
+  upstream theirs
+  git fetch -q origin && git merge -q --ff-only origin/feat
+  (cd "$TMP/other" && git checkout -q main && git pull -q origin main && echo m >> main.txt && git add main.txt && git commit -qm m && git push -q origin main 2>/dev/null)
+  git fetch -q origin && git rebase -q origin/main
+  [ "$(git log -1 --format=%ae)" = them@example.com ]
+  [ "$(git log -1 --format=%ce)" = t@example.com ]
+  "$SD_ACT" push >/dev/null
+  pushed=$(remote feat)
+  [ "$pushed" = "$(git rev-parse feat)" ]
+  git reset -q --hard HEAD~1
+  run "$SD_ACT" push
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"didn't make them all"* ]] || false
+  [ "$(remote feat)" = "$pushed" ]
+}
+
+@test "a branch checked out nowhere has no worktree to be dirty: its own pushed commit is dropped (#86)" {
+  commit oops
+  "$SD_ACT" push >/dev/null
+  git switch -q main
+  git branch -qf feat feat~1
+  run "$SD_ACT" push feat
+  [ "$status" -eq 0 ]
+  [ "$(remote feat)" = "$(git rev-parse feat)" ]
+  [[ "$output" == "force-pushed feat to origin (dropped 1 commit;"* ]] || false
+}
+
+@test "a restacked branch's own commit, pushed then reset away, was made here: dropped (#86)" {
+  (cd "$TMP/other" && git checkout -q main && echo m >> main.txt && git add main.txt && git commit -qm m && git push -q origin main 2>/dev/null)
+  git fetch -q origin && git rebase -q origin/main
+  commit oops
+  "$SD_ACT" push >/dev/null
+  git reset -q --hard HEAD~1
+  run "$SD_ACT" push
+  [ "$status" -eq 0 ]
+  [[ "$output" == "force-pushed feat to origin (dropped 1 commit;"* ]] || false
+}
+
+@test "a restack past a colleague's squash-merged commit drops it from the branch: pushed with a lease (#86)" {
+  inherit_main
+  upstream theirs
+  git fetch -q origin && git merge -q --ff-only origin/feat
+  commit mine
+  "$SD_ACT" push >/dev/null
+  (cd "$TMP/other" && git checkout -q main && git pull -q origin main \
+     && echo theirs >> other.txt && git add other.txt \
+     && git -c user.email=them@example.com -c user.name=Them commit -qm "theirs (#1)" && git push -q origin main 2>/dev/null)
+  git fetch -q origin && git rebase -q origin/main
+  [ "$(git log --format=%s origin/main..feat)" = "$(printf '%s\n' mine feat)" ]
+  run "$SD_ACT" push
+  [ "$status" -eq 0 ]
+  [ "$(remote feat)" = "$(git rev-parse feat)" ]
+  [[ "$output" == "force-pushed feat to origin (rewritten;"* ]] || false
+}
+
+@test "taken, reset away, then a new commit: the rewrite path leases over the taken commit, as before #86 (only a pure drop checks who made it)" {
+  inherit_main
+  upstream theirs
+  git fetch -q origin && git merge -q --ff-only origin/feat
+  git reset -q --hard HEAD~1
+  commit mine
+  run "$SD_ACT" push
+  [ "$status" -eq 0 ]
+  [ "$(remote feat)" = "$(git rev-parse feat)" ]
+  [[ "$output" == "force-pushed feat to origin (rewritten;"* ]] || false
 }
 
 @test "the remote is only ahead: refused, says how to take its commits" {

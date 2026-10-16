@@ -25,12 +25,18 @@ values {...s, remote}
 | put open:=(pr is null or on(pr.state == "OPEN")), has_pr:=on(pr.state == "OPEN"),
       foreign:=(on(push.remote_ours == false) and n(push.theirs) > 0),
       bot_blocking:=(n(threads.owed_bot) - n(threads.info)),
-      to_push:=(push.remote_sha is null or n(push.ahead) > 0),
+      dropping:=(on(push.remote_ours) and n(push.behind) > 0 and n(push.ahead) == 0 and on(push.remote_made)),
+      taken:=(on(push.remote_ours) and n(push.behind) > 0 and n(push.ahead) == 0 and on(push.remote_made == false)),
+      held:=(on(push.remote_ours) and n(push.behind) > 0 and n(push.ahead) == 0
+             and (on(push.remote_made == false) or (on(push.remote_made) and on(push.dirty)))),
+      to_push:=(push.remote_sha is null or n(push.ahead) > 0
+                or (on(push.remote_ours) and n(push.behind) > 0 and n(push.ahead) == 0 and on(push.remote_made) and not on(push.dirty))),
       chase:=(on(sync.target != sync.default) or on(parent.merged)),
       undone:=(n(sync.undone) > 0),
       merge_state:=coalesce(pr.merge_state, "UNKNOWN"),
       gh_behind:=on(pr.merge_state == "BEHIND"),
-      draft_ready:=(on(pr.draft) and not (push.remote_sha is null or n(push.ahead) > 0)
+      draft_ready:=(on(pr.draft) and not (push.remote_sha is null or n(push.ahead) > 0
+                                           or (on(push.remote_ours) and n(push.behind) > 0 and n(push.ahead) == 0))
                     and not (on(push.remote_ours == false) and n(push.theirs) > 0)
                     and (on(ci.verdict == "green") or on(ci.verdict == "none"))),
       review_required:=on(pr.review_decision == "REVIEW_REQUIRED"),
@@ -77,9 +83,14 @@ values {...s, remote}
       ? step("bot", "agent", f"address {plural(threads.owed_bot, "bot item")}", "sd act address") : null,
     open and bot_blocking == 0 and n(threads.info) > 0
       ? step("read", "you", f"read {plural(threads.info, "bot item")} in sd state --long, then ack", "sd act ack") : null,
+    open and taken
+      ? step("take", "you", f"{remote}/{branch} has {plural(push.behind, "commit")} this branch took but didn'"'"'t make, reset away here: take {n(push.behind) == 1 ? "it" : "them"} back (git merge --ff-only {remote}/{branch}), or drop {n(push.behind) == 1 ? "it" : "them"} by hand", null) : null,
+    open and dropping and on(push.dirty)
+      ? step("reset-dirty", "you", f"{remote}/{branch} has {plural(push.behind, "commit")} reset away here, and the worktree has uncommitted changes: commit them (then sd act push replaces the remote {n(push.behind) == 1 ? "commit" : "commits"}), or remove them (git reset --hard; git clean for untracked files)", null) : null,
     open and not foreign and not undone and to_push
       ? step("push", "run", push.remote_sha is null ? f"push: not on {remote} yet"
              : on(push.diverged) ? f"force-push {plural(coalesce(sync.ahead, push.ahead), "commit")} (rewritten); a plain git push is rejected, and pulling would undo the rewrite"
+             : n(push.ahead) == 0 ? f"force-push: drop {plural(push.behind, "commit")} the remote has, reset away here"
              : f"push {plural(push.ahead, "commit")}", "sd act push") : null,
     pr is null and len(errors) == 0 ? step("open-pr", "run", "ship: push, open a draft PR", "sd act ship") : null,
     has_pr and draft_ready and not need_review and not bot_due
@@ -93,10 +104,10 @@ values {...s, remote}
                 : f"{plural(review.findings.n, "review finding")} after {review.findings.round} rounds"}: fix {review.findings.n == 1 ? "it" : "them"}, or accept HEAD as reviewed (sd state --long lists them)",
              "sd act review --accept")
       : open and need_review ? step("review", "agent", "review the changes since the last review", "sd act review") : null,
-    has_pr and not to_push and not foreign and bot_due
+    has_pr and not to_push and not held and not foreign and bot_due
       ? step("bot-trigger", "run", f"trigger the review bot ({bot.command})", "sd act trigger") : null,
     has_pr and on(ci.verdict == "inconclusive") ? step("ci-rerun", "run", "rerun cancelled CI", "gh pr checks") : null,
-    has_pr and not to_push and (on(ci.verdict == "pending") or on(ci.for_head == false))
+    has_pr and not to_push and not held and (on(ci.verdict == "pending") or on(ci.for_head == false))
       ? step("ci-wait", "wait", on(ci.verdict == "pending") ? "CI running" : "CI hasn'"'"'t reported on HEAD yet",
              "gh pr checks --watch") : null,
     has_pr and parent_closed

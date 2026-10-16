@@ -252,6 +252,38 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(keys '.sync.undone = 1' '.pr.merge_state = "BEHIND"')" = restack-undone ]
 }
 
+@test "the remote has commits this copy reset away (ours): force-push, which leases (#86)" {
+  [ "$(step push say '.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true' '.push.remote_made = true')" = "force-push: drop 1 commit the remote has, reset away here" ]
+  [ "$(step push cmd '.push.ahead = 0' '.push.behind = 2' '.push.remote_ours = true' '.push.remote_made = true')" = "sd act push" ]
+  [ "$(keys '.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true' '.push.remote_made = null')" = ready ]
+}
+
+@test "commits taken from the remote and reset away: take them back, no drop (#86)" {
+  local st=('.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true' '.push.remote_made = false')
+  [ "$(keys "${st[@]}")" = take ]
+  [ "$(step take who "${st[@]}")" = you ]
+  [ "$(step take say "${st[@]}")" = "origin/feat has 1 commit this branch took but didn't make, reset away here: take it back (git merge --ff-only origin/feat), or drop it by hand" ]
+  [ "$(step take say "${st[@]}" '.push.behind = 2')" = "origin/feat has 2 commits this branch took but didn't make, reset away here: take them back (git merge --ff-only origin/feat), or drop them by hand" ]
+  [ "$(keys "${st[@]}" '.pr.draft = true' '.pr.merge_state = "DRAFT"')" = take ]
+}
+
+@test "the same reset with changes still in the worktree: chrismo commits or drops them, no push step (#86)" {
+  [ "$(keys '.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true' '.push.remote_made = true' '.push.dirty = true')" = reset-dirty ]
+  [ "$(step reset-dirty who '.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true' '.push.remote_made = true' '.push.dirty = true')" = you ]
+  [ "$(step reset-dirty say '.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true' '.push.remote_made = true' '.push.dirty = true')" = "origin/feat has 1 commit reset away here, and the worktree has uncommitted changes: commit them (then sd act push replaces the remote commit), or remove them (git reset --hard; git clean for untracked files)" ]
+  [[ "$(step reset-dirty say '.push.ahead = 0' '.push.behind = 2' '.push.remote_ours = true' '.push.remote_made = true' '.push.dirty = true')" == "origin/feat has 2 commits reset away here, and the worktree has uncommitted changes: commit them (then sd act push replaces the remote commits),"* ]]
+  [ "$(keys '.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true' '.push.remote_made = true' '.push.dirty = false')" = push ]
+  [ "$(keys '.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true' '.push.remote_made = true' '.push.dirty = null')" = push ]
+}
+
+@test "take or reset-dirty holds the pipeline: no bot trigger or CI wait after it, since nothing reaches GitHub until chrismo acts (#86)" {
+  local remote_ahead=('.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true'
+                      '.ci.sha = "r1"' '.ci.for_head = false' '.bot = {command: "/review-bot"}')
+  [ "$(keys "${remote_ahead[@]}" '.push.remote_made = false')" = take ]
+  [ "$(keys "${remote_ahead[@]}" '.push.remote_made = true' '.push.dirty = true')" = reset-dirty ]
+  [ "$(keys "${remote_ahead[@]}" '.push.remote_made = true' '.push.dirty = false')" = "push" ]
+}
+
 @test "rewritten history of our own: sd act push, which leases" {
   [ "$(step push say '.push.ahead = 2' '.push.behind = 2' '.push.diverged = true' '.sync.ahead = 2')" = "force-push 2 commits (rewritten); a plain git push is rejected, and pulling would undo the rewrite" ]
   [ "$(step push cmd '.push.ahead = 2' '.push.behind = 2' '.push.diverged = true')" = "sd act push" ]
@@ -287,6 +319,7 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(keys '.pr.draft = true' '.pr.merge_state = "DRAFT"' '.ci.verdict = "pending"')" = ci-wait ]
   [ "$(keys '.pr.draft = true' '.pr.merge_state = "DRAFT"' '.review.local = {sha: "x", status: "uncovered", uncovered: 1}')" = review ]
   [ "$(keys '.pr.draft = true' '.pr.merge_state = "DRAFT"' '.push.ahead = 1')" = push ]
+  [ "$(keys '.pr.draft = true' '.pr.merge_state = "DRAFT"' '.push.behind = 1' '.push.remote_ours = true' '.push.remote_made = true')" = push ]
 }
 
 @test "no PR: ship opens one" {

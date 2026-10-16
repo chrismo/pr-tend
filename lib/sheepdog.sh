@@ -34,6 +34,25 @@ commits_not_ours() {
   sed -n 's/^./^&/p' <<<"$1" | git rev-list --count --stdin "$2"
 }
 
+# worktree_for <branch>: the worktree that has refs/heads/<branch> checked out, if any.
+worktree_for() {
+  git worktree list --porcelain \
+    | awk -v ref="refs/heads/$1" '/^worktree / { wt = substr($0, 10) } $0 == "branch " ref { print wt; exit }'
+}
+
+# made_here <range>: every commit in <range> was authored and committed by
+# this repo's user. A commit, amend, cherry-pick or rebase here sets the
+# committer (a fast-forward merge, pull or rebase onto the remote keeps the
+# original one); the author survives a rebase, so a colleague's commit that a
+# restack replayed is still theirs. Only commits made here may be dropped by
+# a force-push (#86). No user.email: nothing is.
+made_here() {
+  local me people
+  me=$(git config user.email) && [[ -n $me ]] || return 1
+  people=$(git log --format='%ae%n%ce' "$1") || return 1
+  [[ -z $(grep -vxF "$me" <<<"$people") ]]
+}
+
 # step_guidance <setting> <branch> <base> <default-file>: the guidance part of a
 # step's prompt: the file settings.<setting> names, else <default-file>. A
 # relative path is read from the <base> commit, which the branch's agent can't
