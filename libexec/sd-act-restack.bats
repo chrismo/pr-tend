@@ -183,6 +183,29 @@ base_pin() { git rev-parse -q --verify refs/sheepdog/feat/base || true; }
   [ "$(git rev-parse child^)" = "$a_head" ]
 }
 
+@test "stacked, pin lost, parent squash-merged and deleted: refused, no rebase, no agent" {
+  git switch -q main && git switch -qc A
+  edit 's/^c$/C/' a1
+  edit 's/^d$/D/' a2
+  git push -q origin A 2>/dev/null
+  a_head=$(git rev-parse A)
+  git switch -qc child A~1
+  edit 's/^d$/D/' "a2 again"
+  edit 's/^f$/F/' child
+  git config branch.child.sd-parent A
+  git update-ref refs/sheepdog/child/base "$a_head"
+  (cd "$TMP/other" && git fetch -q origin && git checkout -q main && git merge -q --squash origin/A >/dev/null \
+     && git commit -qm "A (#1)" && git push -q origin main :A 2>/dev/null)
+  merged_pr A "$a_head"
+  before=$(git rev-parse child)
+  run "$SD_ACT" restack --resolve
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"base pin ${a_head:0:7} is no longer in child's history"* ]]
+  [ "$(git rev-parse child)" = "$before" ]
+  ! rebase_in_progress
+  [ ! -e "$FX/claude.calls" ]
+}
+
 # ── retarget ─────────────────────────────────────────────────────────────────
 
 @test "retarget: parent merged, PR still on it: base edited to main, sd-parent rewritten" {

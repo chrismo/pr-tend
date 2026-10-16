@@ -362,6 +362,61 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
   [ "$(field .sync.old_base)" = "$pin" ]
 }
 
+# lost_pin_stack [pin]: parent (p1, p2) squash-merged into main and its branch
+# deleted; feat stacked on it, rewritten outside sheepdog so p2 is a copy, not
+# p2. Pins the base at p2 unless told "nopin". Sets $p2.
+lost_pin_stack() {
+  git switch -qc parent && commit p.txt p1 && commit q.txt p2 && git push -q origin parent 2>/dev/null
+  p2=$(git rev-parse parent)
+  git switch -qc feat parent~1
+  printf 'p2 again\n' > q.txt && git add q.txt && git commit -qm "copy of p2"
+  commit c.txt c
+  git config branch.feat.sd-parent parent
+  [[ ${1:-} == nopin ]] || git update-ref refs/sheepdog/feat/base "$p2"
+  (cd "$TMP/other" && git fetch -q origin && git merge -q --squash origin/parent >/dev/null \
+     && git commit -qm "parent (#3)" && git push -q origin main :parent 2>/dev/null)
+  git fetch -q --prune
+  pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p2\""
+}
+
+@test "sync: stacked, pin lost, parent merged and deleted: no old base, and says why" {
+  lost_pin_stack
+  state
+  [ "$(field .sync.target)" = main ]
+  [ "$(field .sync.old_base)" = null ]
+  [ "$(field .sync.conflict)" = null ]
+  [[ "$(field '.errors | join(" ")')" == *"base pin ${p2:0:7} is no longer in feat's history (rewritten outside sheepdog?)"* ]]
+}
+
+@test "sync: stacked, no pin, parent merged and deleted: no old base, and says why" {
+  lost_pin_stack nopin
+  state
+  [ "$(field .sync.old_base)" = null ]
+  [[ "$(field '.errors | join(" ")')" == *"no base for feat on parent"* ]]
+}
+
+@test "sync: stacked on an open parent, no pin or fork-point: falls back to the merge-base with the parent" {
+  local fork; fork=$(git rev-parse main)
+  git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
+  git switch -qc feat main && commit c.txt c
+  git config branch.feat.sd-parent parent
+  state
+  [ "$(field .sync.target)" = parent ]
+  [ "$(field .sync.old_base)" = "$fork" ]
+  [ "$(field '.errors | length')" = 0 ]
+}
+
+@test "sync: not stacked, pin lost: falls back to the merge-base, and reports the pin" {
+  git switch -qc feat && commit a.txt a
+  local fork; fork=$(git rev-parse main)
+  local pin; pin=$(git rev-parse feat)
+  git update-ref refs/sheepdog/feat/base "$pin"
+  git commit -q --amend -m "rewritten"
+  state
+  [ "$(field .sync.old_base)" = "$fork" ]
+  [[ "$(field '.errors | join(" ")')" == *"base pin ${pin:0:7} is no longer in feat's history"* ]]
+}
+
 @test "sync: no shared history with the parent is reported, not guessed" {
   git switch -q --orphan feat && commit a.txt a
   state
