@@ -166,7 +166,7 @@ base_pin() { git rev-parse -q --verify refs/sheepdog/feat/base || true; }
   git config branch.child.sd-parent A
   (cd "$TMP/other" && git fetch -q origin && git checkout -q main && git merge -q --squash origin/A \
      && git commit -qm "A (#1)" && git push -q origin main 2>/dev/null)
-  merged_pr A "$a_head"
+  merged_pr A "$a_head" "$(git rev-parse A~1)" "$a_head"
   run "$SD_ACT" restack
   [ "$status" -eq 0 ]
   [ "$(git rev-parse child^)" = "$(git rev-parse origin/main)" ]
@@ -225,7 +225,7 @@ base_pin() { git rev-parse -q --verify refs/sheepdog/feat/base || true; }
   before=$(git rev-parse child)
   run "$SD_ACT" restack --resolve
   [ "$status" -ne 0 ]
-  [[ "$output" == *"wrong base: this would replay 2 of #1's commits onto origin/main; rebase past them by hand: git rebase --onto origin/main ${a_head:0:12}"* ]]
+  [[ "$output" == *"wrong base: this would replay 2 of #1's commits onto origin/main; rebase past them by hand: git rebase --onto origin/main ${a_head:0:12} child && git update-ref refs/sheepdog/child/base origin/main"* ]]
   [ "$(git rev-parse child)" = "$before" ]
   ! rebase_in_progress
   [ ! -e "$FX/claude.calls" ]
