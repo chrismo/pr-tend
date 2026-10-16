@@ -466,7 +466,7 @@ address() {
     return
   fi
 
-  local stored_h sid h mode result outcome plan timeout cfg forced verify guidance
+  local stored_h sid h mode result outcome plan timeout cfg forced verify guidance gbase
   stored_h=$(git config --get "branch.$b.sd-harness" || true)
   sid=$(git config --get "branch.$b.sd-session" || true)
   forced=${harness_opt:-$stored_h}
@@ -483,7 +483,8 @@ address() {
   [[ $timeout =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $timeout"
   verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "sd config failed"
   [[ $verify != *$'\n'* ]] || die "verify must be a single command, not a list"
-  guidance=$(cd "$wt" && step_guidance addressPrompt "$b" "$(guidance_base "$b")" "$SD_LIB/prompts/address.md") \
+  gbase=$(guidance_base "$b") || die "can't find $b's base, to read its prompt guidance from"
+  guidance=$(cd "$wt" && step_guidance addressPrompt "$b" "$gbase" "$SD_LIB/prompts/address.md") \
     || die "can't read the address guidance"
   echo "sd act: $h ($mode session $sid) is addressing $(prc_val "$findings" 'len(this)') item(s) on $b…" >&2
   result=$(cd "$wt" && HARNESS_STEP=address HARNESS_BRANCH=$b harness_run "$h" "$sid" "$mode" "$timeout" \
@@ -1014,19 +1015,19 @@ EOF
 
 # guidance_base <branch>: the commit a step reads repo guidance (.sheepdog/,
 # relative prompt paths) from, which the branch's agent can't rewrite: the
-# base pin, else where the branch forked from the default branch (the remote's,
-# else the local one), unless that is the branch's own tip. Nothing when none
+# base pin, else where the branch forked from the default branch: the remote's,
+# else the local one unless that is the branch itself. Nothing when none
 # qualifies: the branch's own commits are never trusted for its guidance.
 guidance_base() {
-  local remote def ref tip mb
+  local remote def ref
+  local -a refs
   git rev-parse -q --verify "refs/sheepdog/$1/base" && return
   remote=$(prc_get settings.remote "$1" false) || return 1
-  tip=$(git rev-parse "refs/heads/$1") || return 1
   if def=$(start_default "$remote"); then
-    for ref in "refs/remotes/$remote/$def" "refs/heads/$def"; do
-      git show-ref -q --verify "$ref" || continue
-      mb=$(git merge-base "$tip" "$ref") || continue
-      if [[ $mb != "$tip" ]]; then echo "$mb"; return; fi
+    refs=("refs/remotes/$remote/$def")
+    [[ $def == "$1" ]] || refs+=("refs/heads/$def")
+    for ref in "${refs[@]}"; do
+      git show-ref -q --verify "$ref" && git merge-base "refs/heads/$1" "$ref" && return
     done
   fi
   return 0
@@ -1234,7 +1235,8 @@ ci_fix() {
   fi
   step_session "$b" ci-fix
   base=$(prc_val "$state" 'coalesce(sync.old_base, "")')
-  [[ -n $base ]] || base=$(git rev-parse "refs/heads/$b")
+  # With no base from sd state, the trusted one guidance_base finds (maybe none).
+  [[ -n $base ]] || base=$(guidance_base "$b") || die "can't find $b's base, to read its prompt guidance from"
   task=$(git config --get "branch.$b.sd-task" || true)
 
   # Zero tokens first: verify, autofix, verify. A fix there is the whole step.

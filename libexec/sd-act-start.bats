@@ -541,7 +541,6 @@ findings_at() {
   mkdir -p .sheepdog && printf 'Local repo guidance.\n' > .sheepdog/implement.md
   printf 'a\nb\n' > file.txt && git add . && git commit -qm init
   git switch -qc feat && git config branch.feat.sd-task "add c"
-  git commit -q --allow-empty -m "branch work"
   "$SD_ACT" implement >/dev/null
   [ "$(head -1 "$FX/claude.prompt")" = "Local repo guidance." ]
 }
