@@ -203,15 +203,17 @@ else
   # Not with the default branch once a stacked parent merged: that replays the parent's commits.
   elif [[ $target == "$parent" ]]; then
     old_base=$(git merge-base "$target_ref" "$head" || true)
-  elif [[ -z $base_pin ]]; then
-    errors+=("no base for $branch on $parent: no base pin, and neither the merged parent's head nor its fork-point is in $branch's history")
   fi
 
   if is_ancestor "$target_ref" "$head"; then
     up_to_date=true conflict=false
   elif [[ -z $old_base ]]; then
     up_to_date=false
-    [[ $target != "$parent" ]] || errors+=("no merge base with $remote/$target")
+    if [[ $target == "$parent" ]]; then
+      errors+=("no merge base with $remote/$target")
+    elif [[ -z $base_pin ]]; then
+      errors+=("no base for $branch on $parent: no base pin, and neither the merged parent's head nor its fork-point is in $branch's history")
+    fi
   else
     up_to_date=false
     rc=0

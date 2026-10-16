@@ -418,6 +418,21 @@ lost_pin_stack() {
   [[ "$(field '.errors | join(" ")')" == *"no base for feat on parent"* ]]
 }
 
+@test "sync: stacked, no base, but already on main (rebased by hand): up to date, no error" {
+  git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
+  local p1; p1=$(git rev-parse parent)
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  (cd "$TMP/other" && git fetch -q origin && git merge -q --squash origin/parent >/dev/null \
+     && git commit -qm "parent (#3)" && git push -q origin main :parent 2>/dev/null)
+  git fetch -q --prune
+  git rebase -q --onto origin/main parent feat
+  pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p1\""
+  state
+  [ "$(field .sync.up_to_date)" = true ]
+  [ "$(field -c .errors)" = '[]' ]
+}
+
 @test "sync: stacked on an open parent, no pin or fork-point: falls back to the merge-base with the parent" {
   local fork; fork=$(git rev-parse main)
   git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
