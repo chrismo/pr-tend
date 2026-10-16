@@ -218,12 +218,14 @@ holds_parent_commits() {
 # parent's net change (from where it left the target to its merged head) into
 # HEAD again must change nothing; a missing part, or the branch's own edit to
 # the parent's lines, changes or conflicts. Squash merges only: a head already
-# in the target would make the merge a no-op whatever HEAD holds.
+# in the target would make the merge a no-op whatever HEAD holds. And HEAD
+# must have where the parent left the target: else the tree merge from the
+# merged head would revert what the parent picked up from the target.
 parent_in_head() {
   local base tree
   [[ -n $merged_head ]] && git cat-file -e "$merged_head^{commit}" 2>/dev/null || return 1
   ! is_ancestor "$merged_head" "$target_ref" || return 1
-  base=$(git merge-base "$merged_head" "$target_ref") || return 1
+  base=$(git merge-base "$merged_head" "$target_ref") && is_ancestor "$base" "$head" || return 1
   tree=$(git merge-tree --write-tree --merge-base="$base" "$head" "$merged_head" 2>/dev/null) || return 1
   [[ $tree == "$(git rev-parse "$head^{tree}")" ]]
 }
