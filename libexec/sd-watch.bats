@@ -349,6 +349,7 @@ EOF
   pass
   [ -d "$SHEEPDOG_STATE_DIR/branches" ]
   [ -z "$(find "$SHEEPDOG_STATE_DIR/branches" -name '*.tmp')" ]
+  [ -z "$(find "$SHEEPDOG_STATE_DIR/branches" -name 'feat.json')" ]
 }
 
 @test "a failed fetch keeps git's reason" {
@@ -586,6 +587,15 @@ refresh() { "$SD_WATCH" refresh "$@"; }
   run refresh feat other
   [ "$status" -ne 0 ]
   [[ "$output" == *"usage: sd watch refresh [<branch>]"* ]]
+  [ ! -e "$PS_FIXTURES/calls" ]
+}
+
+@test "refresh: refuses a repo the pass doesn't watch" {
+  git config --global --unset-all sheepdog.repo
+  ps_fixture feat
+  run refresh
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"$TMP/repo isn't registered"*"sd act enroll"* ]]
   [ ! -e "$PS_FIXTURES/calls" ]
 }
 

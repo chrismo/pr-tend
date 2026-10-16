@@ -206,6 +206,9 @@ refresh() {
   [[ $(git config "branch.$b.sheepdog") == true ]] || die "$b isn't enrolled (sd act enroll $b)"
   # The repo as enroll registered it, so a pass and a refresh share the branch's state.
   repo=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+  grep -qxF "$repo" <<<"$(git config --global --get-all sheepdog.repo || true)" \
+    || die "$repo isn't registered, so the pass doesn't watch it (sd act enroll $b)"
+  prc_super_init || exit 1
   name=$(basename "$repo")
   mkdir -p "$STATE_DIR" "$STATUS_DIR"
   WRITTEN=/dev/null
@@ -273,7 +276,7 @@ uninstall_job() {
 
 case ${1:-} in
   "") prc_super_init || exit 1; run_pass ;;
-  refresh) shift; prc_super_init || exit 1; refresh "$@" ;;
+  refresh) shift; refresh "$@" ;;
   status)
     if [[ -f $STATE_DIR/last-pass ]]; then show < "$STATE_DIR/last-pass"; else echo "no pass yet"; fi ;;
   install) prc_super_init || exit 1; install_job ;;
