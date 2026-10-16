@@ -1,14 +1,15 @@
-# pr-tend
+# sheepdog
 
-The PR pipeline: `sd state`, `sd act`, `sd watch`, `sd config`. Split out of
-agent-rig on 2026-10-13 with its history; commits before that date are
-agent-rig commits filtered down to these paths.
+The PR pipeline: `sd state`, `sd act`, `sd watch`, `sd config`. `bin/sd`
+dispatches each verb to `libexec/sd-<verb>`. Split out of agent-rig on
+2026-10-13 with its history; commits before that date are agent-rig commits
+filtered down to these paths. Named pr-tend until 2026-10-15 (#40).
 
-Edit this repo, never `~/.local/bin/` — those are symlinks made by `./install.sh`.
+Edit this repo, never `~/.local/bin/sd` — it's a symlink made by `./install.sh`.
 
 ## Workflow
 
-pr-tend tends its own PRs, so code changes go through them:
+sheepdog tends its own PRs, so code changes go through them:
 
 - Branch, then `sd act push`, `gh pr create`, `sd act enroll`. Follow
   `sd state`'s NEXT from there.
@@ -21,19 +22,19 @@ pr-tend tends its own PRs, so code changes go through them:
 - `docs/pr-workflow/` is being consumed, not kept: when work from it is built or
   filed as an issue, delete that part of the doc in the same change.
 
-### Or run pr-tend against the sandbox
+### Or run sheepdog against the sandbox
 
 Dogfooding on this repo's own PRs is the default, not a rule.
 [`chrismo/pr-tend-sandbox`](https://github.com/chrismo/pr-tend-sandbox)
-(checkout `../pr-tend-sandbox`) is a throwaway Go repo with RWX CI that pr-tend
+(checkout `../pr-tend-sandbox`) is a throwaway Go repo with RWX CI that sheepdog
 can run against when running it here isn't advisable:
 
 - a spike that needs real merges, force-pushes or branch-protection changes
 - a CI state on demand: its `ci/mode` makes CI pass, fail, flake, crawl or hang
-- a pr-tend build you don't trust yet near real PRs
+- a sheepdog build you don't trust yet near real PRs
 
 Pick whichever fits the task; one piece of work can use both. The sandbox's
-AGENTS.md has its rules and the setup that keeps pr-tend's state there away
+AGENTS.md has its rules and the setup that keeps sheepdog's state there away
 from chrismo's real config, glyphs and launchd job.
 
 ## Development
@@ -45,7 +46,7 @@ This is a TDD repo: write a failing bats test first, then make it pass.
 under 2 minutes on a 10-core machine (424/424 in 107 s, 2026-10-13):
 
 ```bash
-bats --jobs 10 lib/*.bats bin/pr-*.bats ci/*.bats
+bats --jobs 10 lib/*.bats bin/*.bats libexec/*.bats ci/*.bats
 bats install.bats
 ```
 
@@ -62,7 +63,7 @@ PATH="/opt/homebrew/opt/bash/bin:$PATH" bats ...   # if 3.2 comes first
 
 **Stress-test a changed SuperDB query.** super 0.3.0 has panicked
 intermittently on one construct, so `ci/super-stress` runs every named query
-(the `read -r -d '' NAME <<'EOF'` heredocs in `bin/pr-*` and `lib/next.sh`'s
+(the `read -r -d '' NAME <<'EOF'` heredocs in `libexec/sd-*` and `lib/next.sh`'s
 `PRN_QUERY`) 200 times over `ci/fixtures/` and fails on a panic or a differing
 output. Run it after touching one; CI runs it too. SuperDB's edges (missing
 fields are errors, `has()` lies on fused types, dynamic `grep` is not a
@@ -90,5 +91,5 @@ rwx logs --task test <run-id>
 One 16-CPU task, not Captain shards: `bats --jobs` balances tests across CPUs
 better than Captain balances 11 files across runners (37 s vs 77 s, 2026-10-14).
 
-Linux has no `plutil`, so the five sd watch tests that validate the launchd
+Linux has no `plutil`, so the `sd watch` tests that validate the launchd
 plist skip there (`needs_plutil`). They still run on macOS.
