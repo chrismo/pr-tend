@@ -61,7 +61,7 @@ harness_result() {
 # Runs one headless agent step in $PWD; prints the step's JSON result.
 # settings-json is prc_step's output: model, effort, provider and args.
 # The harness's stderr (claude can put protocol JSON there) shows only when
-# the step fails.
+# the step fails, and then all at once: nothing streams while it runs.
 harness_run() {
   local h=$1 sid=$2 mode=$3 timeout=$4 prompt=$5 schema=$6 settings=${7:-'{}'} out err rc
   local model effort provider args fields
@@ -106,7 +106,13 @@ harness_run() {
     *) echo "unknown harness: $h (claude or pi)" >&2; rm -f "$err"; return 1 ;;
   esac
   rc=$?
-  (( rc == 0 )) || cat "$err" >&2
+  if (( rc != 0 )); then
+    cat "$err" >&2
+    # claude's own account of the failure (e.g. an is_error result's text).
+    if [[ $h == claude ]]; then
+      prc_line 'where kind(this) == "record" and coalesce(result, "") != "" | values result' "$out" >&2 2>/dev/null
+    fi
+  fi
   rm -f "$err"
   return "$rc"
 }

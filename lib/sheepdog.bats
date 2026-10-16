@@ -78,6 +78,7 @@ EOF
   [ "$status" -ne 0 ]
   [ -z "$output" ]
   [[ "$stderr" == *'"subtype":"init"'* ]]
+  [[ "$stderr" == *"out of turns"* ]]
 }
 
 @test "harness_run: pi's stderr follows the same rule" {

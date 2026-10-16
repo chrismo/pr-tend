@@ -87,7 +87,8 @@ prints the question. Permission prompts go to the host or are auto-denied
 (`--permission-prompts none`).
 
 `harness_run` holds the harness's stderr (claude can put protocol JSON there)
-and shows it only when the step fails. Each step says on stderr when it
+and shows it only when the step fails, so nothing streams while a step runs.
+With claude it adds the result's own error text. Each step says on stderr when it
 starts: which harness, which session, what it is doing.
 
 **Auth and billing** (docs read 2026-10-11 by the claude-code-guide agent;
