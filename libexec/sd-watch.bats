@@ -861,6 +861,251 @@ SH
   [ "$(notified)" = "repo feat|ready to merge" ]
 }
 
+# ── stale enrollments (#51) ──────────────────────────────────────────────────
+
+# aged <branch> <seconds>: the branch's stale clock started that long ago.
+aged() {
+  local f; f=$(find "$SHEEPDOG_STATE_DIR/branches" -path "*/$1.json")
+  jq -c --argjson s "$2" '.stale.since -= $s' "$f" > "$f.new" && mv "$f.new" "$f"
+}
+enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
+
+@test "stale: a branch checked out nowhere is unenrolled after vacuumAfter, and only unenrolled" {
+  git update-ref refs/sheepdog/feat/base HEAD
+  git switch -q main
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  enrolled feat
+  aged feat 604801
+  pass
+  ! enrolled feat || false
+  grep -q "feat.*unenrolled: checked out nowhere for 7d" "$SHEEPDOG_STATE_DIR/last-pass"
+  [ "$(notified)" = "repo feat|unenrolled: checked out nowhere for 7d (sd act enroll feat to watch it again)" ]
+  git rev-parse -q --verify refs/heads/feat
+  [ -n "$(git for-each-ref refs/sheepdog/feat/)" ]
+}
+
+@test "stale: re-enrolling after an unenroll starts a fresh clock" {
+  ps_fixture feat '.pr.state = "MERGED"'
+  pass
+  aged feat 604801
+  pass
+  ! enrolled feat || false
+  enroll feat
+  pass
+  enrolled feat
+}
+
+@test "vacuum: one past its threshold says it goes next pass" {
+  git switch -q main
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  aged feat 700000
+  run "$SD_WATCH" vacuum
+  [[ "$output" == *"checked out nowhere for 8d: unenrolled next pass"* ]] || false
+}
+
+@test "stale: a worktree whose directory was deleted doesn't count" {
+  git switch -q main
+  git worktree add -q "$TMP/feat-wt" feat
+  rm -rf "$TMP/feat-wt"
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  aged feat 604801
+  pass
+  ! enrolled feat
+}
+
+@test "stale: not before vacuumAfter" {
+  git switch -q main
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  aged feat 604000
+  pass
+  enrolled feat
+}
+
+@test "stale: checking the branch out again stops the clock" {
+  git switch -q main
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  aged feat 604000
+  git switch -q feat
+  pass
+  git switch -q main
+  pass
+  aged feat 1000
+  pass
+  enrolled feat
+}
+
+@test "stale: merged or closed is unenrolled after vacuumAfter, even while checked out" {
+  local st
+  for st in MERGED CLOSED; do
+    enroll feat
+    rm -rf "$SHEEPDOG_STATE_DIR"
+    ps_fixture feat ".pr.state = \"$st\""
+    pass
+    aged feat 604801
+    pass
+    ! enrolled feat || { echo "for $st"; return 1; }
+    grep -q "feat.*unenrolled: $(tr A-Z a-z <<<"$st") for 7d" "$SHEEPDOG_STATE_DIR/last-pass"
+  done
+}
+
+@test "stale: an unsure pass neither starts, resets nor acts on the clock" {
+  git switch -q main
+  ps_fixture feat '.errors = ["gh: down"]'
+  pass
+  [ "$(jq -c .stale "$(find "$SHEEPDOG_STATE_DIR/branches" -name feat.json)")" = null ]
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  aged feat 604801
+  ps_fixture feat '.errors = ["gh: down"]'
+  pass
+  enrolled feat
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  ! enrolled feat
+}
+
+@test "stale: an enrolled branch with no local branch is unenrolled at once" {
+  git switch -q main
+  git update-ref -d refs/heads/feat
+  enrolled feat
+  pass
+  ! enrolled feat || false
+  grep -q "feat.*unenrolled: no local branch" "$SHEEPDOG_STATE_DIR/last-pass"
+  [ ! -e "$PS_FIXTURES/calls" ]
+}
+
+@test "stale: a new reason restarts the clock" {
+  git switch -q main
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  aged feat 604000
+  ps_fixture feat '.pr.state = "MERGED"'
+  pass
+  aged feat 1000
+  pass
+  enrolled feat
+  [ "$(jq -r .stale.reason "$(find "$SHEEPDOG_STATE_DIR/branches" -name feat.json)")" = merged ]
+}
+
+@test "stale: a refresh can unenroll too" {
+  ps_fixture feat '.pr.state = "MERGED"'
+  pass
+  aged feat 604801
+  run "$SD_WATCH" refresh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"feat  -  unenrolled: merged for 7d"* ]] || false
+  ! enrolled feat
+}
+
+@test "vacuum: thresholds under a day read in hours or minutes, and a config error is said" {
+  write_cfg '{"settings":{"vacuumAfter":7200}}'
+  git switch -q main
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  aged feat 90
+  run "$SD_WATCH" vacuum
+  [[ "$output" == *"checked out nowhere for 1m: unenrolled after 2h"* ]] || false
+  printf '{not json\n' > "$SHEEPDOG_CONFIG"
+  run "$SD_WATCH" vacuum
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"sd config failed"* ]] || false
+}
+
+@test "vacuum: durations under a minute read in seconds, and a clock running behind reads 0s" {
+  write_cfg '{"settings":{"vacuumAfter":30}}'
+  git switch -q main
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  aged feat 5
+  run "$SD_WATCH" vacuum
+  [[ "$output" == *"checked out nowhere for "[5-9]"s: unenrolled after 30s"* ]] || false
+  aged feat -3600
+  run "$SD_WATCH" vacuum
+  [[ "$output" == *"checked out nowhere for 0s: unenrolled after 30s"* ]] || false
+}
+
+@test "stale: vacuumAfter 0 never unenrolls" {
+  write_cfg '{"settings":{"vacuumAfter":0}}'
+  git switch -q main
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  aged feat 99999999
+  pass
+  enrolled feat
+}
+
+@test "stale: vacuumAfter from the config file" {
+  write_cfg '{"settings":{"vacuumAfter":60}}'
+  git switch -q main
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  aged feat 61
+  pass
+  ! enrolled feat
+}
+
+@test "vacuum: previews what's on the clock and changes nothing" {
+  git branch other && enroll other
+  git switch -q main
+  ps_fixture feat '.ci.verdict = "pending"'
+  ps_fixture other '.pr.state = "MERGED"'
+  git worktree add -q "$TMP/other-wt" other
+  pass
+  aged feat 172800
+  aged other 120
+  local before; before=$(cat "$SHEEPDOG_STATE_DIR/last-pass")
+  run "$SD_WATCH" vacuum
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"repo  feat  checked out nowhere for 2d: unenrolled after 7d"* ]] || false
+  [[ "$output" == *"repo  other  merged for 2m: unenrolled after 7d"* ]] || false
+  enrolled feat && enrolled other
+  [ "$(cat "$SHEEPDOG_STATE_DIR/last-pass")" = "$before" ]
+}
+
+@test "vacuum: a branch enrolled since the last pass is skipped, not an error" {
+  ps_fixture feat
+  pass
+  git branch other && enroll other
+  run "$SD_WATCH" vacuum
+  [ "$status" -eq 0 ]
+  [ "$output" = "nothing stale" ]
+}
+
+@test "vacuum: -h prints the help; arguments are refused" {
+  run "$SD_WATCH" vacuum -h
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage: sd watch"* ]] || false
+  run "$SD_WATCH" vacuum feat
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"usage: sd watch vacuum"* ]] || false
+}
+
+@test "stale: a worktree paused mid-rebase still has the branch checked out" {
+  echo a > f && git add f && git commit -qm a
+  git switch -q main
+  echo b > f && git add f && git commit -qm b
+  git switch -q feat
+  ! git rebase -q main 2>/dev/null
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  git rebase --abort
+  [ "$(jq -c .stale "$(find "$SHEEPDOG_STATE_DIR/branches" -name feat.json)")" = null ]
+  [ "$(glyph repo)" = "⏳" ]
+}
+
+@test "vacuum: nothing stale says so" {
+  ps_fixture feat
+  pass
+  run "$SD_WATCH" vacuum
+  [ "$status" -eq 0 ]
+  [ "$output" = "nothing stale" ]
+}
+
 # ── status ───────────────────────────────────────────────────────────────────
 
 @test "status: prints the last pass" {
