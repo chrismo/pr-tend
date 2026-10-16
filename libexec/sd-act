@@ -1310,14 +1310,23 @@ EOF
 
 describe_file() { echo "$(cd "$(git rev-parse --git-common-dir)" && pwd)/sheepdog/${1//\//__}.describe.json"; }
 
-# describe_base <state>: the prompt's line on what the PR targets, so the body
-# doesn't describe a merged parent as pending (#105). The description is
-# stored with sync.target: a new target (a parent merged under an unchanged
-# HEAD) makes it stale. One stored before #105 has none, so it is written
-# again once.
+# ship_base <branch> <state>: the base ship opens or edits the PR with:
+# sd-parent, else the default branch, which a merged parent hands over to.
+ship_base() {
+  local p default; default=$(prc_val "$2" sync.default)
+  p=$(git config --get "branch.$1.sd-parent" || true)
+  [[ $(prc_val "$2" 'coalesce(parent.merged, false)') == true ]] && p=$default
+  echo "${p:-$default}"
+}
+
+# describe_base <branch> <state>: the prompt's line on what the PR targets, so
+# the body doesn't describe a merged parent as pending (#105). The description
+# is stored with that target (ship_base): a new one (a parent merged under an
+# unchanged HEAD) makes it stale. One stored before #105 has none, so it is
+# written again once.
 describe_base() {
-  local state=$1 target
-  target=$(prc_val "$state" sync.target)
+  local state=$2 target
+  target=$(ship_base "$1" "$state")
   if [[ $(prc_val "$state" 'coalesce(parent.merged, false)') == true ]]; then
     echo "Base: $(prc_val "$state" parent.name) has merged into $target, so this PR targets $target; don't describe the parent as pending."
   elif [[ $target != $(prc_val "$state" sync.default) ]]; then
@@ -1339,7 +1348,7 @@ describe_run() {
   task=$(git config --get "branch.$b.sd-task" || true)
   commits=$(git log --format='- %s' "$base..$head")
   diff=$(git diff "$base" "$head")
-  local where; where=$(describe_base "$state")
+  local where; where=$(describe_base "$b" "$state")
   echo "sd act: $STEP_H ($STEP_MODE session $STEP_SID) is describing $b…" >&2
   result=$(cd "$wt" && HARNESS_CLAUDE_ALLOW=$HARNESS_READONLY_ALLOW && HARNESS_PI_TOOLS=read \
              && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" \
@@ -1352,7 +1361,7 @@ describe_run() {
   f=$(describe_file "$b")
   mkdir -p "$(dirname "$f")"
   prc_json 'values {head, target, title: r.title, body: coalesce(r.body, "")}' \
-    "{\"head\": \"$head\", \"target\": $(prc_json_string "$(prc_val "$state" sync.target)"), \"r\": $result}" > "$f"
+    "{\"head\": \"$head\", \"target\": $(prc_json_string "$(ship_base "$b" "$state")"), \"r\": $result}" > "$f"
   cat "$f"
 }
 
@@ -1411,7 +1420,7 @@ ship() {
     | values "sd act: warning: the local review doesn'"'"'t cover HEAD (sd act review); the PR stays a draft until it does"' "$state" >&2
   head=$(git rev-parse "refs/heads/$b")
   f=$(describe_file "$b")
-  if [[ ! -f $f || $(prc_line 'values f"{head} {coalesce(target, "")}"' "$(<"$f")" 2>/dev/null) != "$head $(prc_val "$state" sync.target)" ]]; then
+  if [[ ! -f $f || $(prc_line 'values f"{head} {coalesce(target, "")}"' "$(<"$f")" 2>/dev/null) != "$head $(ship_base "$b" "$state")" ]]; then
     describe_run "$b" "$wt" "$state" >/dev/null
     [[ $(git rev-parse "refs/heads/$b") == "$head" ]] \
       || die "HEAD moved during the describe step (${head:0:7} → $(git rev-parse --short "refs/heads/$b")); nothing pushed. Look, then ship again"

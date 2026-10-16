@@ -140,6 +140,15 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   grep -q 'Base: this PR targets main\.' "$FX/claude.prompt"
 }
 
+@test "describe: told the base ship will use, main when sd-parent is unset, whatever the PR targets now (#105)" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
+  git switch -q feat && git push -q -u origin feat 2>/dev/null
+  open_pr feat A 7
+  "$SD_ACT" describe >/dev/null
+  grep -q 'Base: this PR targets main\.' "$FX/claude.prompt"
+  [ "$(jq -r .target "$(git rev-parse --git-common-dir)/sheepdog/feat.describe.json")" = main ]
+}
+
 @test "ship: a stale description (HEAD moved) is written again" {
   "$SD_ACT" describe >/dev/null
   echo d >> file.txt && git commit -qam "add d"
