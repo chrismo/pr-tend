@@ -338,6 +338,7 @@ SH
 @test "a failed state write leaves no temp file behind" {
   local real
   real=$(bash5 -c 'source "$1/../lib/config.sh"; command -v "$(prc_superdb_binary)"' _ "$BATS_TEST_DIRNAME")
+  [[ $real != */shims/* ]] || skip "super is an asdf shim, which the fake's ASDF_DATA_DIR would break"
   cat > "$TMP/fakebin/super" <<EOF
 #!/usr/bin/env bash
 for a; do [[ \$a == *"state: s"* ]] && { echo '{"partial":'; exit 1; }; done
@@ -346,7 +347,8 @@ EOF
   chmod +x "$TMP/fakebin/super"
   export ASDF_DATA_DIR="$TMP/no-asdf"
   ps_fixture feat
-  pass
+  run --separate-stderr pass
+  [[ "$stderr" == *"couldn't save"*"feat.json"* ]]
   [ -d "$SHEEPDOG_STATE_DIR/branches" ]
   [ -z "$(find "$SHEEPDOG_STATE_DIR/branches" -name '*.tmp')" ]
   [ -z "$(find "$SHEEPDOG_STATE_DIR/branches" -name 'feat.json')" ]
