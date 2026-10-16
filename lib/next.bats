@@ -250,6 +250,7 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(step restack-undone cmd '.sync.undone = 1' '.sync.old_base = "0123456789abcdef0123"')" = "git rebase --onto origin/main 0123456789ab && sd act push" ]
   [ "$(keys '.sync.undone = 0')" = ready ]
   [ "$(keys '.sync.undone = 1' '.pr.merge_state = "BEHIND"')" = restack-undone ]
+}
 
 @test "the remote has commits this copy reset away (ours): force-push, which leases (#86)" {
   [ "$(step push say '.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true' '.push.remote_made = true')" = "force-push: drop 1 commit the remote has, reset away here" ]
