@@ -517,15 +517,15 @@ rebase_in_progress() { [[ -e $(git rev-parse --git-path rebase-merge) || -e $(gi
   [[ $allow == *Edit* && $allow != *"git add"* && $allow != *"rebase"* ]]
 }
 
-@test "--resolve: the agent is told which commit it is replaying and which are the branch's own" {
+@test "--resolve: the agent is told which commit it is replaying, out of which" {
   edit 's/^b$/B/' "feat two"
   upstream main 's/^g$/X/'
   resolver GX
   own1=$(git rev-parse --short feat~1) own2=$(git rev-parse --short feat)
   "$SD_ACT" restack --resolve >/dev/null
   grep -qx "Replaying: $own1 feat" "$FX/claude.prompt"
-  grep -A2 -x "This branch's own commits, oldest first:" "$FX/claude.prompt" > "$TMP/own"
-  [ "$(cat "$TMP/own")" = "This branch's own commits, oldest first:
+  grep -A2 -x "Commits being replayed, oldest first:" "$FX/claude.prompt" > "$TMP/own"
+  [ "$(cat "$TMP/own")" = "Commits being replayed, oldest first:
 $own1 feat
 $own2 feat two" ]
 }
