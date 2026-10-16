@@ -532,6 +532,22 @@ refresh() { "$SD_WATCH" refresh "$@"; }
   [ "$(glyph repo)" = "⚠️" ]
 }
 
+@test "refresh: unparseable sd state output is ⚠️ and exits non-zero" {
+  printf 'warning: junk\n{"branch":' > "$PS_FIXTURES/feat.json"
+  run refresh
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"feat  ⚠️  unparseable"* ]]
+}
+
+@test "refresh: an unreadable config file exits non-zero without checking" {
+  ps_fixture feat
+  printf '{not json\n' > "$SHEEPDOG_CONFIG"
+  run refresh
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"sd config failed"* ]]
+  [ ! -e "$PS_FIXTURES/calls" ]
+}
+
 @test "refresh: refuses a branch that isn't enrolled, or doesn't exist" {
   git branch other
   run refresh other

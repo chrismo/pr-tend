@@ -13,7 +13,7 @@
 #   refresh    the same check for one branch (default: the current one), now:
 #              fetch its repo, glyph, notify, cache its state. Not a pass: other
 #              branches and glyphs are left alone and status still shows the
-#              last pass. Exits non-zero when sd state fails.
+#              last pass. Exits non-zero when the branch couldn't be checked.
 #   status     print the last pass
 #   install    launchd job: a pass every settings.interval seconds (default 300)
 #   uninstall  remove the job
@@ -105,7 +105,8 @@ check() {
   while IFS= read -r line; do
     [[ -n $line ]] && notify "$name $b" "$line"
   done < <(prc_line 'unnest {prev, r: c.reasons} | where not (r.key in prev) | values r.msg' "{\"prev\": $prev, \"c\": $cls}")
-  # A refresh can run alongside a pass: each writes its own temp file.
+  # A refresh can overlap a pass: unlocked, so both may notify a new reason
+  # and the slower may write the older state. Only the temp file is per-process.
   prc_json 'values {...c, state: s}' "{\"c\": $cls, \"s\": $json}" > "$state_file.$$.tmp" \
     && mv "$state_file.$$.tmp" "$state_file"
 

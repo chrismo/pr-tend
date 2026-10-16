@@ -674,7 +674,8 @@ not built; a pass only observes and reports:
   the ❌ steps, merged, ready to merge.
 - `sd watch refresh [<branch>]` (2026-10-15, #48) runs a pass's check on one
   branch now, the current one by default: fetch, glyph, notify, cached state,
-  shared with the pass so neither re-notifies the other. It isn't a pass, so
+  shared with the pass so neither re-notifies the other (when they don't
+  overlap: there's no lock, and the next pass repairs it). It isn't a pass, so
   `status` still shows the last one and other branches' glyphs stay.
 - `sd watch status` prints the last pass. `sd watch install` / `uninstall`
   manage the launchd job, opt-in per machine; interval `settings.interval`,
