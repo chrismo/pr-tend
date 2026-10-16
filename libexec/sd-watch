@@ -123,7 +123,8 @@ glyph_of() {
   local dir=${1:-.} top branch
   [[ -d $dir ]] || dir=$(dirname "$dir")
   top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || return 0
-  branch=$(git -C "$top" symbolic-ref -q --short HEAD) || branch=$(rebase_head "$top") || return 0
+  branch=$(git -C "$top" symbolic-ref -q HEAD) || branch=$(rebase_head "$top") || return 0
+  branch=${branch#refs/heads/}
   awk -F'\t' -v p="$top" -v b="$branch" '$1 == p && $2 == b { print $3; exit }' "$STATE_DIR/glyphs" 2>/dev/null || true
 }
 

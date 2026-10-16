@@ -1154,10 +1154,18 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   echo b > f && git add f && git commit -qm b
   git switch -q feat
   ! git rebase -q main 2>/dev/null
+  [ -d "$(git rev-parse --git-path rebase-merge)" ]
   ps_fixture feat '.sync.up_to_date = false | .sync.conflict = true'
   pass
   [ "$("$SD_WATCH" glyph)" = "❌" ]
   git rebase --abort
+}
+
+@test "glyph: a tag with the branch's name doesn't hide the glyph" {
+  ps_fixture feat
+  pass
+  git tag feat
+  [ "$("$SD_WATCH" glyph)" = "✅" ]
 }
 
 @test "glyph: an unknown option or a second path is refused" {
