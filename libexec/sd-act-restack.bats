@@ -488,6 +488,17 @@ child" ]
   [[ "$output" == *"can't tell whether A merged"* ]]
 }
 
+@test "a parent only here is refused with the step: ship it first (#105)" {
+  git switch -q main && git switch -qc A
+  edit 's/^c$/C/' a1
+  git switch -qc child
+  edit 's/^f$/F/' child
+  git config branch.child.sd-parent A
+  run "$SD_ACT" restack
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"can't restack child: parent A isn't on origin yet: ship it first (sd act ship A)"* ]]
+}
+
 @test "a branch not checked out anywhere is refused" {
   git switch -q main
   run "$SD_ACT" restack feat

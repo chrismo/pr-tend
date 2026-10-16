@@ -42,6 +42,7 @@ values {...s, remote}
       review_required:=on(pr.review_decision == "REVIEW_REQUIRED"),
       stacked:=(on(pr.base != sync.default) and (on(parent.pr.state == "OPEN") or on(parent.merged))),
       parent_closed:=(on(pr.base != sync.default) and on(parent.pr.state == "CLOSED")),
+      parent_unpushed:=on(parent.unpushed),
       restack:=(sync.old_base is null ? f"git rebase {remote}/{sync.target}"
                 : f"git rebase --onto {remote}/{sync.target} {sync.old_base[0:12]}"),
       need_review:=((on(pr.state == "OPEN") or trails(review.local) or trails(review.bot) or trails(review.accepted)
@@ -69,6 +70,8 @@ values {...s, remote}
       ? step("restack-undone", "you",
              f"the restack was undone ({sync.undone} of {sync.target}'"'"'s commits {sync.undone == 1 ? "is a copy" : "are copies"} on {branch}; a plain git push after a restack?): redo it, and don'"'"'t sd act push before that, which would publish the copies",
              f"{restack} && sd act push") : null,
+    open and parent_unpushed
+      ? step("ship-parent", "run", f"ship the parent first: {parent.name} isn'"'"'t on {remote} yet", f"sd act ship {parent.name}") : null,
     open and not undone and not parent_closed and on(sync.up_to_date == false) and on(sync.conflict)
       ? (on(sync.by_tree)
          ? step("conflict", "you", f"restack onto {sync.target} by tree conflicts, which --resolve can'"'"'t do: resolve it by hand (sd act restack says how)", "sd act restack")
@@ -90,12 +93,12 @@ values {...s, remote}
       ? step("take", "you", f"{remote}/{branch} has {plural(push.behind, "commit")} this branch took but didn'"'"'t make, reset away here: take {n(push.behind) == 1 ? "it" : "them"} back (git merge --ff-only {remote}/{branch}), or drop {n(push.behind) == 1 ? "it" : "them"} by hand", null) : null,
     open and dropping and on(push.dirty)
       ? step("reset-dirty", "you", f"{remote}/{branch} has {plural(push.behind, "commit")} reset away here, and the worktree has uncommitted changes: commit them (then sd act push replaces the remote {n(push.behind) == 1 ? "commit" : "commits"}), or remove them (git reset --hard; git clean for untracked files)", null) : null,
-    open and not foreign and not undone and to_push
+    open and not foreign and not undone and not parent_unpushed and to_push
       ? step("push", "run", push.remote_sha is null ? f"push: not on {remote} yet"
              : on(push.diverged) ? f"force-push {plural(coalesce(sync.ahead, push.ahead), "commit")} (rewritten); a plain git push is rejected, and pulling would undo the rewrite"
              : n(push.ahead) == 0 ? f"force-push: drop {plural(push.behind, "commit")} the remote has, reset away here"
              : f"push {plural(push.ahead, "commit")}", "sd act push") : null,
-    pr is null and len(errors) == 0 ? step("open-pr", "run", "ship: push, open a draft PR", "sd act ship") : null,
+    pr is null and len(errors) == 0 and not parent_unpushed ? step("open-pr", "run", "ship: push, open a draft PR", "sd act ship") : null,
     has_pr and draft_ready and not need_review and not bot_due
       ? step("draft", "run", "CI green and reviewed: mark the PR ready for review", "gh pr ready") : null,
     open and fixing and not on(review.findings.declined) and review.findings.round < review.findings.cap

@@ -666,6 +666,78 @@ squash_parent_away() {
   [ "$(field '.next[0].key')" = errors ]
 }
 
+@test "parent: a parent only here is reported as such, with no error, and NEXT ships it first (#105)" {
+  git switch -qc parent && commit p.txt p
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  state
+  [ "$(field .parent.local)" = true ]
+  [ "$(field .parent.on_remote)" = false ]
+  [ "$(field .parent.unpushed)" = true ]
+  [ "$(field '.errors | length')" = 0 ]
+  [ "$(field '.next[0].key')" = ship-parent ]
+  [ "$(field '.next[0].cmd')" = "sd act ship parent" ]
+  git push -q origin parent 2>/dev/null && git fetch -q
+  state
+  [ "$(field .parent.on_remote)" = true ]
+  [ "$(field .parent.unpushed)" = false ]
+  [ "$(field '.next[0].key')" != ship-parent ]
+}
+
+@test "parent: a parent closed without merging, its remote branch deleted, still errors (#105)" {
+  git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  pr_fixture parent '.state = "CLOSED"'
+  git push -q origin :parent 2>/dev/null && git fetch -q --prune
+  state
+  [ "$(field .parent.on_remote)" = false ]
+  [[ "$(field '.errors | join(" ")')" == *"no origin/parent ref"* ]]
+  [ "$(field '.next[0].key')" = errors ]
+}
+
+@test "parent: an open parent PR whose ref isn't fetched is an error, not an unpushed parent (#105)" {
+  git switch -qc parent && commit p.txt p
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  pr_fixture parent
+  state
+  [ "$(field .parent.on_remote)" = false ]
+  [ "$(field .parent.unpushed)" = false ]
+  [[ "$(field '.errors | join(" ")')" == *"no origin/parent ref"* ]]
+  [ "$(field '.next[0].key')" = errors ]
+}
+
+@test "parent: a parent only here whose PR lookup fails keeps the error, not ship-parent (#105)" {
+  git switch -qc parent && commit p.txt p
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  GH_FAKE_FAIL_FOR=parent state
+  [ "$(field .parent.unpushed)" = false ]
+  [[ "$(field '.errors | join(" ")')" == *"no origin/parent ref"* ]]
+  [ "$(field '[.next[].key] | index("ship-parent")')" = null ]
+}
+
+@test "parent: a parent only here that already landed on main by hand is not unpushed (#105)" {
+  git switch -qc parent && commit p.txt p
+  git switch -q main && git merge -q --ff-only parent && git push -q origin main 2>/dev/null
+  git switch -qc feat parent && commit c.txt c
+  git config branch.feat.sd-parent parent
+  state
+  [ "$(field .parent.on_remote)" = false ]
+  [ "$(field .parent.unpushed)" = false ]
+  [ "$(field '[.next[].key] | index("ship-parent")')" = null ]
+  [[ "$(field '.errors | join(" ")')" == *"parent has no commits beyond origin/main and isn't on origin"* ]]
+}
+
+@test "parent: a parent that exists nowhere is still an error" {
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent nosuch
+  state
+  [ "$(field .parent.local)" = false ]
+  [[ "$(field '.errors | join(" ")')" == *"no origin/nosuch ref"* ]]
+}
+
 @test "sync: no shared history with the parent is reported, not guessed" {
   git switch -q --orphan feat && commit a.txt a
   state

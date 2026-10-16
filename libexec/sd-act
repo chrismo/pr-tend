@@ -132,17 +132,17 @@
 #             is reviewed enough), and drop the findings
 #   describe  the agent writes the PR title and body (J6) from the task, the
 #             commits and the diff, read-only, in the branch's session; stored
-#             for HEAD. Spends tokens
-#   ship      describe unless a description for HEAD is stored, check HEAD
-#             didn't move, push, then open a draft PR on the parent (sd-parent,
-#             else the default branch) and enroll; with a PR already open, fix
-#             up its title, body and base instead. Warns when the local review
-#             doesn't cover HEAD; the draft stays a draft until it does.
-#             Refuses while the parent (sd-parent) isn't on the remote, has
-#             merged (restack first), was closed, or can't be looked up; a
-#             merged parent with the branch already on the default branch
-#             ships onto it and rewrites sd-parent. Spends tokens unless HEAD
-#             already has a stored description
+#             for HEAD and the PR's target. Spends tokens
+#   ship      describe unless one for HEAD and the target is stored, check
+#             HEAD didn't move, push, then open a draft PR on the parent
+#             (sd-parent, else the PR's base, else the default branch) and
+#             enroll; with a PR already open, fix up its title, body and base
+#             instead. Warns when the local review doesn't cover HEAD; the
+#             draft stays a draft until it does. Refuses while the parent
+#             isn't on the remote, has merged (restack first), was closed, or
+#             can't be looked up; a merged parent with the branch already on
+#             the default branch ships onto it and rewrites sd-parent. Spends
+#             tokens unless a description for HEAD and the target is stored
 #   trigger   post settings.botCommand on the PR so the review bot runs, and
 #             pin bot at HEAD; nothing when already pinned there. HEAD must
 #             be on the remote (the bot reviews what GitHub has); the local
@@ -663,6 +663,15 @@ autofix() {
   [[ -n $AUTOFIX_CMD ]] || echo "no settings.autofix configured; nothing to run"
 }
 
+# no_base_why <branch> <state>: why sd state found no base: its errors, else a
+# parent that exists only here (parent.unpushed), which sd state reports as a
+# step, not an error (#105).
+no_base_why() {
+  local remote; remote=$(prc_get settings.remote "$1" false) || remote=origin
+  prc_val "$2" "len(coalesce(errors, [])) > 0 ? sj(errors, \"; \")
+    : on(parent.unpushed) ? f\"parent {parent.name} isn't on $remote yet: ship it first (sd act ship {parent.name})\" : \"\""
+}
+
 # ── review ───────────────────────────────────────────────────────────────────
 
 review() {
@@ -673,7 +682,7 @@ review() {
   attached_check "$b" "reviewing $b"
   state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
   base=$(prc_val "$state" 'coalesce(sync.old_base, "")')
-  [[ -n $base ]] || die "can't find $b's base: $(prc_val "$state" 'sj(coalesce(errors, []), "; ")')"
+  [[ -n $base ]] || die "can't find $b's base: $(no_base_why "$b" "$state")"
   head=$(git rev-parse "refs/heads/$b")
   if $accept; then
     pin_write "$b" accepted "$head" "$base"
@@ -1301,22 +1310,40 @@ EOF
 
 describe_file() { echo "$(cd "$(git rev-parse --git-common-dir)" && pwd)/sheepdog/${1//\//__}.describe.json"; }
 
+# describe_base <state>: the prompt's line on what the PR targets (sync.target,
+# the base ship sets), so the body doesn't describe a merged parent as pending
+# (#105). The description is stored with that target: a new one (a parent
+# merged under an unchanged HEAD) makes it stale. One stored before #105 has
+# none, so it is written again once.
+describe_base() {
+  local state=$1 target
+  target=$(prc_val "$state" sync.target)
+  if [[ $(prc_val "$state" 'coalesce(parent.merged, false)') == true ]]; then
+    echo "Base: $(prc_val "$state" parent.name) has merged into $target, so this PR targets $target; don't describe the parent as pending."
+  elif [[ $target != $(prc_val "$state" sync.default) ]]; then
+    echo "Base: this PR is stacked on $target; describe only this branch's change."
+  else
+    echo "Base: this PR targets $target."
+  fi
+}
+
 # describe_run <branch> <worktree> <state>: the describe step in the branch's
-# session (minted if none), read-only. Stores {head, title, body} where ship
+# session (minted if none), read-only. Stores {head, target, title, body} where ship
 # finds it, and prints it.
 describe_run() {
   local b=$1 wt=$2 state=$3 base head task commits diff result f
   base=$(prc_val "$state" 'coalesce(sync.old_base, "")')
-  [[ -n $base ]] || die "can't find $b's base: $(prc_val "$state" 'sj(coalesce(errors, []), "; ")')"
+  [[ -n $base ]] || die "can't find $b's base: $(no_base_why "$b" "$state")"
   head=$(git rev-parse "refs/heads/$b")
   step_session "$b" describe
   task=$(git config --get "branch.$b.sd-task" || true)
   commits=$(git log --format='- %s' "$base..$head")
   diff=$(git diff "$base" "$head")
+  local where; where=$(describe_base "$state")
   echo "sd act: $STEP_H ($STEP_MODE session $STEP_SID) is describing $b…" >&2
   result=$(cd "$wt" && HARNESS_CLAUDE_ALLOW=$HARNESS_READONLY_ALLOW && HARNESS_PI_TOOLS=read \
              && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" \
-                  "$DESCRIBE_PROMPT"$'\n\nTask: '"${task:-(none recorded)}"$'\n\nCommits ('"${base:0:7}..${head:0:7}"$'):\n'"$commits"$'\n\nDiff:\n'"$diff" \
+                  "$DESCRIBE_PROMPT"$'\n\nTask: '"${task:-(none recorded)}"$'\n\n'"$where"$'\n\nCommits ('"${base:0:7}..${head:0:7}"$'):\n'"$commits"$'\n\nDiff:\n'"$diff" \
                   "$DESCRIBE_SCHEMA" "$STEP_CFG") \
     || die "the $STEP_H describe step failed or returned no usable result (session $STEP_SID)"
   [[ $(prc_val "$result" 'case when is(coalesce(title, null), <string>) then grep("\\S", title) else false end' 2>/dev/null) == true ]] \
@@ -1324,7 +1351,8 @@ describe_run() {
   step_store "$b"
   f=$(describe_file "$b")
   mkdir -p "$(dirname "$f")"
-  prc_json 'values {head, title: r.title, body: coalesce(r.body, "")}' "{\"head\": \"$head\", \"r\": $result}" > "$f"
+  prc_json 'values {head, target, title: r.title, body: coalesce(r.body, "")}' \
+    "{\"head\": \"$head\", \"target\": $(prc_json_string "$(prc_val "$state" sync.target)"), \"r\": $result}" > "$f"
   cat "$f"
 }
 
@@ -1357,8 +1385,8 @@ ship() {
     none|OPEN) ;;
     *) die "PR #$(prc_val "$state" pr.number) is $(tr '[:upper:]' '[:lower:]' <<<"$pr_state"); nothing to ship" ;;
   esac
-  parent=$(git config --get "branch.$b.sd-parent" || true)
-  parent=${parent:-$(prc_val "$state" sync.default)}
+  # sd state's parent: sd-parent, else the PR's base, else the default branch.
+  parent=$(prc_val "$state" parent.name)
   if [[ $parent != "$(prc_val "$state" sync.default)" ]]; then
     # Like RESTACK_GATE: a parent whose state is unknown or closed is nobody's
     # to ship onto; a merged one means restack first, unless the branch is
@@ -1371,7 +1399,7 @@ ship() {
       || die "can't parse sd state's answer"
     case $pstate in
       open) git -C "$wt" show-ref -q --verify "refs/remotes/$remote/$parent" \
-              || die "parent $parent isn't on $remote: ship it first (sd act ship $parent)" ;;
+              || die "can't ship $b onto $parent: $(no_base_why "$b" "$state")" ;;
       unknown) die "can't tell whether $parent merged: $(prc_val "$state" 'sj(coalesce(errors, []), "; ")')" ;;
       closed) die "parent $parent (#$(prc_val "$state" parent.pr.number)) was closed without merging: decide what $b targets (git config branch.$b.sd-parent <branch>), then ship" ;;
       merged) die "parent $parent has merged: sd act restack first, which lands $b on $(prc_val "$state" sync.target) and rewrites sd-parent" ;;
@@ -1383,7 +1411,7 @@ ship() {
     | values "sd act: warning: the local review doesn'"'"'t cover HEAD (sd act review); the PR stays a draft until it does"' "$state" >&2
   head=$(git rev-parse "refs/heads/$b")
   f=$(describe_file "$b")
-  if [[ ! -f $f || $(prc_line 'values head' "$(<"$f")" 2>/dev/null) != "$head" ]]; then
+  if [[ ! -f $f || $(prc_line 'values f"{head} {coalesce(target, "")}"' "$(<"$f")" 2>/dev/null) != "$head $(prc_val "$state" sync.target)" ]]; then
     describe_run "$b" "$wt" "$state" >/dev/null
     [[ $(git rev-parse "refs/heads/$b") == "$head" ]] \
       || die "HEAD moved during the describe step (${head:0:7} → $(git rev-parse --short "refs/heads/$b")); nothing pushed. Look, then ship again"
@@ -1435,7 +1463,7 @@ trigger() {
   if [[ -n $line ]] && ! $force; then die "not triggering the bot on $b: $line (--force to trigger anyway)"; fi
   head=$(git rev-parse "refs/heads/$b")
   base=$(prc_val "$state" 'coalesce(sync.old_base, "")')
-  [[ -n $base ]] || die "can't find $b's base: $(prc_val "$state" 'sj(coalesce(errors, []), "; ")')"
+  [[ -n $base ]] || die "can't find $b's base: $(no_base_why "$b" "$state")"
   pr_id=$(gql -f url="$(prc_val "$state" pr.url)" \
             -f query='query($url: URI!) { resource(url: $url) { ... on PullRequest { id } } }' \
           | prc_line 'values data.resource.id') || die "couldn't look up PR #$(prc_val "$state" pr.number)"
@@ -1555,7 +1583,9 @@ patch_id() { git diff -U0 "$1" "$2" | git patch-id --stable | cut -d' ' -f1; }
 
 # Over {remote, resolve, replay: old_base..HEAD, newest first, s: the sd state JSON}.
 read -r -d '' RESTACK_GATE <<'EOF' || true
-values {remote, resolve, s, why: sj(coalesce(s.errors, []), "; "), onto: f"{remote}/{s.sync.target}",
+values {remote, resolve, s, onto: f"{remote}/{s.sync.target}",
+        why: len(coalesce(s.errors, [])) > 0 ? sj(s.errors, "; ")
+             : on(s.parent.unpushed) ? f"parent {s.parent.name} isn't on {remote} yet: ship it first (sd act ship {s.parent.name})" : "",
         from_parent: coalesce([unnest {p: coalesce(s.parent.pr.commits, []), r: replay} | where r in p | values r], [])}
 | values [
     on(s.parent.pr.state == "CLOSED") and on(s.parent.name != s.sync.default)
