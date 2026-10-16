@@ -107,7 +107,7 @@ harness_run() {
   esac
   rc=$?
   if (( rc != 0 )); then
-    cat "$err" >&2
+    tail -n 40 "$err" >&2
     # The end of the harness's own account of the failure: claude's result
     # text, else an error result's subtype (e.g. error_max_turns), else
     # stdout that isn't JSON; pi's reply.

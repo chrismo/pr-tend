@@ -522,8 +522,9 @@ review() {
   timeout=$(prc_get settings.stepTimeout "$b" false) || die "sd config failed"
   [[ $timeout =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $timeout"
   task=$(git config --get "branch.$b.sd-task" || true)
-  # A margin over stepTimeout, so the default reviewer's own harness timeout
-  # fires first and shows the harness's stderr before this one kills it.
+  # A margin over stepTimeout for every reviewer, so the default reviewer's own
+  # harness timeout fires first and shows the harness's stderr before this one
+  # kills it.
   findings=$(cd "$wt" && SHEEPDOG_BASE=$base SHEEPDOG_HEAD=$head SHEEPDOG_TASK=$task \
                with_timeout "$((timeout + 30))" sh -c "$reviewer" </dev/null) \
     || die "the reviewer failed ($reviewer); nothing pinned"

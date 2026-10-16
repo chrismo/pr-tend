@@ -119,7 +119,7 @@ EOF
   jq -n '{type: "result", is_error: true, result: ([range(1; 31) | "line \(.)"] | join("\n"))}' > "$FX/out"
   run --separate-stderr harness_run claude sid1 new 30 "do it" '{}'
   [ "$status" -ne 0 ]
-  [[ "$stderr" == *"line 30"* ]]
+  [[ "$stderr" == *"line 11"$'\n'*"line 30"* ]]
   [[ "$stderr" != *"line 10"$'\n'* ]]
 }
 
