@@ -156,6 +156,14 @@ step() { # step <key> <field> <jq-assignment...>
   [ "$(step foreign say '.push.remote_ours = false' '.push.behind = 2' '.push.theirs = 1')" = "origin/feat has 1 commit this copy has never had" ]
 }
 
+@test "attached: the session is open interactively; agent steps wait" {
+  run next '.session.locked = true' '.threads.owed_bot = 2'
+  [ "$(jq -r '.[0].key' <<<"$output")" = attached ]
+  [ "$(jq -r '.[0].who' <<<"$output")" = wait ]
+  [ "$(jq -r '.[0].cmd' <<<"$output")" = null ]
+  [ "$(jq -r '.[1].key' <<<"$output")" = bot ]
+}
+
 @test "human items: chrismo replies, via the --long list" {
   [ "$(step human who '.threads.owed_human = 2')" = you ]
   [ "$(step human say '.threads.owed_human = 2')" = "reply to 2 human items" ]
