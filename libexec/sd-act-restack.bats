@@ -296,7 +296,7 @@ child" ]
   run "$SD_ACT" restack --resolve
   [ "$status" -ne 0 ]
   [[ "$output" == *"by tree would conflict"* ]]
-  [[ "$output" == *"By hand: git reset --hard origin/main && git diff ${a_head:0:12} ${before:0:12} | git apply -3, resolve and commit, then git update-ref refs/sheepdog/child/base origin/main (the old head stays at ${before:0:12})"* ]]
+  [[ "$output" == *"By hand: git switch child && git reset --hard origin/main && git diff --binary ${a_head:0:12} ${before:0:12} | git apply -3, resolve and commit, then git update-ref refs/sheepdog/child/base origin/main (the old head stays at ${before:0:12})"* ]]
   [ "$(git rev-parse child)" = "$before" ]
   [ ! -e "$FX/claude.calls" ]
 }

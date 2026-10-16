@@ -1570,7 +1570,7 @@ values {remote, resolve, s, why: sj(coalesce(s.errors, []), "; "), onto: f"{remo
       ? {hard: f"wrong base: this would replay {len(from_parent)} of #{s.parent.pr.number}'s commits onto {onto}; if the stack is linear, rebase past them by hand: git rebase --onto {onto} {from_parent[0][0:12]} {s.branch} && git update-ref refs/sheepdog/{s.branch}/base {onto}"}
     : nul(s.sync.conflict) ? {hard: f"can't tell whether restacking {s.branch} would conflict: {why}"}
     : on(s.sync.by_tree) and on(s.sync.conflict)
-      ? {hard: f"restacking {s.branch} onto {onto} by tree would conflict; --resolve can't resolve a tree restack. By hand: git reset --hard {onto} && git diff {s.sync.old_base[0:12]} {s.head[0:12]} | git apply -3, resolve and commit, then git update-ref refs/sheepdog/{s.branch}/base {onto} (the old head stays at {s.head[0:12]})"}
+      ? {hard: f"restacking {s.branch} onto {onto} by tree would conflict; --resolve can't resolve a tree restack. By hand: git switch {s.branch} && git reset --hard {onto} && git diff --binary {s.sync.old_base[0:12]} {s.head[0:12]} | git apply -3, resolve and commit, then git update-ref refs/sheepdog/{s.branch}/base {onto} (the old head stays at {s.head[0:12]})"}
     : on(s.sync.conflict) and not resolve
       ? {hard: f"restacking {s.branch} onto {onto} would conflict; resolve it by hand: git rebase --onto {onto} {s.sync.old_base[0:12]} {s.branch}, then git update-ref refs/sheepdog/{s.branch}/base $(git merge-base {onto} {s.branch}); or let the agent: sd act restack --resolve"}
     : null,
@@ -1661,7 +1661,7 @@ restack() {
 # restack_by_tree <worktree> <branch> <old-base> <old-head> <new-base> <onto>:
 # <old-base>..<old-head>'s change as one commit on <new-base>, by a tree merge,
 # for an old base that isn't an ancestor (sd state's sync.by_tree). The message
-# leaves out the copies of the parent's commits: their change is on the target.
+# leaves out exact copies of the parent's commits: their change is on the target.
 restack_by_tree() {
   local tree new
   tree=$(git merge-tree --write-tree --merge-base="$3" "$5" "$4") \
