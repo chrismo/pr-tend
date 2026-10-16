@@ -214,9 +214,26 @@ holds_parent_commits() {
   local commits; commits=$(prc_line 'unnest coalesce(allCommits.nodes, []) | values commit.oid' "$parent_pr")
   [[ -n $commits ]] && grep -qxFf <(printf '%s\n' "$commits") <<<"$(git rev-list "$1")"
 }
+# parent_in_head: HEAD holds the merged parent's whole change. Merging the
+# parent's net change (from where it left the target to its merged head) into
+# HEAD again must change nothing; a missing part, or the branch's own edit to
+# the parent's lines, changes or conflicts. Squash merges only: a head already
+# in the target would make the merge a no-op whatever HEAD holds. And HEAD
+# must leave the target where the parent did: from an older point, the tree
+# merge from the merged head would revert what the parent picked up from the
+# target; from a newer one, the change it checks would hold target commits.
+parent_in_head() {
+  local base tree
+  [[ -n $merged_head ]] && git cat-file -e "$merged_head^{commit}" 2>/dev/null || return 1
+  ! is_ancestor "$merged_head" "$target_ref" || return 1
+  base=$(git merge-base "$merged_head" "$target_ref") || return 1
+  [[ $(git merge-base "$head" "$target_ref") == "$base" ]] || return 1
+  tree=$(git merge-tree --write-tree --merge-base="$base" "$head" "$merged_head" 2>/dev/null) || return 1
+  [[ $tree == "$(git rev-parse "$head^{tree}")" ]]
+}
 
 target_ref=$(ref "refs/remotes/$remote/$target")
-sync_ahead=null behind=null up_to_date=null old_base="" conflict=null
+sync_ahead=null behind=null up_to_date=null old_base="" conflict=null by_tree=false
 if [[ -z $target_ref ]]; then
   errors+=("no $remote/$target ref (not fetched?)")
 else
@@ -234,6 +251,10 @@ else
   elif [[ -n $(ref "refs/remotes/$remote/$parent") ]] \
        && old_base=$(git merge-base --fork-point "refs/remotes/$remote/$parent" "$head" 2>/dev/null); then
     :
+  # No rebase --onto without an ancestor, but a tree merge from the merged
+  # head (not the pin: the head is what HEAD was just shown to hold).
+  elif [[ -n $base_pin && $parent_merged == true ]] && parent_in_head; then
+    old_base=$merged_head by_tree=true
   # Not with the default branch once a stacked parent merged: that replays the parent's commits.
   elif [[ $target == "$parent" ]]; then
     old_base=$(git merge-base "$target_ref" "$head" || true)
@@ -241,6 +262,8 @@ else
 
   if is_ancestor "$target_ref" "$head"; then
     up_to_date=true conflict=false
+    # A tree base is for a restack, and there's none to do.
+    if [[ $by_tree == true ]]; then old_base="" by_tree=false; fi
     # Past the target, the branch's own commits, unless a merge (not a
     # rebase) kept the merged parent's.
     if [[ -z $old_base ]]; then
@@ -450,7 +473,7 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
              pr: nul(s.parent_pr) ? null : {number: s.parent_pr.number, state: s.parent_pr.state, head_sha: s.parent_pr.headRefOid,
                                        commits: coalesce([unnest coalesce(s.parent_pr.allCommits.nodes, []) | values commit.oid], [])}},
     sync: {target: s.target, default: s.default_branch, ahead: s.sync_ahead, behind: s.behind, up_to_date: s.up_to_date,
-           old_base: s.old_base, conflict: s.conflict, undone: s.undone},
+           old_base: s.old_base, by_tree: s.by_tree, conflict: s.conflict, undone: s.undone},
     push: {remote_sha: s.remote_sha, ahead: s.ahead, behind: s.push_behind, diverged: s.diverged, remote_ours: s.remote_ours, theirs: s.theirs,
            remote_made: s.remote_made, dirty: s.dirty},
     fresh: s.gh_ok and s.parent_ok ? len(s.stale) == 0 : null, stale: s.stale,
@@ -490,12 +513,12 @@ errors_json='[]'
 (( ${#errors[@]} == 0 )) || errors_json=$(printf '%s\n' "${errors[@]}" | prc_strings)
 refs_json=$(git for-each-ref --format='%(refname) %(objectname)' "refs/sheepdog/$branch/" | prc_strings)
 args=$(printf '{"branch": %s, "head": %s, "pr": %s, "parent": %s, "parent_source": %s, "parent_pr": %s, "parent_merged": %s,
-  "target": %s, "default_branch": %s, "sync_ahead": %s, "behind": %s, "up_to_date": %s, "old_base": %s, "conflict": %s, "undone": %s,
+  "target": %s, "default_branch": %s, "sync_ahead": %s, "behind": %s, "up_to_date": %s, "old_base": %s, "by_tree": %s, "conflict": %s, "undone": %s,
   "remote_sha": %s, "ahead": %s, "push_behind": %s, "diverged": %s, "remote_ours": %s, "theirs": %s, "remote_made": %s, "dirty": %s, "stale": %s,
   "r_local": %s, "r_bot": %s, "r_accepted": %s, "r_findings": %s, "r_findings_at_head": %s, "review_rounds": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s,
   "ignore": %s, "ignore_body": %s, "handled": %s, "refs": %s, "enrolled": %s, "harness": %s, "session": %s, "lock": %s, "errors": %s}\n' \
   "$(jstr "$branch")" "$(jstr "$head")" "$pr" "$(jstr "$parent")" "$(jstr "$parent_source")" "$parent_pr" "$parent_merged" \
-  "$(jstr "$target")" "$(jstr "$default_branch")" "$sync_ahead" "$behind" "$up_to_date" "$(jnull "$old_base")" "$conflict" "$undone" \
+  "$(jstr "$target")" "$(jstr "$default_branch")" "$sync_ahead" "$behind" "$up_to_date" "$(jnull "$old_base")" "$by_tree" "$conflict" "$undone" \
   "$(jnull "$remote_sha")" "$ahead" "$push_behind" "$diverged" "$remote_ours" "$theirs" "$remote_made" "$dirty" "$stale_json" \
   "${review[local]}" "${review[bot]}" "${review[accepted]}" "$r_findings" "$r_findings_at_head" "$review_rounds" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" \
   "$ignore" "$ignore_body" "$(jlist "branch.$branch.sd-handled")" "$refs_json" \

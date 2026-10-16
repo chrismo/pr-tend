@@ -383,16 +383,19 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
   git update-ref refs/sheepdog/feat/base "$pin"
   state
   [ "$(field .sync.old_base)" = "$pin" ]
+  [ "$(field .sync.by_tree)" = false ]
 }
 
-# lost_pin_stack [pin]: parent (p1, p2) squash-merged into main and its branch
-# deleted; feat stacked on it, rewritten outside sheepdog so p2 is a copy, not
-# p2. Pins the base at p2 unless told "nopin". Sets $p2.
+# lost_pin_stack [nopin|same]: parent (p1, p2) squash-merged into main and its
+# branch deleted; feat stacked on it, rewritten outside sheepdog so p2 is a
+# copy, not p2: a changed one, or with "same" an exact one. Pins the base at p2
+# unless told "nopin". Sets $p1 and $p2.
 lost_pin_stack() {
   git switch -qc parent && commit p.txt p1 && commit q.txt p2 && git push -q origin parent 2>/dev/null
-  p2=$(git rev-parse parent)
+  p1=$(git rev-parse parent~1) p2=$(git rev-parse parent)
   git switch -qc feat parent~1
-  printf 'p2 again\n' > q.txt && git add q.txt && git commit -qm "copy of p2"
+  printf '%s\n' "$([[ ${1:-} == same ]] && echo p2 || echo 'p2 again')" > q.txt
+  git add q.txt && git commit -qm "copy of p2"
   commit c.txt c
   git config branch.feat.sd-parent parent
   [[ ${1:-} == nopin ]] || git update-ref refs/sheepdog/feat/base "$p2"
@@ -409,6 +412,123 @@ lost_pin_stack() {
   [ "$(field .sync.old_base)" = null ]
   [ "$(field .sync.conflict)" = null ]
   [[ "$(field '.errors | join(" ")')" == *"base pin ${p2:0:7} is no longer in feat's history (rewritten outside sheepdog?)"* ]]
+}
+
+@test "sync: pin lost, but all of the merged parent is in HEAD: the merged head is the base, by tree" {
+  lost_pin_stack same
+  pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p2\"" \
+    ".allCommits = {nodes: [{commit: {oid: \"$p1\"}}, {commit: {oid: \"$p2\"}}]}"
+  state
+  [ "$(field .sync.old_base)" = "$p2" ]
+  [ "$(field .sync.by_tree)" = true ]
+  [ "$(field .sync.conflict)" = false ]
+}
+
+# squash_parent_away: parent squash-merged into main elsewhere, its branch deleted.
+squash_parent_away() {
+  (cd "$TMP/other" && git fetch -q origin && git merge -q --squash origin/parent >/dev/null \
+     && git commit -qm "parent (#3)" && git push -q origin main :parent 2>/dev/null)
+  git fetch -q --prune
+}
+
+@test "sync: pin lost, HEAD still has a line the parent deleted: no tree base" {
+  git switch -qc parent && printf 'x\ny\nz\n' > r.txt && git add r.txt && git commit -qm p1
+  printf 'x\nz\n' > r.txt && git commit -qam "p2 drops y" && git push -q origin parent 2>/dev/null
+  local p2; p2=$(git rev-parse parent)
+  git switch -qc feat parent~1 && git commit -q --allow-empty -m "not really p2" && commit c.txt c
+  git config branch.feat.sd-parent parent
+  git update-ref refs/sheepdog/feat/base "$p2"
+  squash_parent_away
+  pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p2\"" \
+    ".allCommits = {nodes: [{commit: {oid: \"$(git rev-parse "$p2~1")\"}}, {commit: {oid: \"$p2\"}}]}"
+  state
+  [ "$(field .sync.by_tree)" = false ]
+  [ "$(field .sync.old_base)" = null ]
+}
+
+@test "sync: pin lost, HEAD holds the parent as one copy of two edits to a line: by tree" {
+  git switch -qc parent && commit s.txt X && commit s.txt Y && git push -q origin parent 2>/dev/null
+  local p2; p2=$(git rev-parse parent)
+  git switch -qc feat main && commit s.txt Y && commit c.txt c
+  git config branch.feat.sd-parent parent
+  git update-ref refs/sheepdog/feat/base "$p2"
+  squash_parent_away
+  pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p2\""
+  state
+  [ "$(field .sync.by_tree)" = true ]
+  [ "$(field .sync.old_base)" = "$p2" ]
+}
+
+@test "sync: pin at an older parent head, HEAD holds the whole merged parent: the merged head is the tree base" {
+  git switch -qc parent && commit s.txt X && local p1; p1=$(git rev-parse parent)
+  commit t.txt Y && git push -q origin parent 2>/dev/null
+  local p2; p2=$(git rev-parse parent)
+  git switch -qc feat main
+  printf 'X\n' > s.txt && printf 'Y\n' > t.txt && git add s.txt t.txt && git commit -qm "parent, copied" && commit c.txt c
+  git config branch.feat.sd-parent parent
+  git update-ref refs/sheepdog/feat/base "$p1"
+  squash_parent_away
+  pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p2\""
+  state
+  [ "$(field .sync.by_tree)" = true ]
+  [ "$(field .sync.old_base)" = "$p2" ]
+}
+
+@test "sync: pin lost, parent moved onto a newer main than HEAD has: no tree base, which would revert main" {
+  git switch -qc parent && commit s.txt X && git push -q origin parent 2>/dev/null
+  local p1; p1=$(git rev-parse parent)
+  git switch -qc feat main
+  printf 'X\n' > s.txt && git add s.txt && git commit -qm "copy of p1" && commit c.txt c
+  git config branch.feat.sd-parent parent
+  git update-ref refs/sheepdog/feat/base "$p1"
+  (cd "$TMP/other" && commit m.txt M1 "$TMP/other" && git push -q origin main 2>/dev/null \
+     && git fetch -q origin && git switch -qc parent origin/parent && git rebase -q main \
+     && git push -qf origin parent 2>/dev/null && git switch -q main)
+  git fetch -q
+  local p1b; p1b=$(git rev-parse origin/parent)
+  squash_parent_away
+  pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p1b\""
+  state
+  [ "$(field .sync.by_tree)" = false ]
+  [ "$(field .sync.old_base)" = null ]
+}
+
+@test "sync: pin lost, HEAD on a newer main than the parent was: no tree base, whose restack would roll back" {
+  git switch -qc parent && commit s.txt X && git push -q origin parent 2>/dev/null
+  local p1; p1=$(git rev-parse parent)
+  (cd "$TMP/other" && commit m.txt M1 "$TMP/other" && git push -q origin main 2>/dev/null)
+  git fetch -q && git switch -qc feat origin/main
+  printf 'X\n' > s.txt && git add s.txt && git commit -qm "copy of p1" && commit c.txt c
+  git config branch.feat.sd-parent parent
+  git update-ref refs/sheepdog/feat/base "$p1"
+  squash_parent_away
+  pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p1\""
+  state
+  [ "$(field .sync.by_tree)" = false ]
+  [ "$(field .sync.old_base)" = null ]
+}
+
+@test "sync: pin lost, parent merged with a merge commit: no tree base, whatever HEAD holds" {
+  git switch -qc parent && commit p.txt p1 && commit q.txt p2 && git push -q origin parent 2>/dev/null
+  local p2; p2=$(git rev-parse parent)
+  git switch -qc feat parent~1 && commit q.txt "p2, rewritten" && commit c.txt c
+  git config branch.feat.sd-parent parent
+  git update-ref refs/sheepdog/feat/base "$p2"
+  (cd "$TMP/other" && git fetch -q origin && git merge -q --no-ff --no-edit origin/parent \
+     && git push -q origin main :parent 2>/dev/null)
+  git fetch -q --prune
+  pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p2\""
+  state
+  [ "$(field .sync.by_tree)" = false ]
+}
+
+@test "sync: pin lost, a parent commit that is in HEAD only changed: no old base" {
+  lost_pin_stack
+  pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p2\"" \
+    ".allCommits = {nodes: [{commit: {oid: \"$p1\"}}, {commit: {oid: \"$p2\"}}]}"
+  state
+  [ "$(field .sync.old_base)" = null ]
+  [ "$(field .sync.by_tree)" = false ]
 }
 
 @test "sync: stacked, no pin, parent merged and deleted: no old base, and says why" {

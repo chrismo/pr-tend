@@ -180,6 +180,17 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(step behind cmd "${STACKED[@]}")" = "sd act restack" ]
 }
 
+@test "a tree restack that conflicts is chrismo's: --resolve can't do it" {
+  [ "$(step conflict who "${STACKED[@]}" '.sync.conflict = true' '.sync.by_tree = true')" = you ]
+  [ "$(step conflict say "${STACKED[@]}" '.sync.conflict = true' '.sync.by_tree = true')" = "restack onto base by tree conflicts, which --resolve can't do: resolve it by hand (sd act restack says how)" ]
+  [ "$(step conflict cmd "${STACKED[@]}" '.sync.conflict = true' '.sync.by_tree = true')" = "sd act restack" ]
+}
+
+@test "behind, by tree: the step says the commits become one" {
+  [ "$(step behind say "${STACKED[@]}" '.sync.by_tree = true')" = "restack onto base by tree (3 behind): its commits become one" ]
+  [ "$(step behind cmd "${STACKED[@]}" '.sync.by_tree = true')" = "sd act restack" ]
+}
+
 @test "a conflicting restack hands the agent the resolution" {
   [ "$(step conflict cmd "${STACKED[@]}" '.sync.conflict = true')" = "sd act restack --resolve" ]
   [ "$(step conflict who "${STACKED[@]}" '.sync.conflict = true')" = agent ]
