@@ -60,7 +60,7 @@ query($owner: String!, $repo: String!, $branch: String!, $commits: Boolean!) {
         mergeStateStatus reviewDecision
         reviewRequests(first: 20) { nodes { requestedReviewer {
           ... on User { login } ... on Bot { login } ... on Mannequin { login } ... on Team { slug } } } }
-        allCommits: commits(first: 250) @include(if: $commits) { nodes { commit { oid } } }
+        allCommits: commits(last: 250) @include(if: $commits) { nodes { commit { oid } } }
         commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes {
           __typename
           ... on CheckRun { name status conclusion }
