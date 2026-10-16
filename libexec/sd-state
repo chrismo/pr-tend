@@ -174,12 +174,15 @@ if [[ -z $parent ]]; then
   else
     parent=$default_branch parent_source=default
     # A plain git branch from another's tip records no parent (#94): flag it,
-    # unless gh failed and a PR we couldn't see may name the parent.
+    # unless gh failed and a PR we couldn't see may name the parent. An error,
+    # so ship waits: it would open the PR on the default branch with the
+    # parent's commits in it.
     rc=1
     if $gh_ok; then rc=0 stacked=$(stacked_on "$branch" "$remote" "$default_branch") || rc=$?; fi
     case $rc in
       0) errors+=("stacked on ${stacked%% *} without sheepdog knowing: sd act enroll records it") ;;
       2) errors+=("stacked on ${stacked// / or } without sheepdog knowing: record one with git config branch.$branch.sd-parent <name>") ;;
+      3) errors+=("shares commits with ${stacked%% *}, and each has its own since, so either may be stacked on the other: git config branch.$branch.sd-parent ${stacked%% *} if $branch is, or git config branch.$branch.sd-parent $default_branch if not") ;;
     esac
   fi
 fi

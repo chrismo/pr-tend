@@ -208,6 +208,19 @@ field() { jq -r "$@" <<<"$output"; }
   [[ "$(field '.errors | join(" ")')" == *"stacked on par or twin without sheepdog knowing"* ]]
 }
 
+@test "an unrecorded stack whose parent moved on says it can't tell which way, both ways round" {
+  git switch -qc par && commit a.txt a
+  git switch -qc kid && commit b.txt b
+  git switch -q par && commit c.txt c
+  state par
+  [[ "$(field '.errors | join(" ")')" == *"shares commits with kid, and each has its own since, so either may be stacked on the other: git config branch.par.sd-parent kid if par is, or git config branch.par.sd-parent main if not"* ]]
+  state kid
+  [[ "$(field '.errors | join(" ")')" == *"shares commits with par"* ]]
+  git config branch.kid.sd-parent par
+  state par
+  [[ "$(field '.errors | join(" ")')" != *"shares commits"* ]]
+}
+
 @test "an unrecorded stack isn't flagged when gh failed, since a PR may name the parent" {
   git switch -qc par && commit a.txt a
   git switch -qc kid && commit b.txt b

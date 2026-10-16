@@ -38,12 +38,59 @@ stack_setup() {
   [ "$output" = "par $(git rev-parse par)" ]
 }
 
-@test "stacked_on: the parent moved on since; the base is where they forked" {
+@test "stacked_on: the parent moved on since; named, base where they forked, but either way round" {
   stack_setup
   local fork; fork=$(git rev-parse par)
   c par p3
   run stacked_on kid origin main
+  [ "$status" -eq 3 ]
   [ "$output" = "par $fork" ]
+}
+
+@test "stacked_on: a moved parent can't tell its own child from a parent either" {
+  stack_setup
+  local fork; fork=$(git rev-parse par)
+  c par p3
+  run stacked_on par origin main
+  [ "$status" -eq 3 ]
+  [ "$output" = "kid $fork" ]
+}
+
+@test "stacked_on: a moved parent skips a child that recorded it as its parent" {
+  stack_setup
+  c par p3
+  git config branch.kid.sd-parent par
+  run stacked_on par origin main
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
+@test "stacked_on: a moved parent whose remote copy is still at the fork is the parent" {
+  stack_setup
+  local fork; fork=$(git rev-parse par)
+  git update-ref refs/remotes/origin/par par
+  c par p3
+  run stacked_on kid origin main
+  [ "$status" -eq 0 ]
+  [ "$output" = "par $fork" ]
+}
+
+@test "stacked_on: a sibling made from the same tip loses to the parent" {
+  stack_setup
+  git switch -q par && git switch -qc sib && git commit -q --allow-empty -m s1
+  run stacked_on kid origin main
+  [ "$status" -eq 0 ]
+  [ "$output" = "par $(git rev-parse par)" ]
+}
+
+@test "stacked_on: the default branch is stacked on nothing, unpushed commits or not" {
+  git update-ref refs/remotes/origin/main main
+  c main m1
+  git switch -qc topic && git commit -q --allow-empty -m t1
+  c main m2
+  run stacked_on main origin main
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
 }
 
 @test "stacked_on: a local parent rewritten since is found by its remote-tracking ref" {

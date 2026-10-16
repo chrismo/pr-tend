@@ -225,15 +225,20 @@ harness_run() {
 # stacked_on <branch> <remote> <default>: the branch <branch> was made from when
 # no one recorded it (a plain git branch from another's tip), found by the
 # commits they share that aren't on <remote>/<default>. Prints "<name> <base>",
-# base being where they forked. Exit 1: none; 2: a tie, the names printed.
+# base being where they forked. Exit 1: none; 2: a tie, the names printed;
+# 3: the one found has commits of its own past the fork too, so git can't say
+# which was made from which (a parent that moved on looks like a child).
 # Git only, and bounded for sd state: candidates are local branches and their
-# remote-tracking refs that hold <branch>'s oldest commit past the default, one
-# rev-list each. A branch holding all of <branch>'s commits is its child, not
-# its parent.
+# remote-tracking refs that hold <branch>'s oldest commit past the default, two
+# rev-lists each. A branch holding all of <branch>'s commits is its child, not
+# its parent, and so is one whose sd-parent names <branch>. At equal shared
+# commits, one with none of its own beats one with some: a sibling shares the
+# parent's commits too.
 stacked_on() {
-  local b=$1 remote=$2 def="refs/remotes/$2/$3" oldest total ref name own shared
-  local best="" best_ref="" best_n=0
+  local b=$1 remote=$2 def="refs/remotes/$2/$3" oldest total ref name own theirs shared score
+  local best="" best_ref="" best_score=0 best_theirs=0
   local -A local_branch=() tie=()
+  [[ $b != "$3" ]] || return 1
   oldest=$(git rev-list --topo-order --reverse "$def..refs/heads/$b" 2>/dev/null) || return 1
   oldest=${oldest%%$'\n'*}
   [[ -n $oldest ]] || return 1
@@ -244,14 +249,18 @@ stacked_on() {
     [[ $name != "$b" && $name != "$3" && -n ${local_branch[$name]:-} ]] || continue
     own=$(git rev-list --count "refs/heads/$b" "^$def" "^$ref")
     (( own > 0 )) || continue
+    theirs=$(git rev-list --count "$ref" "^$def" "^refs/heads/$b")
+    if (( theirs > 0 )) && [[ $(git config --get "branch.$name.sd-parent") == "$b" ]]; then continue; fi
     shared=$(( total - own ))
-    if (( shared > best_n )); then
-      best=$name best_ref=$ref best_n=$shared tie=()
-    elif (( shared == best_n )) && [[ $name != "$best" ]]; then
+    score=$(( shared * 2 + (theirs == 0) ))
+    if (( score > best_score )); then
+      best=$name best_ref=$ref best_score=$score best_theirs=$theirs tie=()
+    elif (( score == best_score )) && [[ $name != "$best" ]]; then
       tie[$name]=1
     fi
   done < <(git for-each-ref --contains "$oldest" --format='%(refname)' refs/heads "refs/remotes/$remote")
   [[ -n $best ]] || return 1
   if (( ${#tie[@]} )); then printf '%s\n' "$best" "${!tie[@]}" | sort | paste -sd' ' -; return 2; fi
   echo "$best $(git merge-base "refs/heads/$b" "$best_ref")"
+  (( best_theirs == 0 )) || return 3
 }
