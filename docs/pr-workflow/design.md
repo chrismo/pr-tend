@@ -18,16 +18,6 @@ a glance where each one stands:
 3. review current (local and/or bot)
 4. bot comments responded to
 
-**Name: `pr-tend`, for now (2026-10-13).** It's the overarching name for the
-pipeline and the namespace for its state: git config `pr-tend.*` and
-`branch.<b>.sheepdog`, `refs/sheepdog/`, `~/.config/sheepdog/`,
-`~/.local/state/sheepdog/`, `<git dir>/sheepdog/`, `lib/sheepdog.sh`. The commands
-stay `sd state`, `sd act`, `sd watch`, `sd config`. Rename candidates: `sheepdog` (favourite), `tug`, **`pr-op`** (*prop*), and
-**`pr-onto`** (*pronto*). The last two keep the `pr-` prefix while reading as
-short familiar words; `pr-op` suggests a PR operation, while `pr-onto` suggests
-getting a PR moving. Renaming means a pass over every name above, plus migrating
-existing state.
-
 ## Principles
 
 1. **Deterministic wherever possible.** Scripts observe and act at zero token
@@ -71,7 +61,7 @@ existing state.
 | Per-step turn cap | **No.** Neither CLI shows a turn-cap flag (`--help`, 2026-10-11); `--max-budget-usd` bounds Claude steps. |
 | Verify before reply | **No, for now.** Revisit if we move fix steps to cheaper models (OpenHands-style per-thread "was it incorporated?" check). |
 | Handed-off feedback | Multi-valued `branch.<name>.sd-handled <comment-id>` (git config `--add`). Mostly a guard for review bodies and in-flight steps; threads already dedup via "last speaker is us" (O7). |
-| Step prompts | Lookup chain, nearest wins: `<scope>/.sheepdog/<step>.md` walking up to the repo root → pr-tend defaults. `scope` = `branch.<name>.sd-scope`, set by `sd act start --scope <app-dir>` (monorepo: per app); default repo root. |
+| Step prompts | Lookup chain, nearest wins: `<scope>/.sheepdog/<step>.md` walking up to the repo root → sheepdog defaults. `scope` = `branch.<name>.sd-scope`, set by `sd act start --scope <app-dir>` (monorepo: per app); default repo root. |
 | Build vs adopt | Self-built. AO evaluated (below), not adopted; round 2 (2026-10-11) found nothing to adopt wholesale — see "Prior art, round 2". |
 | Who drives | **Pipeline drives, reaffirmed** after round 2. Symphony / Gas Town (agent drives the PR loop from prompts) are the opposite camp; Sortie / Archon match us. Keeps tokens down; stochastic only where judgment is needed. |
 | GitHub native stacks (`gh stack`) | **Not used by the pipeline.** Too heavy for local automation; read only for git tricks. Guard only: chrismo uses `gh stack` at work, so a branch can be in a native stack anyway — then O1 sees the `stack` field and the pipeline skips A2 / A4 (GitHub restacks server-side and refuses base edits) rather than race it. Not built: [#17]. |
@@ -354,8 +344,8 @@ sd config: <git dir>/sheepdog/feat.json: settings.remote: global file only
 - **Cost:** about 50 ms per file per read (2026-10-13: `prc_get` 184 → 282 ms
   with both files present).
 
-**No git config fallback.** `pr-tend.<key>` and `pr-tend.<harness>.args` aren't
-read any more; nobody had any set (checked 2026-10-13). Per-branch *state* stays
+**No git config fallback.** `pr-tend.<key>` and `pr-tend.<harness>.args` (now
+`sheepdog.*`) aren't read any more; nobody had any set (checked 2026-10-13). Per-branch *state* stays
 in git config: enrollment, `sd-session`, `sd-harness`, `sd-handled`, and so on,
 plus the `sheepdog.repo` registry.
 
@@ -580,7 +570,7 @@ sd config set [--global] settings.localReview <command>
 ```
 
 Any executable. What it does inside (prompt, model, emulating the backend bot
-or not) is out of scope; pr-tend defines only the contract, and ships a
+or not) is out of scope; sheepdog defines only the contract, and ships a
 default `libexec/sd-review-local` (built 2026-10-14: `lib/review-prompt.md` plus
 the task, commits and diff, through `harness_run` in `lib/sheepdog.sh` with
 read-only tools and a new session every run; harness, model and effort from
@@ -775,7 +765,7 @@ from running them.
     remains. [#14]
 
 Two decisions that had to come before steps 5 and 6 are settled: the name is
-`pr-tend`, and the pipeline moved out of agent-rig into its own repo
+`pr-tend` (sheepdog since 2026-10-15), and the pipeline moved out of agent-rig into its own repo
 (2026-10-13).
 
 ## `sd act address` — built 2026-10-12
