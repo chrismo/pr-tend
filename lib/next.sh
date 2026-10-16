@@ -66,8 +66,8 @@ values {...s, remote}
       : has_pr and not parent_closed and not on(sync.conflict) and gh_behind
       ? step("behind", "run", f"restack onto {sync.default} ({n(sync.behind)} behind): GitHub requires branches to be up to date",
              "sd act restack") : null,
-    has_pr and on(ci.verdict == "red")
-      ? step("ci-red", "agent", f"fix CI: {join(ci.failing, ", ")}", "gh pr checks") : null,
+    has_pr and on(ci.verdict == "red") and on(ci.for_head) and not to_push
+      ? step("ci-red", "agent", f"fix CI: {join(ci.failing, ", ")}", "sd act ci-fix") : null,
     open and bot_blocking > 0
       ? step("bot", "agent", f"address {plural(threads.owed_bot, "bot item")}", "sd act address") : null,
     open and bot_blocking == 0 and n(threads.info) > 0
