@@ -181,6 +181,12 @@ target=$parent
 
 # ── O3 sync vs parent ────────────────────────────────────────────────────────
 
+# holds_parent_commits <range>: a commit in the range is one of the parent PR's.
+holds_parent_commits() {
+  local commits; commits=$(prc_line 'unnest coalesce(allCommits.nodes, []) | values commit.oid' "$parent_pr")
+  [[ -n $commits ]] && grep -qxFf <(printf '%s\n' "$commits") <<<"$(git rev-list "$1")"
+}
+
 target_ref=$(ref "refs/remotes/$remote/$target")
 sync_ahead=null behind=null up_to_date=null old_base="" conflict=null
 if [[ -z $target_ref ]]; then
@@ -207,8 +213,15 @@ else
 
   if is_ancestor "$target_ref" "$head"; then
     up_to_date=true conflict=false
-    # Everything past the target is the branch's own.
-    [[ -n $old_base ]] || old_base=$target_ref
+    # Past the target, the branch's own commits, unless a merge (not a
+    # rebase) kept the merged parent's.
+    if [[ -z $old_base ]]; then
+      if holds_parent_commits "$target_ref..$head"; then
+        errors+=("no base for $branch on $parent: $branch is on $remote/$target but still has the merged parent's commits")
+      else
+        old_base=$target_ref
+      fi
+    fi
   elif [[ -z $old_base ]]; then
     up_to_date=false
     if [[ $target == "$parent" ]]; then

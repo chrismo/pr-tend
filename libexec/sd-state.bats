@@ -434,6 +434,43 @@ lost_pin_stack() {
   [ "$(field -c .errors)" = '[]' ]
 }
 
+@test "sync: stacked, rebased onto main by hand, stale pin: target is the base, pin reported" {
+  git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
+  local p1; p1=$(git rev-parse parent)
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  git update-ref refs/sheepdog/feat/base "$(git commit-tree HEAD^{tree} -m elsewhere)"
+  (cd "$TMP/other" && git fetch -q origin && git merge -q --squash origin/parent >/dev/null \
+     && git commit -qm "parent (#3)" && git push -q origin main :parent 2>/dev/null)
+  git fetch -q --prune
+  git rebase -q --onto origin/main parent feat
+  pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p1\"" ".allCommits = {nodes: [{commit: {oid: \"$p1\"}}]}"
+  state
+  [ "$(field .sync.up_to_date)" = true ]
+  [ "$(field .sync.old_base)" = "$(git rev-parse origin/main)" ]
+  [[ "$(field '.errors | join(" ")')" == *"is no longer in feat's history"* ]]
+}
+
+@test "sync: stacked, main merged in rather than rebased: no base, the parent's commits are still there" {
+  git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
+  local p1; p1=$(git rev-parse parent)
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  git switch -q parent && commit q.txt p2 && git push -q origin parent 2>/dev/null
+  local p2; p2=$(git rev-parse parent)
+  git switch -q feat
+  (cd "$TMP/other" && git fetch -q origin && git merge -q --squash origin/parent >/dev/null \
+     && git commit -qm "parent (#3)" && git push -q origin main :parent 2>/dev/null)
+  git fetch -q --prune
+  git merge -q --no-edit origin/main
+  pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p2\"" \
+    ".allCommits = {nodes: [{commit: {oid: \"$p1\"}}, {commit: {oid: \"$p2\"}}]}"
+  state
+  [ "$(field .sync.up_to_date)" = true ]
+  [ "$(field .sync.old_base)" = null ]
+  [[ "$(field '.errors | join(" ")')" == *"no base for feat on parent"* ]]
+}
+
 @test "sync: already on main, but a stale pin: still reported" {
   git switch -qc feat && commit a.txt a
   git update-ref refs/sheepdog/feat/base "$(git rev-parse feat)"
