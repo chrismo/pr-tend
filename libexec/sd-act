@@ -1472,13 +1472,13 @@ values {s: this, why: sj(coalesce(errors, []), "; ")}
 | values case
     when nul(s.pr) then {hard: f"no PR for {s.branch}{why != "" ? f": {why}" : ""}"}
     when on(s.pr.state != "OPEN") then {hard: f"PR #{s.pr.number} is {lower(s.pr.state)}"}
-    when on(s.review.bot.status == "covered") then {done: f"the bot was already triggered on {s.head[0:7]}"}
     when n(s.push.behind) > 0 and n(s.push.ahead) == 0 and on(s.push.remote_ours) and on(s.push.remote_made) and on(s.push.dirty)
       then {hard: f"{s.branch} isn't on the remote at HEAD; the bot reviews what GitHub has: commit or remove the worktree's changes, then sd act push"}
     when nul(s.push.remote_sha) or n(s.push.ahead) > 0 or on(s.push.diverged) or (n(s.push.behind) > 0 and on(s.push.remote_ours) and on(s.push.remote_made))
       then {hard: f"{s.branch} isn't on the remote at HEAD; the bot reviews what GitHub has: sd act push first"}
     when n(s.push.behind) > 0
       then {hard: f"{s.branch} isn't on the remote at HEAD; the bot reviews what GitHub has: take its commits first (git merge --ff-only)"}
+    when on(s.review.bot.status == "covered") then {done: f"the bot was already triggered on {s.head[0:7]}"}
     when not (coalesce(s.review.local.status, "") in ["covered", "rewritten-same"])
       then {soft: "the local review doesn't cover HEAD (sd act review)"}
     else {} end

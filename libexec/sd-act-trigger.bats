@@ -141,6 +141,16 @@ pin() { git rev-parse -q --verify "refs/sheepdog/feat/$1" || true; }
   [ -z "$(pin bot)" ]
 }
 
+@test "trigger: --force on a pinned HEAD the remote doesn't have is still refused" {
+  echo d >> file.txt && git commit -qam "add d"
+  git update-ref refs/sheepdog/feat/local HEAD
+  git update-ref refs/sheepdog/feat/bot HEAD
+  run "$SD_ACT" trigger --force
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"push"* ]] || false
+  [ -z "$(calls)" ]
+}
+
 @test "trigger: no PR is refused" {
   rm "$GH/feat.json"
   run "$SD_ACT" trigger
