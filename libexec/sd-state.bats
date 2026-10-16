@@ -23,7 +23,7 @@ setup() {
   cat > "$TMP/fakebin/gh" <<'EOF'
 #!/usr/bin/env bash
 if [[ -n ${GH_FAKE_FAIL:-} ]]; then echo "$GH_FAKE_FAIL" >&2; exit 1; fi
-b="" prev=""
+b="" c="" prev=""
 for a; do
   case $a in
     branch=*)
@@ -32,12 +32,14 @@ for a; do
       if [[ $prev == -F && $b =~ ^([0-9]+|true|false|null)$ ]]; then
         echo "gh: Variable \$branch of type String! was provided invalid value" >&2; exit 1
       fi ;;
+    commits=*) c=$a ;;
   esac
   prev=$a
 done
 [[ -n $b ]] || { echo "fake gh: no branch= field in: $*" >&2; exit 2; }
 if [[ ${GH_FAKE_FAIL_FOR:-} == "$b" ]]; then echo "gh: boom for $b" >&2; exit 1; fi
 echo "$b" >> "$GH_FIXTURES/calls"
+echo "$b ${c:-}" >> "$GH_FIXTURES/commits"
 f="$GH_FIXTURES/${b//\//__}.json"
 if [[ -f $f ]]; then cat "$f"; else
   echo '{"data":{"viewer":{"login":"me"},"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"nodes":[]}}}}'
@@ -290,6 +292,15 @@ field() { jq -r "$@" <<<"$output"; }
   pr_fixture parent
   state
   [ "$(field -c .parent.pr.commits)" = '[]' ]
+}
+
+@test "only the parent lookup asks GitHub for its PR's commits" {
+  git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  state
+  [ "$(cat "$GH_FIXTURES/commits")" = "feat commits=false
+parent commits=true" ]
 }
 
 @test "bot: the configured trigger command is reported, null when there is none" {

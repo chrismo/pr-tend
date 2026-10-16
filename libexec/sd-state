@@ -50,7 +50,7 @@ source "$(dirname "$(realpath "$0")")/../lib/next.sh"
 source "$(dirname "$(realpath "$0")")/../lib/sheepdog.sh"
 
 read -r -d '' QUERY <<'EOF' || true
-query($owner: String!, $repo: String!, $branch: String!) {
+query($owner: String!, $repo: String!, $branch: String!, $commits: Boolean!) {
   viewer { login }
   repository(owner: $owner, name: $repo) {
     defaultBranchRef { name }
@@ -60,7 +60,7 @@ query($owner: String!, $repo: String!, $branch: String!) {
         mergeStateStatus reviewDecision
         reviewRequests(first: 20) { nodes { requestedReviewer {
           ... on User { login } ... on Bot { login } ... on Mannequin { login } ... on Team { slug } } } }
-        allCommits: commits(first: 250) { nodes { commit { oid } } }
+        allCommits: commits(first: 250) @include(if: $commits) { nodes { commit { oid } } }
         commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes {
           __typename
           ... on CheckRun { name status conclusion }
@@ -120,11 +120,13 @@ bot_command=$(prc_get settings.botCommand "$branch" false) || die "sd config fai
   || die "botIgnoreBody has an invalid regex: $ignore_body"
 
 # -f, not -F, for the branch: -F would send "1234" or "true" as a non-string.
+# gh_query <branch> [true]: true also fetches its PRs' commits.
 RESP=""
 GH_ERR=$(mktemp)
 trap 'rm -f "$GH_ERR"' EXIT
 gh_query() {
-  if ! RESP=$(gh api graphql -F owner='{owner}' -F repo='{repo}' -f branch="$1" -f query="$QUERY" 2>"$GH_ERR"); then
+  if ! RESP=$(gh api graphql -F owner='{owner}' -F repo='{repo}' -f branch="$1" -F commits="${2:-false}" \
+                -f query="$QUERY" 2>"$GH_ERR"); then
     errors+=("gh ($1): $(tr '\n' ' ' <"$GH_ERR")")
     RESP=""
     return 1
@@ -167,7 +169,7 @@ fi
 parent_pr=null parent_ok=$gh_ok
 [[ $parent_source == config ]] && parent_ok=true
 if [[ $parent != "$default_branch" ]]; then
-  if gh_query "$parent"; then parent_pr=$(pick_pr); else parent_ok=false; fi
+  if gh_query "$parent" true; then parent_pr=$(pick_pr); else parent_ok=false; fi
 fi
 parent_merged=null
 if $parent_ok; then
