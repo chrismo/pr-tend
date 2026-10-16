@@ -29,13 +29,13 @@ Upgrading from pr-tend? [Migrate its state first](#coming-from-pr-tend).
 ./install.sh        # links sd and installs its launchd watcher
 ```
 
-On macOS, the installer links `bin/sd` into `~/.local/bin` (`$LOCAL_BIN` to
-change the link directory) and starts the watcher, which checks enrolled
+The installer links `bin/sd` into `~/.local/bin` (`$LOCAL_BIN` to change the
+link directory) and, on macOS, starts the watcher, which checks enrolled
 branches every five minutes by default. Re-run it to update both. Use
 `sd watch uninstall` to stop the background job, or `sd watch install` to
 start it again. On other platforms, only the CLI is linked; the background
-watcher requires macOS (launchd). An existing regular file at `$LOCAL_BIN/sd`
-blocks installation before any links or jobs are changed.
+watcher requires macOS (launchd). Anything at `$LOCAL_BIN/sd` that isn't a
+symlink blocks installation before any links or jobs are changed.
 
 Needs on `PATH`: `bash5` (a link to bash 5+; the commands are
 `#!/usr/bin/env bash5`), `git`, `gh`, `jq`, and SuperDB `super` **0.3.0**

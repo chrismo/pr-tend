@@ -26,7 +26,9 @@ done
 if [[ $(uname -s) == Darwin ]]; then
   "$dest" watch install || {
     status=$?
-    echo "! sd is linked, but watcher installation failed; retry with: $dest watch install" >&2
+    retry=$(printf '%q watch install' "$dest")
+    [[ $LOCAL_BIN == "$HOME/.local/bin" ]] || retry="LOCAL_BIN=$(printf %q "$LOCAL_BIN") $retry"
+    echo "! sd is linked, but watcher installation failed; retry with: $retry" >&2
     exit "$status"
   }
 else

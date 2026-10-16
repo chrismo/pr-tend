@@ -91,7 +91,15 @@ teardown() {
   run "$INSTALLER"
   [ "$status" -eq 42 ]
   [ "$(cat "$WATCH_CALLS")" = "watch install" ]
-  [[ "$output" == *"linked"*"watcher installation failed"*"$LOCAL_BIN/sd watch install"* ]]
+  [[ "$output" == *"linked"*"watcher installation failed"*"LOCAL_BIN=$LOCAL_BIN $LOCAL_BIN/sd watch install"* ]]
+}
+
+@test "the retry hint for the default LOCAL_BIN is the plain command" {
+  unset LOCAL_BIN
+  export HOME="$TEST_DIR/home" WATCH_EXIT=1
+  run "$INSTALLER"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"retry with: $HOME/.local/bin/sd watch install" ]]
 }
 
 @test "on Linux links sd and explains that the background watcher requires macOS" {
