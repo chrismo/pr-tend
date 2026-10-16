@@ -414,7 +414,7 @@ lost_pin_stack() {
   [[ "$(field '.errors | join(" ")')" == *"base pin ${p2:0:7} is no longer in feat's history (rewritten outside sheepdog?)"* ]]
 }
 
-@test "sync: pin lost, but all of the merged parent is in HEAD: the pin is the base, by tree" {
+@test "sync: pin lost, but all of the merged parent is in HEAD: the merged head is the base, by tree" {
   lost_pin_stack same
   pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p2\"" \
     ".allCommits = {nodes: [{commit: {oid: \"$p1\"}}, {commit: {oid: \"$p2\"}}]}"
@@ -488,6 +488,21 @@ squash_parent_away() {
   local p1b; p1b=$(git rev-parse origin/parent)
   squash_parent_away
   pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p1b\""
+  state
+  [ "$(field .sync.by_tree)" = false ]
+  [ "$(field .sync.old_base)" = null ]
+}
+
+@test "sync: pin lost, HEAD on a newer main than the parent was: no tree base, whose restack would roll back" {
+  git switch -qc parent && commit s.txt X && git push -q origin parent 2>/dev/null
+  local p1; p1=$(git rev-parse parent)
+  (cd "$TMP/other" && commit m.txt M1 "$TMP/other" && git push -q origin main 2>/dev/null)
+  git fetch -q && git switch -qc feat origin/main
+  printf 'X\n' > s.txt && git add s.txt && git commit -qm "copy of p1" && commit c.txt c
+  git config branch.feat.sd-parent parent
+  git update-ref refs/sheepdog/feat/base "$p1"
+  squash_parent_away
+  pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p1\""
   state
   [ "$(field .sync.by_tree)" = false ]
   [ "$(field .sync.old_base)" = null ]
