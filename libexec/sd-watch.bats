@@ -408,6 +408,249 @@ EOF
   [ "${lines[3]}" = "repo feat|merged: drop the branch's pins and enrollment, then remove this worktree" ]
 }
 
+# ── notification policy (#52) ────────────────────────────────────────────────
+
+# policy n|q: the step keys sd watch --help lists as notified (n) or not (q).
+policy() {
+  "$SD_WATCH" --help | awk -v want="$1" '
+    /^Notified/ { m = "n"; next }
+    /^Not notified/ { m = "q"; next }
+    /^[^ ]/ { m = "" }
+    m == want && /^  [a-z][a-z -]*:/ { sub(/^ +/, ""); sub(/:.*/, ""); print }' | tr ' ' '\n' | grep .
+}
+
+# one_step <key>: sd state's next is that single step, said as "say <key>".
+one_step() {
+  ps_fixture feat ".next = [{key: \"$1\", who: \"you\", say: \"say $1\", cmd: null}]"
+}
+
+@test "policy: every lib/next.sh step is in --help, notified or not, exactly once" {
+  local steps listed
+  steps=$(grep -o 'step("[a-z-]*"' "$BATS_TEST_DIRNAME/../lib/next.sh" | sed 's/step("//; s/"//' | sort -u)
+  listed=$( { policy n; policy q; } | sort)
+  [ -n "$(policy n)" ]
+  diff <(echo "$steps") <(echo "$listed")
+}
+
+@test "policy: a notified step notifies once on entering it, not on later passes" {
+  local k
+  for k in $(policy n); do
+    rm -rf "$SHEEPDOG_STATE_DIR" "$PS_FIXTURES/notified"
+    one_step "$k"
+    pass
+    pass
+    pass
+    [ "$(notified)" = "repo feat|say $k" ] || { echo "for $k: $(notified)"; return 1; }
+  done
+}
+
+@test "policy: a step that isn't notified never is" {
+  local k
+  for k in $(policy q); do
+    rm -rf "$SHEEPDOG_STATE_DIR"
+    one_step "$k"
+    pass
+    [ -z "$(notified)" ] || { echo "for $k: $(notified)"; return 1; }
+  done
+}
+
+@test "policy: a parent closed without merging is ❌ and notifies" {
+  ps_fixture feat '.pr.base = "par" | .parent = {name: "par", merged: false, pr: {number: 5, state: "CLOSED"}}'
+  pass
+  [ "$(glyph repo)" = "❌" ]
+  [[ "$(notified)" == "repo feat|par (#5) was closed without merging"* ]]
+}
+
+@test "notify: a conflict after CI red was notified still notifies, once" {
+  ps_fixture feat '.ci.verdict = "red" | .ci.failing = ["lint"]'
+  pass
+  ps_fixture feat '.ci.verdict = "red" | .ci.failing = ["lint"] | .sync.up_to_date = false | .sync.conflict = true'
+  pass
+  pass
+  run notified
+  [ "${#lines[@]}" -eq 2 ]
+  [ "${lines[0]}" = "repo feat|fix CI: lint" ]
+  [ "${lines[1]}" = "repo feat|restack onto main conflicts: resolve it" ]
+}
+
+@test "notify: a conflict after ready to merge was notified still notifies, once" {
+  ps_fixture feat
+  pass
+  ps_fixture feat '.sync.up_to_date = false | .sync.conflict = true'
+  pass
+  pass
+  run notified
+  [ "${#lines[@]}" -eq 2 ]
+  [ "${lines[1]}" = "repo feat|restack onto main conflicts: resolve it" ]
+}
+
+@test "notify: an unknown pass (sd state errors) between two doesn't re-notify what's still true" {
+  ps_fixture feat '.sync.up_to_date = false | .sync.conflict = true'
+  pass
+  ps_fixture feat '.errors = ["gh: down"]'
+  pass
+  [ "$(glyph repo)" = "⚠️" ]
+  ps_fixture feat '.sync.up_to_date = false | .sync.conflict = true'
+  pass
+  [ "$(notified)" = "repo feat|restack onto main conflicts: resolve it" ]
+}
+
+@test "notify: errors alongside a ❌ step still keep what was notified" {
+  ps_fixture feat '.ci.verdict = "red" | .ci.failing = ["lint"] | .threads.owed_human = 1'
+  pass
+  ps_fixture feat '.ci.verdict = "red" | .ci.failing = ["lint"] | .errors = ["gh: down"]'
+  pass
+  [ "$(glyph repo)" = "❌" ]
+  ps_fixture feat '.ci.verdict = "red" | .ci.failing = ["lint"] | .threads.owed_human = 1'
+  pass
+  [ "$(notified | grep -c 'human item')" = 1 ]
+}
+
+@test "notify: a state file from before notified was recorded doesn't re-notify" {
+  ps_fixture feat
+  pass
+  local f; f=$(find "$SHEEPDOG_STATE_DIR/branches" -name feat.json)
+  jq -c 'del(.notified)' "$f" > "$f.old" && mv "$f.old" "$f"
+  pass
+  [ "$(notified)" = "repo feat|ready to merge" ]
+}
+
+@test "notify: sd state failing between two passes doesn't re-notify what's still true" {
+  ps_fixture feat '.sync.up_to_date = false | .sync.conflict = true'
+  pass
+  mv "$PS_FIXTURES/feat.json" "$TMP/feat.json"
+  pass
+  mv "$TMP/feat.json" "$PS_FIXTURES/feat.json"
+  pass
+  [ "$(notified)" = "repo feat|restack onto main conflicts: resolve it" ]
+}
+
+@test "notify: a pass with no next steps between two doesn't re-notify what's still true" {
+  ps_fixture feat '.sync.up_to_date = false | .sync.conflict = true'
+  pass
+  ps_fixture feat '.next = []'
+  pass
+  [ "$(glyph repo)" = "⚠️" ]
+  ps_fixture feat '.sync.up_to_date = false | .sync.conflict = true'
+  pass
+  [ "$(notified)" = "repo feat|restack onto main conflicts: resolve it" ]
+}
+
+@test "notify: a reason the pass couldn't send because super failed is sent next pass" {
+  local real
+  real=$(bash5 -c 'source "$1/../lib/config.sh"; command -v "$(prc_superdb_binary)"' _ "$BATS_TEST_DIRNAME")
+  [[ $real != */shims/* ]] || skip "super is an asdf shim, which the fake's ASDF_DATA_DIR would break"
+  ps_fixture feat '.sync.up_to_date = false | .sync.conflict = true'
+  cat > "$TMP/fakebin/super" <<EOF
+#!/usr/bin/env bash
+if [[ ! -e $PS_FIXTURES/super-works ]]; then
+  for a; do [[ \$a == *"r.msg}"* ]] && { echo panic >&2; exit 2; }; done
+fi
+exec "$real" "\$@"
+EOF
+  chmod +x "$TMP/fakebin/super"
+  export ASDF_DATA_DIR="$TMP/no-asdf"
+  pass
+  [ -z "$(notified)" ]
+  touch "$PS_FIXTURES/super-works"
+  pass
+  pass
+  [ "$(notified)" = "repo feat|restack onto main conflicts: resolve it" ]
+}
+
+@test "notify: a notification that fails is tried again next pass, then not again" {
+  cat > "$TMP/fakebin/notify" <<'SH'
+#!/usr/bin/env bash
+[[ -e $PS_FIXTURES/notify-works ]] || exit 1
+printf '%s|%s\n' "$1" "$2" >> "$PS_FIXTURES/notified"
+SH
+  ps_fixture feat '.sync.up_to_date = false | .sync.conflict = true'
+  run --separate-stderr pass
+  [[ "$stderr" == *"notify failed"* ]] || false
+  [ -z "$(notified)" ]
+  touch "$PS_FIXTURES/notify-works"
+  pass
+  pass
+  [ "$(notified)" = "repo feat|restack onto main conflicts: resolve it" ]
+}
+
+@test "notify: a notifier that keeps failing is tried twice, then given up on" {
+  cat > "$TMP/fakebin/notify" <<'SH'
+#!/usr/bin/env bash
+echo "$2" >> "$PS_FIXTURES/attempts"
+exit 1
+SH
+  ps_fixture feat '.sync.up_to_date = false | .sync.conflict = true'
+  pass
+  run --separate-stderr pass
+  [[ "$stderr" == *"giving up on: restack onto main conflicts"* ]] || false
+  pass
+  pass
+  [ "$(wc -l < "$PS_FIXTURES/attempts" | tr -d ' ')" = 2 ]
+}
+
+@test "notify: GitHub recomputing mergeability doesn't make ready re-notify" {
+  ps_fixture feat
+  pass
+  one_step merge-wait
+  pass
+  ps_fixture feat
+  pass
+  [ "$(notified)" = "repo feat|ready to merge" ]
+}
+
+@test "notify: an attached session hiding ready doesn't make ready re-notify" {
+  ps_fixture feat
+  pass
+  one_step attached
+  pass
+  ps_fixture feat
+  pass
+  [ "$(notified)" = "repo feat|ready to merge" ]
+}
+
+@test "notify: merge-wait doesn't reset a failed ready's one retry" {
+  cat > "$TMP/fakebin/notify" <<'SH'
+#!/usr/bin/env bash
+echo "$2" >> "$PS_FIXTURES/attempts"
+exit 1
+SH
+  local i
+  for i in 1 2 3; do
+    ps_fixture feat
+    pass
+    one_step merge-wait
+    pass
+  done
+  [ "$(wc -l < "$PS_FIXTURES/attempts" | tr -d ' ')" = 2 ]
+}
+
+@test "notify: merge-wait carries only ready: a conflict that comes back after it notifies" {
+  ps_fixture feat '.sync.up_to_date = false | .sync.conflict = true'
+  pass
+  one_step merge-wait
+  pass
+  ps_fixture feat '.sync.up_to_date = false | .sync.conflict = true'
+  pass
+  [ "$(notified | grep -c conflicts)" = 2 ]
+}
+
+@test "notify: an unsure pass doesn't reset a failed notification's one retry" {
+  cat > "$TMP/fakebin/notify" <<'SH'
+#!/usr/bin/env bash
+echo "$2" >> "$PS_FIXTURES/attempts"
+exit 1
+SH
+  ps_fixture feat '.sync.up_to_date = false | .sync.conflict = true'
+  pass
+  ps_fixture feat '.errors = ["gh: down"]'
+  pass
+  ps_fixture feat '.sync.up_to_date = false | .sync.conflict = true'
+  pass
+  pass
+  [ "$(wc -l < "$PS_FIXTURES/attempts" | tr -d ' ')" = 2 ]
+}
+
 @test "notify: a notifier that reads stdin doesn't swallow later reasons" {
   cat > "$TMP/fakebin/notify" <<'SH'
 #!/usr/bin/env bash
