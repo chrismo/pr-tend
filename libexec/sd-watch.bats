@@ -1256,6 +1256,19 @@ SH
   [ "$("$SD_WATCH" glyph "$TMP/y/wt")" = "❌" ]
 }
 
+@test "same name: a third one on another branch keeps the .pr file it wrote last" {
+  twin feat
+  git clone -q "$TMP/origin.git" "$TMP/repo3" 2>/dev/null
+  git -C "$TMP/repo3" branch -q other
+  git -C "$TMP/repo3" config branch.other.sheepdog true
+  register "$TMP/repo3"
+  mkdir -p "$TMP/z"
+  git -C "$TMP/repo3" worktree add -q "$TMP/z/wt" other
+  ps_fixture other
+  pass
+  [ "$(cat "$STATUS_DIR/wt.pr")" = $'other\t✅' ]
+}
+
 @test "same name: a repo registered twice isn't its own twin" {
   ps_fixture feat
   git config --global --add sheepdog.repo "$TMP/repo"

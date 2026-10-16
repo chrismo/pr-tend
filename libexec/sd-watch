@@ -118,13 +118,15 @@ write_glyph() { # write_glyph <worktree-or-empty> <branch> <glyph>
 }
 
 # drop_ambiguous <index>: remove the <worktree>.pr file of a name two indexed
-# worktrees share while on the same branch: tab-status reads the file by
-# name, and its branch check can't tell them apart (sd watch glyph can).
+# worktrees share while on the same branch, when the file holds that branch:
+# tab-status reads the file by name, and its branch check can't tell them
+# apart (sd watch glyph can).
 drop_ambiguous() {
-  local base
-  while IFS= read -r base; do
-    rm -f "$STATUS_DIR/$base.pr"
-  done < <(awk -F'\t' '!seen[$1]++ { n = $1; sub(/.*\//, "", n); if (++c[n "\t" $2] == 2) print n }' "$1" 2>/dev/null)
+  local base branch f
+  while IFS=$'\t' read -r base branch; do
+    f="$STATUS_DIR/$base.pr"
+    [[ $(cut -f1 "$f" 2>/dev/null) != "$branch" ]] || rm -f "$f"
+  done < <(awk -F'\t' '!seen[$1]++ { n = $1; sub(/.*\//, "", n); if (++c[n "\t" $2] == 2) print n "\t" $2 }' "$1" 2>/dev/null)
 }
 
 # glyph_of [<path>]: the glyph the last check left for the worktree holding
