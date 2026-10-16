@@ -139,8 +139,8 @@
 #             merged (restack first), was closed, or can't be looked up; a
 #             merged parent with the branch already on the default branch
 #             ships onto it and rewrites sd-parent, as does a PR in a native
-#             GitHub stack that GitHub already retargeted; a stacked PR never
-#             gets a base edit. Spends tokens unless HEAD
+#             GitHub stack that GitHub already retargeted and rewrote; a PR in a
+#             native GitHub stack never gets a base edit. Spends tokens unless HEAD
 #             already has a stored description
 #   trigger   post settings.botCommand on the PR so the review bot runs, and
 #             pin bot at HEAD; nothing when already pinned there. HEAD must
@@ -1768,6 +1768,8 @@ values {s: this, why: sj(coalesce(errors, []), "; ")}
       then {hard: f"{s.parent.name}'s PR #{s.parent.pr.number} was closed without merging; decide what {s.branch} targets"}
     when nul(s.parent.merged) then {hard: f"can't tell whether {s.parent.name} merged: {why}"}
     when on(s.parent.merged == false) then {hard: f"{s.parent.name} hasn't merged; PR #{s.pr.number} stays on it"}
+    when coalesce(s.pr.stack, null) is not null and on(s.sync.parent_in_history)
+      then {hard: f"PR #{s.pr.number} is in GitHub stack #{s.pr.stack.number}, and GitHub hasn't rewritten {s.branch} yet ({s.parent.name}'s commits are still in it): wait for it, then gh stack sync"}
     when on(s.pr.base == s.sync.default) then {done: f"PR #{s.pr.number} already targets {s.sync.default} (GitHub retargeted it)"}
     else {edit: f"{s.pr.number}"} end
 EOF

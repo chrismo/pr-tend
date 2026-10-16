@@ -671,14 +671,36 @@ in_stack() {
   [ ! -e "$FX/claude.calls" ]
 }
 
-@test "retarget: a PR in a gh stack that GitHub already retargeted: no edit, sd-parent rewritten" {
+# github_rewrites_child: A squash-merges into main, and GitHub rebases child onto
+# main and force-pushes it, as it does for a native stack.
+github_rewrites_child() {
+  (cd "$TMP/other" && git fetch -q origin && git checkout -q -B main origin/main \
+     && git merge -q --squash origin/A && git commit -qm "A (#1)" && git push -q origin main 2>/dev/null)
+  git fetch -q origin
+  git switch -q child && git rebase -q --onto origin/main A child && git push -qf origin child 2>/dev/null
+}
+
+@test "retarget: a PR in a gh stack that GitHub already retargeted and rewrote: no edit, sd-parent rewritten" {
   stacked_child
+  github_rewrites_child
   merged_pr A "$a_head"
   open_pr child main 2 && in_stack child
   run "$SD_ACT" retarget
   [ "$status" -eq 0 ]
   [ ! -e "$GH/calls" ]
   [ "$(git config branch.child.sd-parent)" = main ]
+}
+
+@test "retarget: a PR in a gh stack GitHub retargeted but hasn't rewritten yet: refused, sd-parent kept" {
+  stacked_child
+  merged_pr A "$a_head"
+  open_pr child main 2 && in_stack child
+  run "$SD_ACT" retarget
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"GitHub stack #29"* ]]
+  [[ "$output" == *"gh stack sync"* ]]
+  [ ! -e "$GH/calls" ]
+  [ "$(git config branch.child.sd-parent)" = A ]
 }
 
 @test "retarget: a PR in a gh stack still on its merged parent: the base edit is GitHub's, refused" {
