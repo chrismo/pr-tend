@@ -1218,6 +1218,15 @@ trigger_pin() { # bot pinned at HEAD, triggered at <time>
   [ "$(field .review.bot.waited)" = null ]
 }
 
+@test "review.bot: gh failing: replied and waited are unknown, not a wait" {
+  git switch -qc feat && commit a.txt a
+  trigger_pin 2026-10-15T12:00:00Z
+  GH_FAKE_FAIL="gh: down" state
+  [ "$(field .review.bot.status)" = covered ]
+  [ "$(field .review.bot.replied)" = null ]
+  [ "$(field .review.bot.waited)" = null ]
+}
+
 @test "bot: settings.botTimeout is reported, 3600 s by default" {
   git switch -qc feat && commit a.txt a
   pr_fixture feat
