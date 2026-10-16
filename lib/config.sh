@@ -23,7 +23,7 @@ PRC_STEPS=(address ci-fix describe implement review)
 PRC_GLOBAL_ONLY=(remote interval notify)
 PRC_SETTINGS='stepTimeout?:uint64,replyPrefix?:string,verify?:string,localReview?:string,botCommand?:string,
               botLogin?:[string],botIgnore?:[string],botIgnoreBody?:[string],implementAllow?:[string]'
-PRC_TYPES='type hclaude = {model?:string,effort?:enum(low,medium,high,xhigh,max),args?:string}
+PRC_TYPES='type hclaude = {model?:string,effort?:enum(low,medium,high,xhigh,max),args?:string,useApiKey?:bool}
 type hpi = {provider?:string,model?:string,effort?:enum(off,minimal,low,medium,high,xhigh,max),args?:string}
 type harness = enum(claude,pi)
 type step = {harness?:harness,claude?:hclaude,pi?:hpi}

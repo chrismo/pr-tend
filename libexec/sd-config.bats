@@ -1069,6 +1069,17 @@ old_super() {
   [[ "$output" == *"$(branch_file feat): harnesses.claude.effort: no such symbol in enum"*": hihg"* ]]
 }
 
+@test "validate: harnesses.claude.useApiKey is a bool, and claude's only" {
+  write_global '{"harnesses":{"claude":{"useApiKey":true}}}'
+  run "$SD_CONFIG" show
+  [ "$status" -eq 0 ]
+  write_global '{"harnesses":{"claude":{"useApiKey":"yes"},"pi":{"useApiKey":true}}}'
+  run "$SD_CONFIG" show
+  [ "$status" -eq 1 ]
+  [[ "${lines[0]}" == *": harnesses.claude.useApiKey: cannot cast"* ]]
+  [[ "${lines[1]}" == *": harnesses.pi.useApiKey: unknown key" ]]
+}
+
 @test "validate: each harness takes its own keys and effort levels" {
   write_global '{"harnesses":{"pi":{"provider":"p","effort":"minimal"},"claude":{"provider":"p"}}}'
   run "$SD_CONFIG" show

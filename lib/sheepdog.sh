@@ -59,26 +59,31 @@ harness_result() {
 
 # harness_run <harness> <session-id> <new|resume> <timeout> <prompt> <json-schema> [<settings-json>]
 # Runs one headless agent step in $PWD; prints the step's JSON result.
-# settings-json is prc_step's output: model, effort, provider and args.
+# settings-json is prc_step's output: model, effort, provider, args, and for
+# claude useApiKey. Claude runs with ANTHROPIC_API_KEY unset unless that is
+# true: an exported key overrides the claude.ai login (#68), and the one in a
+# shell rc is often not the one to bill. pi can't use the login, so it keeps
+# the key.
 # The harness's stderr (claude can put protocol JSON there) shows only when
 # the step fails, and then all at once: nothing streams while it runs.
 harness_run() {
   local h=$1 sid=$2 mode=$3 timeout=$4 prompt=$5 schema=$6 settings=${7:-'{}'} out err rc said
-  local model effort provider args fields
-  local -a typed=() extra f
+  local model effort provider use_key args fields
+  local -a typed=() extra f env=()
   # args last, so a newline in it shifts nothing; the end marker survives $( )
   # stripping the trailing newlines of empty fields.
   fields=$(prc_line 'where kind(this) == "record"
-    | values coalesce(model, ""), coalesce(effort, ""), coalesce(provider, ""), coalesce(args, ""), "<end>"' "$settings") || return 1
+    | values coalesce(model, ""), coalesce(effort, ""), coalesce(provider, ""), coalesce(useApiKey, false), coalesce(args, ""), "<end>"' "$settings") || return 1
   mapfile -t f <<<"$fields"
-  [[ ${#f[@]} -ge 5 && ${f[-1]} == "<end>" ]] || return 1
-  model=${f[0]} effort=${f[1]} provider=${f[2]} args=$(printf '%s\n' "${f[@]:3:${#f[@]}-4}")
+  [[ ${#f[@]} -ge 6 && ${f[-1]} == "<end>" ]] || return 1
+  model=${f[0]} effort=${f[1]} provider=${f[2]} use_key=${f[3]} args=$(printf '%s\n' "${f[@]:4:${#f[@]}-5}")
   read -ra extra <<<"$args"
   # An interrupted step leaves this file behind (no trap: harness_run runs in
   # its caller's shell, whose traps it would replace).
   err=$(mktemp) || return 1
   case $h in
     claude)
+      [[ $use_key == true ]] || env=(env -u ANTHROPIC_API_KEY)
       if [[ -n $model ]]; then typed+=(--model "$model"); fi
       if [[ -n $effort ]]; then typed+=(--effort "$effort"); fi ;;
     pi)
@@ -92,7 +97,7 @@ harness_run() {
       [[ $mode == resume ]] && sess=(--resume "$sid")
       # The prompt goes first: --allowedTools and --disallowedTools are variadic
       # and would swallow a trailing one.
-      out=$(with_timeout "$timeout" claude -p "$prompt" "${sess[@]}" --output-format json --json-schema "$schema" \
+      out=$(with_timeout "$timeout" "${env[@]}" claude -p "$prompt" "${sess[@]}" --output-format json --json-schema "$schema" \
               --permission-mode acceptEdits --allowedTools "$HARNESS_CLAUDE_ALLOW" \
               --disallowedTools "$HARNESS_CLAUDE_DENY" "${typed[@]}" "${extra[@]}" </dev/null 2>"$err") \
         && harness_result "$out"
