@@ -346,7 +346,7 @@ base_pin() { git rev-parse -q --verify refs/sheepdog/feat/base || true; }
   run "$SD_ACT" restack
   [ "$status" -eq 1 ]
   [[ "$output" == *"would conflict"* ]]
-  [[ "$output" == *"git rebase --onto origin/main"* ]]
+  [[ "$output" == *"git rebase --onto origin/main $(git rev-parse --short=12 main) feat, then git update-ref refs/sheepdog/feat/base \$(git merge-base origin/main feat)"* ]]
   [[ "$output" == *"sd act restack --resolve"* ]]
   [ "$(git rev-parse HEAD)" = "$before" ]
   [ -z "$(base_pin)" ]
@@ -362,6 +362,8 @@ base_pin() { git rev-parse -q --verify refs/sheepdog/feat/base || true; }
   run "$SD_ACT" restack
   [ "$status" -eq 1 ]
   [[ "$output" == *"rolled back"* ]]
+  onto=$(git rev-parse --short=12 origin/main)
+  [[ "$output" == *"git rebase --onto $onto $(git rev-parse --short=12 main) feat, then git update-ref refs/sheepdog/feat/base $onto"* ]]
   [ "$(git rev-parse HEAD)" = "$before" ]
   [ "$(git branch --show-current)" = feat ]
   [ -z "$(git status --porcelain)" ]

@@ -1244,7 +1244,7 @@ values {remote, resolve, s, why: sj(coalesce(s.errors, []), "; "), onto: f"{remo
       ? {hard: f"wrong base: this would replay {len(from_parent)} of #{s.parent.pr.number}'s commits onto {onto}; if the stack is linear, rebase past them by hand: git rebase --onto {onto} {from_parent[0][0:12]} {s.branch} && git update-ref refs/sheepdog/{s.branch}/base {onto}"}
     : nul(s.sync.conflict) ? {hard: f"can't tell whether restacking {s.branch} would conflict: {why}"}
     : on(s.sync.conflict) and not resolve
-      ? {hard: f"restacking {s.branch} onto {onto} would conflict; resolve it by hand: git rebase --onto {onto} {s.sync.old_base[0:12]}, or let the agent: sd act restack --resolve"}
+      ? {hard: f"restacking {s.branch} onto {onto} would conflict; resolve it by hand: git rebase --onto {onto} {s.sync.old_base[0:12]} {s.branch}, then git update-ref refs/sheepdog/{s.branch}/base $(git merge-base {onto} {s.branch}); or let the agent: sd act restack --resolve"}
     : null,
     on(s.session.locked) ? {soft: f"taken over (branch.{s.branch}.sd-lock is set)"} : null
   ]
@@ -1296,7 +1296,7 @@ restack() {
     if ! $resolve; then
       restack_rollback "$wt" "$b" "$old_head"
       die "the rebase onto $remote/$target stopped on a conflict partway through; rolled back to ${old_head:0:7}." \
-          "Resolve it by hand: git rebase --onto $remote/$target ${old_base:0:12}, or let the agent: sd act restack --resolve"
+          "Resolve it by hand: git rebase --onto ${new_base:0:12} ${old_base:0:12} $b, then git update-ref refs/sheepdog/$b/base ${new_base:0:12}; or let the agent: sd act restack --resolve"
     fi
     resolve_conflicts "$b" "$wt" "$old_head" "$remote/$target" || exit 1
     resolved=true
