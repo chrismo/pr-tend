@@ -20,6 +20,7 @@ setup() {
   TMP="$(cd "$BATS_TEST_TMPDIR" && pwd -P)"
   export GIT_CONFIG_GLOBAL="$TMP/gitconfig-global"
   export GIT_CONFIG_SYSTEM=/dev/null
+  export SHEEPDOG_STATE_DIR="$TMP/state"   # harness_run logs usage there
   printf '[user]\n\temail = t@example.com\n\tname = Tester\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
   export SHEEPDOG_CONFIG="$TMP/global.json"
   export GH="$TMP/gh" FX="$TMP/fx"

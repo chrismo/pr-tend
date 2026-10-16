@@ -79,17 +79,41 @@ harness_result() {
     | values coalesce(structured_output, parse_sup(coalesce(result, "")), null)' "$1" 2>/dev/null | harness_object
 }
 
+# harness_usage <harness> <session-id> <mode> <status> <claude-json>: one TSV
+# row per step in $SHEEPDOG_STATE_DIR/usage.tsv (header when new): time, repo,
+# branch, step, harness, session, mode, status, then claude's cost, tokens
+# (input, cache_create, cache_read, output), duration and turns; empty for pi,
+# which prints no usage. The cost is claude's estimate, not how it was billed.
+harness_usage() {
+  local dir=${SHEEPDOG_STATE_DIR:-$HOME/.local/state/sheepdog} repo branch nums=$'\t\t\t\t\t\t'
+  repo=$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
+  branch=$(git branch --show-current 2>/dev/null)
+  if [[ $1 == claude ]]; then
+    nums=$(prc_line 'where kind(this) == "record"
+      | values join([f"{coalesce(total_cost_usd, 0)}", f"{n(usage.input_tokens)}", f"{n(usage.cache_creation_input_tokens)}",
+                     f"{n(usage.cache_read_input_tokens)}", f"{n(usage.output_tokens)}", f"{n(duration_ms)}", f"{n(num_turns)}"], "\t")' "$5" 2>/dev/null) \
+      && [[ -n $nums ]] || nums=$'\t\t\t\t\t\t'
+  fi
+  mkdir -p "$dir" 2>/dev/null || return 0
+  [[ -s $dir/usage.tsv ]] \
+    || printf 'time\trepo\tbranch\tstep\tharness\tsession\tmode\tstatus\tcost_usd\tinput\tcache_create\tcache_read\toutput\tduration_ms\tturns\n' > "$dir/usage.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$repo" "$branch" "${HARNESS_STEP:-}" "$1" "$2" "$3" "$4" "$nums" >> "$dir/usage.tsv"
+}
+
 # harness_run <harness> <session-id> <new|resume> <timeout> <prompt> <json-schema> [<settings-json>]
 # Runs one headless agent step in $PWD; prints the step's JSON result.
 # settings-json is prc_step's output: model, effort, provider, args, and for
 # claude useApiKey. Claude runs with ANTHROPIC_API_KEY unset unless that is
 # true: an exported key overrides the claude.ai login (#68), and the one in a
 # shell rc is often not the one to bill. pi can't use the login, so it keeps
-# the key.
+# the key. settings.stepBudget (USD, read here for the worktree's branch)
+# caps a claude step through --max-budget-usd; 0 is no cap. Every step
+# appends a row to $SHEEPDOG_STATE_DIR/usage.tsv (harness_usage), with
+# $HARNESS_STEP as the step name when the caller sets it.
 # The harness's stderr (claude can put protocol JSON there) shows only when
 # the step fails, and then all at once: nothing streams while it runs.
 harness_run() {
-  local h=$1 sid=$2 mode=$3 timeout=$4 prompt=$5 schema=$6 settings=${7:-'{}'} out err rc said
+  local h=$1 sid=$2 mode=$3 timeout=$4 prompt=$5 schema=$6 settings=${7:-'{}'} out err rc said budget
   local model effort provider use_key args fields
   local -a typed=() extra f env=()
   # args last, so a newline in it shifts nothing; the end marker survives $( )
@@ -107,7 +131,9 @@ harness_run() {
     claude)
       [[ $use_key == true ]] || env=(env -u ANTHROPIC_API_KEY)
       if [[ -n $model ]]; then typed+=(--model "$model"); fi
-      if [[ -n $effort ]]; then typed+=(--effort "$effort"); fi ;;
+      if [[ -n $effort ]]; then typed+=(--effort "$effort"); fi
+      budget=$(prc_get settings.stepBudget "$(git branch --show-current 2>/dev/null)" false) || budget=0
+      [[ $budget =~ ^0*(\.0*)?$ ]] || typed+=(--max-budget-usd "$budget") ;;
     pi)
       if [[ -n $provider ]]; then typed+=(--provider "$provider"); fi
       if [[ -n $model ]]; then typed+=(--model "$model"); fi
@@ -135,15 +161,18 @@ harness_run() {
     *) echo "unknown harness: $h (claude or pi)" >&2; rm -f "$err"; return 1 ;;
   esac
   rc=$?
+  harness_usage "$h" "$sid" "$mode" "$rc" "$out"
   if (( rc != 0 )); then
     tail -n 40 "$err" >&2
-    # The end of the harness's own account of the failure: claude's result
-    # text, else an error result's subtype (e.g. error_max_turns), else
-    # stdout that isn't JSON; pi's reply.
+    # The end of the harness's own account of the failure: the budget hit,
+    # else claude's result text, else an error result's subtype (e.g.
+    # error_max_turns), else stdout that isn't JSON; pi's reply.
     said=$out
     if [[ $h == claude ]]; then
       said=$(prc_line 'where kind(this) == "record"
-        | values coalesce(nullif(result, ""), coalesce(is_error, false) ? subtype : null, "")
+        | values on(subtype == "error_max_budget_usd")
+            ? f"hit settings.stepBudget ('"$budget"' USD): the step cost {coalesce(total_cost_usd, 0)} USD"
+            : coalesce(nullif(result, ""), coalesce(is_error, false) ? subtype : null, "")
         | where this != ""' "$out" 2>/dev/null) || said=$out
     fi
     [[ -z $said ]] || tail -n 20 <<<"$said" >&2

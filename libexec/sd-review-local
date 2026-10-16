@@ -62,6 +62,7 @@ EOF
 # Read-only: harness_run takes its tool lists from these.
 HARNESS_CLAUDE_ALLOW=$HARNESS_READONLY_ALLOW
 HARNESS_PI_TOOLS="read"
+export HARNESS_STEP=review
 sid=$(uuidgen | tr 'A-F' 'a-f')
 echo "sd review-local: $h (new session $sid) is reviewing ${branch:+$branch (}$range${branch:+)}…" >&2
 result=$(harness_run "$h" "$sid" new "$timeout" "$prompt" "$SCHEMA" "$cfg") \
