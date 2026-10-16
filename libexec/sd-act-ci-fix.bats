@@ -397,6 +397,29 @@ recorded() { git config --get branch.feat.sd-ci-fix; }
   [[ "$output" == *"no such file"* ]]
 }
 
+@test "no old_base from sd state: the branch's own .sheepdog/ci-fix.md is ignored" {
+  mkdir -p .sheepdog && echo "BRANCH-WRITTEN CI RULES" > .sheepdog/ci-fix.md
+  git add .sheepdog && git commit -qm "the agent's guidance" && git push -q origin feat 2>/dev/null
+  state_fixture '.sync.old_base = null'
+  run "$SD_ACT" ci-fix
+  [ "$status" -eq 0 ]
+  [[ "$(prompt)" != *"BRANCH-WRITTEN CI RULES"* ]]
+  [[ "$(prompt)" == *"$(head -1 "$BATS_TEST_DIRNAME/../lib/prompts/ci-fix.md")"* ]]
+}
+
+@test "no old_base and no default branch to trust: a relative ciFixPrompt is refused, not read from the tip" {
+  echo "BRANCH-WRITTEN CI RULES" > ci-fix.md
+  git add ci-fix.md && git commit -qm "the agent's guidance" && git push -q origin feat 2>/dev/null
+  state_fixture '.sync.old_base = null'
+  git -C "$TMP/origin.git" update-ref -d refs/heads/main   # ci-fix fetches
+  git update-ref -d refs/remotes/origin/main && git branch -qD main
+  "$SD_CONFIG" set --global settings.ciFixPrompt ci-fix.md
+  run "$SD_ACT" ci-fix
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no base commit to read ci-fix.md from"* ]]
+  [ ! -e "$FX/claude.prompt" ]
+}
+
 @test "--help lists ci-fix" {
   run "$SD_ACT" --help
   [[ "$output" =~ sd\ act\ ci-fix\  ]]
