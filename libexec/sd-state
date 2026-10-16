@@ -185,6 +185,26 @@ fi
 target=$parent
 [[ $parent_merged == true ]] && target=$default_branch
 
+# ── O3a restack undone (#47) ─────────────────────────────────────────────────
+
+# After a restack, a plain git push is rejected and git's advice (pull --rebase)
+# rebases the branch onto its old remote head and replays the target's commits
+# as copies, orphaning the base pin. Evidence, all three: the pin isn't an
+# ancestor; the remote head is (the pull put it there; a hand rewrite of the
+# branch wouldn't); and commits above the remote head repeat a target commit's
+# author date and subject (only those: a stacked child also carries its
+# parent's commits, which aren't copies). Not seen: a squash-merged parent
+# whose squash was the target's only new commit, since the pull drops the
+# replayed squash as empty and leaves no copy; that case keeps the pin error.
+undone=0
+if u_pin=$(ref "refs/sheepdog/$branch/base") && [[ -n $u_pin ]] \
+   && u_tr=$(ref "refs/remotes/$remote/$target") && [[ -n $u_tr ]] \
+   && u_rs=$(ref "refs/remotes/$remote/$branch") && [[ -n $u_rs ]] && is_ancestor "$u_rs" "$head" \
+   && ! is_ancestor "$u_pin" "$head" && u_mb=$(git merge-base "$u_tr" "$head" 2>/dev/null); then
+  undone=$(comm -12 <(git log --format='%at %s' "$u_rs..$head" | sort -u) \
+                    <(git log --format='%at %s' "$u_mb..$u_tr" | sort -u) | wc -l | tr -d ' ')
+fi
+
 # ── O3 sync vs parent ────────────────────────────────────────────────────────
 
 # holds_parent_commits <range>: a commit in the range is one of the parent PR's.
@@ -202,7 +222,7 @@ else
   behind=$(count "$head..$target_ref")
   base_pin=$(ref "refs/sheepdog/$branch/base")
   merged_head=$(prc_val "$parent_pr" 'coalesce(headRefOid, "")')
-  if [[ -n $base_pin ]] && ! is_ancestor "$base_pin" "$head"; then
+  if [[ -n $base_pin ]] && ! is_ancestor "$base_pin" "$head" && (( undone == 0 )); then
     errors+=("base pin ${base_pin:0:7} is no longer in $branch's history (rewritten outside sheepdog?)")
   fi
   if [[ -n $base_pin ]] && is_ancestor "$base_pin" "$head"; then
@@ -415,7 +435,7 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
              pr: nul(s.parent_pr) ? null : {number: s.parent_pr.number, state: s.parent_pr.state, head_sha: s.parent_pr.headRefOid,
                                        commits: coalesce([unnest coalesce(s.parent_pr.allCommits.nodes, []) | values commit.oid], [])}},
     sync: {target: s.target, default: s.default_branch, ahead: s.sync_ahead, behind: s.behind, up_to_date: s.up_to_date,
-           old_base: s.old_base, conflict: s.conflict},
+           old_base: s.old_base, conflict: s.conflict, undone: s.undone},
     push: {remote_sha: s.remote_sha, ahead: s.ahead, behind: s.push_behind, diverged: s.diverged, remote_ours: s.remote_ours, theirs: s.theirs},
     fresh: s.gh_ok and s.parent_ok ? len(s.stale) == 0 : null, stale: s.stale,
     ci: {sha: coalesce(c.oid, null), for_head: nul(c) ? null : c.oid == s.head,
@@ -454,12 +474,12 @@ errors_json='[]'
 (( ${#errors[@]} == 0 )) || errors_json=$(printf '%s\n' "${errors[@]}" | prc_strings)
 refs_json=$(git for-each-ref --format='%(refname) %(objectname)' "refs/sheepdog/$branch/" | prc_strings)
 args=$(printf '{"branch": %s, "head": %s, "pr": %s, "parent": %s, "parent_source": %s, "parent_pr": %s, "parent_merged": %s,
-  "target": %s, "default_branch": %s, "sync_ahead": %s, "behind": %s, "up_to_date": %s, "old_base": %s, "conflict": %s,
+  "target": %s, "default_branch": %s, "sync_ahead": %s, "behind": %s, "up_to_date": %s, "old_base": %s, "conflict": %s, "undone": %s,
   "remote_sha": %s, "ahead": %s, "push_behind": %s, "diverged": %s, "remote_ours": %s, "theirs": %s, "stale": %s,
   "r_local": %s, "r_bot": %s, "r_accepted": %s, "r_findings": %s, "r_findings_at_head": %s, "review_rounds": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s,
   "ignore": %s, "ignore_body": %s, "handled": %s, "refs": %s, "enrolled": %s, "harness": %s, "session": %s, "lock": %s, "errors": %s}\n' \
   "$(jstr "$branch")" "$(jstr "$head")" "$pr" "$(jstr "$parent")" "$(jstr "$parent_source")" "$parent_pr" "$parent_merged" \
-  "$(jstr "$target")" "$(jstr "$default_branch")" "$sync_ahead" "$behind" "$up_to_date" "$(jnull "$old_base")" "$conflict" \
+  "$(jstr "$target")" "$(jstr "$default_branch")" "$sync_ahead" "$behind" "$up_to_date" "$(jnull "$old_base")" "$conflict" "$undone" \
   "$(jnull "$remote_sha")" "$ahead" "$push_behind" "$diverged" "$remote_ours" "$theirs" "$stale_json" \
   "${review[local]}" "${review[bot]}" "${review[accepted]}" "$r_findings" "$r_findings_at_head" "$review_rounds" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" \
   "$ignore" "$ignore_body" "$(jlist "branch.$branch.sd-handled")" "$refs_json" \

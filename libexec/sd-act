@@ -1598,7 +1598,12 @@ restack() {
         "Compare: git range-diff ${old_base:0:12}..${old_head:0:12} ${new_base:0:12}..${new_head:0:12}"
   fi
   git update-ref -m "sd act restack" "refs/sheepdog/$b/base" "$new_base"
-  echo "restacked $b onto $remote/$target ($(plural "$(git rev-list --count "$new_base..$new_head")" commit)); not pushed: sd act push"
+  local how="sd act push"
+  # A plain push is rejected once the remote head is no longer an ancestor.
+  if git show-ref -q --verify "refs/remotes/$remote/$b" && ! git merge-base --is-ancestor "refs/remotes/$remote/$b" "$new_head"; then
+    how="a plain git push is rejected now, and git's pull advice would undo the restack; use sd act push"
+  fi
+  echo "restacked $b onto $remote/$target ($(plural "$(git rev-list --count "$new_base..$new_head")" commit)); not pushed: $how"
   line=$(prc_line "$KEEP_PARENT" "$state") \
     || die "restacked $b, but couldn't tell whether its PR still targets the parent; sd-parent left as is$($resolved && echo ". The agent resolved conflicts, so verify and review: sd act verify, sd act review")"
   if [[ -n $line ]]; then echo "$line"; else parent_to_default "$b" "$state"; fi
