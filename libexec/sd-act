@@ -55,7 +55,10 @@
 #             (sd act review) go into the prompt; changing nothing for them
 #             declines them, which hands them to chrismo. Spends tokens
 #   enroll    mark the branch for sd watch, and register this repo; for a
-#             stacked PR, store its parent and base before a merge erases them
+#             stacked PR, store its parent and base before a merge erases them;
+#             with no PR and no sd-parent, store the branch it was made from by
+#             a plain git branch (#94), or say why git can't pick one (a tie,
+#             or a parent that moved on) and store nothing
 #   unenroll  clear the mark
 #   forget    the branch is done (merged, abandoned): unenroll it and delete
 #             its refs/sheepdog/<branch>/* pins, which outlive a branch -D
@@ -135,13 +138,15 @@
 #             for HEAD and the PR's target. Spends tokens
 #   ship      describe unless one for HEAD and the target is stored, check
 #             HEAD didn't move, push, then open a draft PR on the parent
-#             (sd-parent, else the PR's base, else the default branch) and
-#             enroll; with a PR already open, fix up its title, body and base
-#             instead. Warns when the local review doesn't cover HEAD; the
-#             draft stays a draft until it does. Refuses while the parent
-#             isn't on the remote, has merged (restack first), was closed, or
-#             can't be looked up; a merged parent with the branch already on
-#             the default branch ships onto it and rewrites sd-parent. Spends
+#             (sd-parent, else the PR's base, else with no PR the branch it
+#             was made from, stored as enroll does, else the default branch)
+#             and enroll; with a PR already open, fix up its title, body and
+#             base instead. Warns when the local review doesn't cover HEAD;
+#             the draft stays a draft until it does. Refuses when git can't
+#             pick the branch it was made from, and while the parent isn't on
+#             the remote, has merged (restack first), was closed, or can't be
+#             looked up; a merged parent with the branch already on the
+#             default branch ships onto it and rewrites sd-parent. Spends
 #             tokens unless a description for HEAD and the target is stored
 #   trigger   post settings.botCommand on the PR so the review bot runs, and
 #             pin bot at HEAD; nothing when already pinned there. HEAD must
