@@ -35,6 +35,10 @@ fi
 b=""
 for a; do [[ $a == branch=* ]] && b=${a#branch=}; done
 [[ -e $GH/fail-$b ]] && { echo "gh: boom for $b" >&2; exit 1; }
+if [[ -e $GH/fail-$b-after-1 ]]; then
+  [[ -e $GH/seen-$b ]] && { echo "gh: boom for $b" >&2; exit 1; }
+  touch "$GH/seen-$b"
+fi
 if [[ -f $GH/$b.json ]]; then cat "$GH/$b.json"
 else echo '{"data":{"viewer":{"login":"me"},"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"nodes":[]}}}}'
 fi
@@ -172,6 +176,49 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   [[ "$output" == *"A has no commits beyond origin/main"*"point sd-parent at main"* ]]
   [[ "$output" != *"sd act ship A"* ]]
   [ -z "$(calls)" ]
+}
+
+@test "ship: a branch made from another's tip with no recorded parent: records it and opens its PR on it (#94)" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
+  git switch -qc kid && git commit -q --allow-empty -m kid
+  run "$SD_ACT" ship
+  [ "$status" -eq 0 ]
+  [ "$(git config branch.kid.sd-parent)" = A ]
+  [[ "$(calls)" == "pr create --draft --base A --head kid "* ]]
+}
+
+@test "ship: gh failing on a second lookup still opens an unrecorded stack's PR on its parent (#94)" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
+  git switch -qc kid && git commit -q --allow-empty -m kid
+  touch "$GH/fail-kid-after-1"
+  run "$SD_ACT" ship
+  [ "$status" -eq 0 ]
+  [ "$(git config branch.kid.sd-parent)" = A ]
+  [[ "$(calls)" == "pr create --draft --base A --head kid "* ]]
+}
+
+@test "ship: an unrecorded stack git can't orient (the parent moved on) is refused before describe or push (#94)" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A1
+  git switch -qc kid && git commit -q --allow-empty -m kid
+  git switch -q A && git commit -q --allow-empty -m A2 && git push -q origin A 2>/dev/null
+  git switch -q kid
+  run "$SD_ACT" ship
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"git can't tell which, if either, was made from the other"* ]]
+  [ -z "$(git config branch.kid.sd-parent || true)" ]
+  [ ! -e "$FX/claude.args" ]
+  [ -z "$(remote kid)" ]
+  [ -z "$(calls)" ]
+}
+
+@test "ship: a branch a scratch branch was made from still ships onto the default branch (#94)" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A1
+  git switch -qc scratch && git commit -q --allow-empty -m s1
+  git switch -q A && git commit -q --allow-empty -m A2
+  run "$SD_ACT" ship
+  [ "$status" -eq 0 ]
+  [ -z "$(git config branch.A.sd-parent || true)" ]
+  [[ "$(calls)" == "pr create --draft --base main --head A "* ]]
 }
 
 @test "ship: a stale description (HEAD moved) is written again" {

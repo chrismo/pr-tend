@@ -173,6 +173,15 @@ if [[ -z $parent ]]; then
     parent=$(prc_val "$pr" baseRefName) parent_source=pr
   else
     parent=$default_branch parent_source=default
+    # A plain git branch from another's tip records no parent (#94): flag it,
+    # unless gh failed and a PR we couldn't see may name the parent.
+    rc=1
+    if $gh_ok; then rc=0 stacked=$(stacked_on "$branch" "$remote" "$default_branch") || rc=$?; fi
+    case $rc in
+      0) errors+=("stacked on ${stacked%% *} without sheepdog knowing: sd act enroll records it") ;;
+      2) errors+=("stacked on ${stacked// / or } without sheepdog knowing: record one with git config branch.$branch.sd-parent <name>") ;;
+      3) errors+=("$(stacked_unclear "$branch" "$stacked" "$default_branch")") ;;
+    esac
   fi
 fi
 

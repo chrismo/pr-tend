@@ -192,6 +192,86 @@ field() { jq -r "$@" <<<"$output"; }
   [ "$(field '.errors | length')" = 0 ]
 }
 
+@test "a branch stacked on another without sheepdog knowing is flagged" {
+  git switch -qc par && commit a.txt a
+  git switch -qc kid && commit b.txt b
+  state kid
+  [[ "$(field '.errors | join(" ")')" == *"stacked on par without sheepdog knowing: sd act enroll records it"* ]]
+  [ "$(field .parent.name)" = main ]
+}
+
+@test "an unrecorded stack with two candidates names both" {
+  git switch -qc par && commit a.txt a
+  git branch twin
+  git switch -qc kid && commit b.txt b
+  state kid
+  [[ "$(field '.errors | join(" ")')" == *"stacked on par or twin without sheepdog knowing"* ]]
+}
+
+@test "an unrecorded stack whose parent moved on: the child can't tell which way, the parent made the fork commit" {
+  git switch -qc par && commit a.txt a
+  git switch -qc kid && commit b.txt b
+  git switch -q par && commit c.txt c
+  state kid
+  [[ "$(field '.errors | join(" ")')" == *"shares commits with par, and each has its own since, so git can't tell which, if either, was made from the other: git config branch.kid.sd-parent par if kid was, or git config branch.kid.sd-parent main if not"* ]]
+  state par
+  [ "$(field '.errors | length')" = 0 ]
+}
+
+@test "siblings whose parent is gone: flagged without claiming either was made from the other" {
+  git switch -qc par && commit a.txt a
+  git switch -qc kid && commit b.txt b
+  git switch -q par && git switch -qc sib && commit c.txt c
+  git branch -qD par
+  state kid
+  [[ "$(field '.errors | join(" ")')" == *"shares commits with sib, and each has its own since, so git can't tell which, if either, was made from the other"* ]]
+}
+
+@test "siblings that each moved on: all named, still without a direction" {
+  git switch -qc par && commit a.txt a
+  git switch -qc kid && commit b.txt b
+  git switch -q par && git switch -qc sib && commit c.txt c
+  git switch -q par && git switch -qc sib2 && commit d.txt d
+  git branch -qD par
+  state kid
+  [[ "$(field '.errors | join(" ")')" == *"shares commits with sib or sib2, and each has its own since, so git can't tell which, if either, was made from the other: git config branch.kid.sd-parent <name> if kid was, or git config branch.kid.sd-parent main if not"* ]]
+}
+
+@test "an unrecorded stack isn't flagged when gh failed, since a PR may name the parent" {
+  git switch -qc par && commit a.txt a
+  git switch -qc kid && commit b.txt b
+  GH_FAKE_FAIL="gh: down" state kid
+  [[ "$(field '.errors | join(" ")')" != *"without sheepdog knowing"* ]]
+}
+
+@test "an unrecorded stack's tie lists each name once, pushed or not" {
+  git switch -qc par && commit a.txt a
+  git branch twin
+  git push -q origin par twin 2>/dev/null
+  git switch -qc kid && commit b.txt b
+  state kid
+  [[ "$(field '.errors | join(" ")')" == *"stacked on par or twin without sheepdog knowing: record one with git config branch.kid.sd-parent <name>"* ]]
+}
+
+@test "a recorded parent, or a PR, means no unrecorded-stack flag" {
+  git switch -qc par && commit a.txt a
+  git switch -qc kid && commit b.txt b
+  git config branch.kid.sd-parent par
+  state kid
+  [[ "$(field '.errors | join(" ")')" != *"without sheepdog knowing"* ]]
+  git config --unset branch.kid.sd-parent
+  pr_fixture kid '.baseRefName = "par"'
+  state kid
+  [[ "$(field '.errors | join(" ")')" != *"without sheepdog knowing"* ]]
+}
+
+@test "a branch made from main alone isn't flagged" {
+  git switch -qc par && commit a.txt a
+  git switch -q main && git switch -qc solo && commit b.txt b
+  state solo
+  [ "$(field '.errors | length')" = 0 ]
+}
+
 @test "a branch name with a slash finds its PR" {
   git switch -qc chrismo/feat && commit a.txt a
   pr_fixture chrismo/feat
