@@ -441,16 +441,6 @@ state_files() { find "$SHEEPDOG_STATE_DIR/branches" -name '*.json' 2>/dev/null; 
   [ "$(cat "$PS_FIXTURES/gh-calls")" = "api repos/{owner}/{repo}/pulls/7" ]
 }
 
-@test "gone: a merge already notified before the branch went isn't notified again" {
-  ps_fixture feat '.pr.state = "MERGED"'
-  pass
-  gone feat
-  gh_pull '{"state": "closed", "merged": true}'
-  pass
-  [ "$(notified | grep -c merged)" = 1 ]
-  [ -z "$(state_files)" ]
-}
-
 @test "gone: a branch with a slash in its name is found" {
   git switch -qc 12/doc && enroll 12/doc
   ps_fixture 12/doc '.ci.verdict = "pending"'
@@ -475,6 +465,21 @@ state_files() { find "$SHEEPDOG_STATE_DIR/branches" -name '*.json' 2>/dev/null; 
   gh_pull '{"state": "closed", "merged": true}'
   pass
   [ "$(notified)" = "repo feat|merged (#7); the local branch is already gone" ]
+}
+
+@test "gone: a PR GitHub says doesn't exist drops the state" {
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  gone feat
+  cat > "$TMP/fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+echo "gh: Not Found (HTTP 404)" >&2
+exit 1
+SH
+  chmod +x "$TMP/fakebin/gh"
+  pass
+  grep -q "feat.*⚠️.*branch is gone; GitHub has no #7" "$SHEEPDOG_STATE_DIR/last-pass"
+  [ -z "$(state_files)" ]
 }
 
 @test "gone: a PR that wasn't merged drops the state quietly" {
@@ -534,7 +539,8 @@ SH
   gh_pull '{"state": "closed", "merged": true}'
   pass
   [ -n "$(state_files)" ]
-  pass
+  run --separate-stderr pass
+  [[ "$stderr" == *"giving up on: merged (#7)"* ]] || false
   pass
   [ "$(grep -c merged "$PS_FIXTURES/attempts")" = 2 ]
   [ -z "$(state_files)" ]

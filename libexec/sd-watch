@@ -161,7 +161,7 @@ state_dir() { echo "$STATE_DIR/branches/$(basename "$1")-$(printf '%s' "$1" | sh
 # notified is. GitHub not answering, or a failed notification's one retry,
 # keeps the state for the next pass.
 report_gone() {
-  local repo=$1 name=$2 dir f b cached pr pull msg pr_state
+  local repo=$1 name=$2 dir f d b cached pr pull msg pr_state err
   dir=$(state_dir "$repo")
   [[ -d $dir ]] || return 0
   while IFS= read -r f; do
@@ -171,10 +171,18 @@ report_gone() {
     pr=$(prc_line 'values coalesce(state.pr.number, "")' "$cached" 2>/dev/null) || pr=
     if [[ -n $pr ]] && ! git -C "$repo" rev-parse -q --verify "refs/heads/$b" >/dev/null \
        && [[ $(prc_line 'values "merged" in coalesce(notified, [unnest reasons | values key], [])' "$cached" 2>/dev/null) != true ]]; then
-      if ! pull=$(cd "$repo" && with_timeout "$TIMEOUT" gh api "repos/{owner}/{repo}/pulls/$pr" 2>/dev/null </dev/null); then
+      err=$(mktemp)
+      if ! pull=$(cd "$repo" && with_timeout "$TIMEOUT" gh api "repos/{owner}/{repo}/pulls/$pr" 2>"$err" </dev/null); then
+        if grep -q 'HTTP 404' "$err"; then
+          printf '%s\t%s\t⚠️\tbranch is gone; GitHub has no #%s\n' "$name" "$b" "$pr"
+          rm -f "$err" "$f"
+          continue
+        fi
         printf '%s\t%s\t⚠️\tbranch is gone; GitHub didn'"'"'t say what became of #%s\n' "$name" "$b" "$pr"
+        rm -f "$err"
         continue
       fi
+      rm -f "$err"
       if [[ $(prc_line 'values on(merged)' "$pull" 2>/dev/null) == true ]]; then
         msg="merged (#$pr); the local branch is already gone"
         printf '%s\t%s\t🏁\t%s\n' "$name" "$b" "$msg"
@@ -183,7 +191,8 @@ report_gone() {
             echo "sd watch: giving up on: $msg" >&2
           else
             prc_json 'values {...this, failed: [...coalesce(failed, []), "merged"]}' "$cached" > "$f.$$.tmp" \
-              && mv "$f.$$.tmp" "$f" || rm -f "$f.$$.tmp"
+              && mv "$f.$$.tmp" "$f" \
+              || { rm -f "$f.$$.tmp"; echo "sd watch: couldn't save $f: its merge will notify again" >&2; }
             continue
           fi
         fi
@@ -194,8 +203,10 @@ report_gone() {
       fi
     fi
     rm -f "$f"
+    d=$(dirname "$f")
+    while [[ $d != "$dir" ]] && rmdir "$d" 2>/dev/null; do d=$(dirname "$d"); done
   done < <(find "$dir" -name '*.json' -type f)
-  find "$dir" -mindepth 1 -type d -empty -delete
+  return 0
 }
 
 # sweep_pins <repo>: delete refs/sheepdog/<b>/* whose branch no longer exists.
@@ -249,7 +260,7 @@ run_pass() {
     mapfile -t branches < <(git -C "$repo" config --get-regexp '^branch\..*\.sheepdog$' 2>/dev/null \
       | awk '$2 == "true" { sub(/^branch\./, "", $1); sub(/\.sheepdog$/, "", $1); print $1 }')
     sweep_pins "$repo"
-    out=$(report_gone "$repo" "$name")
+    out=$(report_gone "$repo" "$name") || true
     [[ -z $out ]] || lines+=$out$'\n'
     (( ${#branches[@]} )) || continue
 
