@@ -50,7 +50,7 @@ source "$(dirname "$(realpath "$0")")/../lib/next.sh"
 source "$(dirname "$(realpath "$0")")/../lib/sheepdog.sh"
 
 read -r -d '' QUERY <<'EOF' || true
-query($owner: String!, $repo: String!, $branch: String!) {
+query($owner: String!, $repo: String!, $branch: String!, $commits: Boolean!) {
   viewer { login }
   repository(owner: $owner, name: $repo) {
     defaultBranchRef { name }
@@ -60,6 +60,8 @@ query($owner: String!, $repo: String!, $branch: String!) {
         mergeStateStatus reviewDecision
         reviewRequests(first: 20) { nodes { requestedReviewer {
           ... on User { login } ... on Bot { login } ... on Mannequin { login } ... on Team { slug } } } }
+        # GitHub takes up to 250 on a PR's commits, not the usual 100.
+        allCommits: commits(last: 250) @include(if: $commits) { nodes { commit { oid } } }
         commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes {
           __typename
           ... on CheckRun { name status conclusion }
@@ -119,11 +121,13 @@ bot_command=$(prc_get settings.botCommand "$branch" false) || die "sd config fai
   || die "botIgnoreBody has an invalid regex: $ignore_body"
 
 # -f, not -F, for the branch: -F would send "1234" or "true" as a non-string.
+# gh_query <branch> [true]: true also fetches its PRs' commits.
 RESP=""
 GH_ERR=$(mktemp)
 trap 'rm -f "$GH_ERR"' EXIT
 gh_query() {
-  if ! RESP=$(gh api graphql -F owner='{owner}' -F repo='{repo}' -f branch="$1" -f query="$QUERY" 2>"$GH_ERR"); then
+  if ! RESP=$(gh api graphql -F owner='{owner}' -F repo='{repo}' -f branch="$1" -F commits="${2:-false}" \
+                -f query="$QUERY" 2>"$GH_ERR"); then
     errors+=("gh ($1): $(tr '\n' ' ' <"$GH_ERR")")
     RESP=""
     return 1
@@ -166,7 +170,7 @@ fi
 parent_pr=null parent_ok=$gh_ok
 [[ $parent_source == config ]] && parent_ok=true
 if [[ $parent != "$default_branch" ]]; then
-  if gh_query "$parent"; then parent_pr=$(pick_pr); else parent_ok=false; fi
+  if gh_query "$parent" true; then parent_pr=$(pick_pr); else parent_ok=false; fi
 fi
 parent_merged=null
 if $parent_ok; then
@@ -363,7 +367,8 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
                               | where this is not null
                             ], [])},
     parent: {name: s.parent, source: s.parent_source, merged: s.parent_merged,
-             pr: nul(s.parent_pr) ? null : {number: s.parent_pr.number, state: s.parent_pr.state, head_sha: s.parent_pr.headRefOid}},
+             pr: nul(s.parent_pr) ? null : {number: s.parent_pr.number, state: s.parent_pr.state, head_sha: s.parent_pr.headRefOid,
+                                       commits: coalesce([unnest coalesce(s.parent_pr.allCommits.nodes, []) | values commit.oid], [])}},
     sync: {target: s.target, default: s.default_branch, ahead: s.sync_ahead, behind: s.behind, up_to_date: s.up_to_date,
            old_base: s.old_base, conflict: s.conflict},
     push: {remote_sha: s.remote_sha, ahead: s.ahead, behind: s.push_behind, diverged: s.diverged, remote_ours: s.remote_ours, theirs: s.theirs},

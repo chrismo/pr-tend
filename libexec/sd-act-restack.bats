@@ -75,12 +75,15 @@ upstream() {
      && perl -pi -e "$2" file.txt && git commit -qam "${3:-upstream}" && git push -q origin "$1" 2>/dev/null)
 }
 
-# merged_pr <branch> <head-sha>: gh says <branch>'s PR merged with that head.
+# merged_pr <branch> <head-sha> [<commit>...]: gh says <branch>'s PR merged with that
+# head, and those commits.
 merged_pr() {
-  jq -n --arg b "$1" --arg h "$2" '{data: {viewer: {login: "me"},
+  local b=$1 h=$2; shift 2
+  jq -n --arg b "$b" --arg h "$h" --args '{data: {viewer: {login: "me"},
     repository: {defaultBranchRef: {name: "main"},
       pullRequests: {nodes: [{number: 1, state: "MERGED", baseRefName: "main", headRefName: $b,
-                              headRefOid: $h, isCrossRepository: false}]}}}}' > "$GH/$1.json"
+                              headRefOid: $h, isCrossRepository: false,
+                              allCommits: {nodes: [$ARGS.positional[] | {commit: {oid: .}}]}}]}}}}' "$@" > "$GH/$b.json"
 }
 
 # open_pr <branch> <base> <number>: gh says <branch> has an open PR into <base>.
@@ -163,7 +166,7 @@ base_pin() { git rev-parse -q --verify refs/sheepdog/feat/base || true; }
   git config branch.child.sd-parent A
   (cd "$TMP/other" && git fetch -q origin && git checkout -q main && git merge -q --squash origin/A \
      && git commit -qm "A (#1)" && git push -q origin main 2>/dev/null)
-  merged_pr A "$a_head"
+  merged_pr A "$a_head" "$(git rev-parse A~1)" "$a_head"
   run "$SD_ACT" restack
   [ "$status" -eq 0 ]
   [ "$(git rev-parse child^)" = "$(git rev-parse origin/main)" ]
@@ -204,6 +207,34 @@ base_pin() { git rev-parse -q --verify refs/sheepdog/feat/base || true; }
   [ "$(git rev-parse child)" = "$before" ]
   ! rebase_in_progress
   [ ! -e "$FX/claude.calls" ]
+}
+
+@test "parent squash-merged, base below the parent's commits: refused, no rebase, no agent" {
+  git switch -q main && git switch -qc A
+  edit 's/^c$/C/' a1
+  edit 's/^d$/D/' a2
+  git push -q origin A 2>/dev/null
+  a1=$(git rev-parse A~1) a_head=$(git rev-parse A)
+  git switch -qc child
+  edit 's/^f$/F/' child
+  git config branch.child.sd-parent A
+  git update-ref refs/sheepdog/child/base "$(git rev-parse main)"
+  (cd "$TMP/other" && git fetch -q origin && git checkout -q main && git merge -q --squash origin/A >/dev/null \
+     && git commit -qm "A (#1)" && git push -q origin main 2>/dev/null)
+  merged_pr A "$a_head" "$a1" "$a_head"
+  before=$(git rev-parse child)
+  run "$SD_ACT" restack --resolve
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"wrong base: this would replay 2 of #1's commits onto origin/main; if the stack is linear, rebase past them by hand: git rebase --onto origin/main ${a_head:0:12} child && git update-ref refs/sheepdog/child/base origin/main"* ]]
+  [ "$(git rev-parse child)" = "$before" ]
+  ! rebase_in_progress
+  [ ! -e "$FX/claude.calls" ]
+  eval "${output##*by hand: }" 2>/dev/null
+  [ "$(git log --format=%s origin/main..child)" = child ]
+  [ "$(git rev-parse refs/sheepdog/child/base)" = "$(git rev-parse origin/main)" ]
+  run "$SD_ACT" restack
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already on origin/main"* ]]
 }
 
 # ── retarget ─────────────────────────────────────────────────────────────────
