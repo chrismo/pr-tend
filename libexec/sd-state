@@ -117,6 +117,7 @@ bots=$(prc_get settings.botLogin "$branch" false json) || die "sd config failed"
 ignore=$(prc_get settings.botIgnore "$branch" false json) || die "sd config failed"
 ignore_body=$(prc_get settings.botIgnoreBody "$branch" false json) || die "sd config failed"
 bot_command=$(prc_get settings.botCommand "$branch" false) || die "sd config failed"
+review_rounds=$(prc_get settings.reviewRounds "$branch" false) || die "sd config failed"
 [[ $(prc_val "$ignore_body" 'len(coalesce([unnest this | where is_error(regexp(this, ""))], [])) == 0' 2>/dev/null) == true ]] \
   || die "botIgnoreBody has an invalid regex: $ignore_body"
 
@@ -297,6 +298,14 @@ pin_status() {
   fi
 }
 
+# sd act review's record of findings that blocked (refs/sheepdog/<b>/findings).
+r_findings=$(git cat-file blob "refs/sheepdog/$branch/findings" 2>/dev/null \
+               | prc_json 'where kind(this) == "record"' 2>/dev/null) || true
+if git rev-parse -q --verify "refs/sheepdog/$branch/findings" >/dev/null && [[ -z $r_findings ]]; then
+  errors+=("review findings: refs/sheepdog/$branch/findings isn't a findings record")
+fi
+[[ -n $r_findings ]] || r_findings=null
+
 declare -A review
 for p in local bot accepted; do
   review[$p]=$(pin_status "$p" || true)
@@ -397,7 +406,11 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
                   : len(coalesce([unnest ctx | where k == "cancelled"], [])) > 0 ? "inconclusive" : "green",
          failing: coalesce([unnest ctx | where k == "fail" | values name], []),
          pending: coalesce([unnest ctx | where k == "pending" | values name], [])},
-    review: {local: s.r_local, bot: s.r_bot, accepted: s.r_accepted},
+    review: {local: s.r_local, bot: s.r_bot, accepted: s.r_accepted,
+             findings: nul(s.r_findings) ? null
+               : {sha: s.r_findings.head, round: s.r_findings.round, n: len(s.r_findings.findings),
+                  at_head: s.r_findings.head == s.head, declined: on(s.r_findings.declined),
+                  cap: s.review_rounds, items: s.r_findings.findings}},
     threads: {owed_bot: s.gh_ok ? len(ob) : null,
               owed_human: s.gh_ok ? len(coalesce([unnest owed | where kind == "human"], [])) : null,
               outdated: s.gh_ok ? len(coalesce([unnest owed | where on(outdated)], [])) : null,
@@ -422,12 +435,12 @@ refs_json=$(git for-each-ref --format='%(refname) %(objectname)' "refs/sheepdog/
 args=$(printf '{"branch": %s, "head": %s, "pr": %s, "parent": %s, "parent_source": %s, "parent_pr": %s, "parent_merged": %s,
   "target": %s, "default_branch": %s, "sync_ahead": %s, "behind": %s, "up_to_date": %s, "old_base": %s, "conflict": %s,
   "remote_sha": %s, "ahead": %s, "push_behind": %s, "diverged": %s, "remote_ours": %s, "theirs": %s, "stale": %s,
-  "r_local": %s, "r_bot": %s, "r_accepted": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s,
+  "r_local": %s, "r_bot": %s, "r_accepted": %s, "r_findings": %s, "review_rounds": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s,
   "ignore": %s, "ignore_body": %s, "handled": %s, "refs": %s, "enrolled": %s, "harness": %s, "session": %s, "lock": %s, "errors": %s}\n' \
   "$(jstr "$branch")" "$(jstr "$head")" "$pr" "$(jstr "$parent")" "$(jstr "$parent_source")" "$parent_pr" "$parent_merged" \
   "$(jstr "$target")" "$(jstr "$default_branch")" "$sync_ahead" "$behind" "$up_to_date" "$(jnull "$old_base")" "$conflict" \
   "$(jnull "$remote_sha")" "$ahead" "$push_behind" "$diverged" "$remote_ours" "$theirs" "$stale_json" \
-  "${review[local]}" "${review[bot]}" "${review[accepted]}" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" \
+  "${review[local]}" "${review[bot]}" "${review[accepted]}" "$r_findings" "$review_rounds" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" \
   "$ignore" "$ignore_body" "$(jlist "branch.$branch.sd-handled")" "$refs_json" \
   "$(jstr "$(cfg sheepdog)")" "$(jstr "$(cfg sd-harness)")" "$(jstr "$(cfg sd-session)")" "$(jstr "$(cfg sd-lock)")" "$errors_json")
 state=$(prc_json "$ASSEMBLE" "$args") || die "couldn't assemble the state"
@@ -454,6 +467,8 @@ values [
   nul(pr) ? null : f"CI {ci.verdict}{len(ci.failing) > 0 ? f" ({sj(ci.failing, ", ")})" : ""}{on(ci.for_head == false) ? " on old head" : ""}",
   nul(pr) or nul(threads.blocking) ? null : f"!:{threads.blocking} i:{threads.info}",
   pin("local", review.local), pin("bot", review.bot), pin("accepted", review.accepted),
+  nul(review.findings) ? null
+    : f"review: {review.findings.n} finding{review.findings.n == 1 ? "" : "s"} (round {review.findings.round}/{review.findings.cap}){review.findings.at_head ? "" : " on old head"}",
   on(session.locked) ? "locked" : null,
   on(fresh == false) ? "⚠ stale: fetch" : null,
   len(errors) > 0 ? f"⚠ {len(errors)} error(s)" : null

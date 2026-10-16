@@ -665,6 +665,31 @@ lost_pin_stack() {
   [ "$(field .review.bot.status)" = none ]
 }
 
+@test "review: no findings record is null" {
+  git switch -qc feat && commit a.txt a
+  state
+  [ "$(field .review.findings)" = null ]
+}
+
+@test "review: a findings record at HEAD, with its round, count and the cap" {
+  git switch -qc feat && commit a.txt a
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: $h, round: 2,
+          findings: [{file: "a.txt", line: 1, severity: "error", body: "x"}]}')
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
+  state
+  [ "$(field .review.findings.round)" = 2 ]
+  [ "$(field .review.findings.n)" = 1 ]
+  [ "$(field .review.findings.at_head)" = true ]
+  [ "$(field .review.findings.declined)" = false ]
+  [ "$(field .review.findings.cap)" = 3 ]
+  [ "$(field '.review.findings.items[0].body')" = x ]
+  run "$SD_STATE"
+  [[ "$output" == *"review: 1 finding (round 2/3)"* ]]
+  commit b.txt b
+  state
+  [ "$(field .review.findings.at_head)" = false ]
+}
+
 @test "review: pin at HEAD is covered" {
   git switch -qc feat && commit a.txt a
   git update-ref refs/sheepdog/feat/local HEAD
