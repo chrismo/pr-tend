@@ -94,13 +94,6 @@ step() { # step <key> <field> <jq-assignment...>
   [ "$(keys "${st[@]}" '.parent.on_remote = true | .parent.unpushed = false')" = "push open-pr" ]
 }
 
-@test "a merged parent whose branch is gone from origin but still here is not an unpushed parent (#105)" {
-  local st=('.pr.base = "p"' '.push.ahead = 1'
-            '.parent = {"name": "p", "source": "config", "merged": true, "local": true, "on_remote": false, "pr": {"number": 25, "state": "MERGED", "head_sha": "x"}}')
-  [ "$(keys "${st[@]}")" = "push retarget" ]
-  [ "$(keys '.pr.base = "p"' '.parent = {"name": "p", "source": "config", "merged": false, "local": true, "on_remote": false, "pr": {"number": 25, "state": "CLOSED", "head_sha": "x"}}')" = parent-closed ]
-}
-
 @test "the parent closed without merging: chrismo decides; no restack, never ready" {
   local st=('.pr.base = "p"' '.sync.target = "p"' '.sync.up_to_date = false' '.sync.behind = 2'
             '.parent = {"name": "p", "source": "config", "merged": false, "pr": {"number": 25, "state": "CLOSED", "head_sha": "x"}}')

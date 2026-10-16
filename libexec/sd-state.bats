@@ -718,6 +718,17 @@ squash_parent_away() {
   [ "$(field '[.next[].key] | index("ship-parent")')" = null ]
 }
 
+@test "parent: a parent only here that already landed on main by hand is not unpushed (#105)" {
+  git switch -qc parent && commit p.txt p
+  git switch -q main && git merge -q --ff-only parent && git push -q origin main 2>/dev/null
+  git switch -qc feat parent && commit c.txt c
+  git config branch.feat.sd-parent parent
+  state
+  [ "$(field .parent.on_remote)" = false ]
+  [ "$(field .parent.unpushed)" = false ]
+  [ "$(field '[.next[].key] | index("ship-parent")')" = null ]
+}
+
 @test "parent: a parent that exists nowhere is still an error" {
   git switch -qc feat && commit c.txt c
   git config branch.feat.sd-parent nosuch

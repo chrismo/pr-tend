@@ -239,14 +239,16 @@ parent_in_head() {
 # step is to ship the parent, not an error (#105). parent.unpushed is that
 # test, the one every consumer reads: only a parent known to have no PR
 # counts, since a merged or closed one whose remote branch was deleted looks
-# the same here, an open one is on GitHub but not fetched, and a failed gh
-# lookup leaves both unknown.
+# the same here, an open one is on GitHub but not fetched, a failed gh
+# lookup leaves both unknown, and one already on the default branch landed
+# without a PR.
 parent_local=null parent_remote=null parent_unpushed=false
 if [[ $parent != "$default_branch" ]]; then
   if git show-ref -q --verify "refs/heads/$parent"; then parent_local=true; else parent_local=false; fi
   if [[ -n $(ref "refs/remotes/$remote/$parent") ]]; then parent_remote=true; else parent_remote=false; fi
   [[ $parent_local == true && $parent_remote == false && $parent_merged == false \
-     && $(prc_val "$parent_pr" 'this is null') == true ]] && parent_unpushed=true
+     && $(prc_val "$parent_pr" 'this is null') == true ]] \
+    && ! is_ancestor "refs/heads/$parent" "refs/remotes/$remote/$default_branch" && parent_unpushed=true
 fi
 
 target_ref=$(ref "refs/remotes/$remote/$target")
