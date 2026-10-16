@@ -229,6 +229,12 @@ base_pin() { git rev-parse -q --verify refs/sheepdog/feat/base || true; }
   [ "$(git rev-parse child)" = "$before" ]
   ! rebase_in_progress
   [ ! -e "$FX/claude.calls" ]
+  eval "${output##*by hand: }" 2>/dev/null
+  [ "$(git log --format=%s origin/main..child)" = child ]
+  [ "$(git rev-parse refs/sheepdog/child/base)" = "$(git rev-parse origin/main)" ]
+  run "$SD_ACT" restack
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already on origin/main"* ]]
 }
 
 # ── retarget ─────────────────────────────────────────────────────────────────
