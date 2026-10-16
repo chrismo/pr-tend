@@ -217,3 +217,48 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   [ "$status" -ne 0 ]
   [ "$(remote feat)" = "$(git rev-parse HEAD)" ]
 }
+
+# ── ship: the upstream (#39) ─────────────────────────────────────────────────
+
+tracks() { git rev-parse --abbrev-ref "$1@{upstream}" 2>/dev/null; }
+
+@test "ship: twice on a published branch tracking origin/main: tracks origin/feat, nothing else changes" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
+  git switch -q feat && git config branch.feat.sd-parent A
+  git push -q origin feat 2>/dev/null
+  git branch -q --set-upstream-to=origin/main feat
+  open_pr feat A 7
+  "$SD_ACT" describe >/dev/null
+  rm -f "$FX/claude.args"
+  head=$(git rev-parse feat)
+  for _ in 1 2; do
+    run "$SD_ACT" ship
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"nothing to push on feat"* ]]
+    [ "$(tracks feat)" = origin/feat ]
+  done
+  [ ! -e "$FX/claude.args" ]
+  [ "$(git rev-parse feat)" = "$head" ]
+  [ "$(remote feat)" = "$head" ]
+  [ "$(git config branch.feat.sd-parent)" = A ]
+  [ "$(calls | grep -c '^pr create')" -eq 0 ]
+  [ "$(calls | grep -c '^pr edit 7 ')" -eq 2 ]
+  [[ "$(calls)" != *"--base"* ]]
+}
+
+@test "ship: retried after gh pr create failed: the PR opens, tracking origin/feat" {
+  git branch -q --set-upstream-to=origin/main feat
+  touch "$GH/fail-create"
+  run "$SD_ACT" ship
+  [ "$status" -ne 0 ]
+  head=$(git rev-parse feat)
+  [ "$(remote feat)" = "$head" ]
+  rm "$GH/fail-create"
+  git branch -q --set-upstream-to=origin/main feat  # as an sd from before #39 left it
+  run "$SD_ACT" ship
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"nothing to push on feat"* ]]
+  [[ "$output" == *"https://example/pr/9"* ]]
+  [ "$(tracks feat)" = origin/feat ]
+  [ "$(git rev-parse feat)" = "$head" ]
+}

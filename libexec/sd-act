@@ -887,8 +887,9 @@ push_branch() {
   git fetch --quiet --prune "$remote" || { echo "sd act: fetch from $remote failed" >&2; return 1; }
   rsha=$(git rev-parse -q --verify "refs/remotes/$remote/$b^{commit}" || true)
   if [[ -z $rsha ]]; then
-    push_ref "$b" "$remote" "" -u || return
+    push_ref "$b" "$remote" "" || return
     echo "pushed $b to $remote (new branch)"
+    track "$b" "$remote"
     return
   fi
   ahead=$(git rev-list --count "$rsha..refs/heads/$b")
@@ -913,6 +914,12 @@ push_branch() {
     push_ref "$b" "$remote" "$rsha" --force-with-lease="refs/heads/$b:$rsha" || return
     echo "force-pushed $b to $remote (rewritten; the remote head ${rsha:0:7} was ours)"
   fi
+  track "$b" "$remote"
+}
+
+track() {
+  git config "branch.$1.remote" "$2" && git config "branch.$1.merge" "refs/heads/$1" \
+    || echo "sd act: warning: $1 is pushed, but its upstream isn't $2/$1: git branch --set-upstream-to=$2/$1 $1" >&2
 }
 
 # push_ref <branch> <remote> <expected-remote-sha> [push options...]
