@@ -1,6 +1,4 @@
-<img src="img/sam-sheepdog-face.png" alt="Sam Sheepdog" width="110" align="right">
-
-# sheepdog
+# <img src="img/sam-sheepdog-face.png" alt="Sam Sheepdog" width="110" align="middle"> sheepdog
 
 Takes the busy work out of getting a branch to a merged PR and keeping it
 current while it's open: up to date with its parent (stack-aware), CI green on
