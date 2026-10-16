@@ -74,6 +74,8 @@ harness_run() {
   [[ ${#f[@]} -ge 5 && ${f[-1]} == "<end>" ]] || return 1
   model=${f[0]} effort=${f[1]} provider=${f[2]} args=$(printf '%s\n' "${f[@]:3:${#f[@]}-4}")
   read -ra extra <<<"$args"
+  # An interrupted step leaves this file behind (no trap: harness_run runs in
+  # its caller's shell, whose traps it would replace).
   err=$(mktemp) || return 1
   case $h in
     claude)

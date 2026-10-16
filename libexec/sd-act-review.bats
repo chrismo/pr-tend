@@ -134,5 +134,6 @@ EOF2
   run --separate-stderr "$SD_ACT" review
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"claude: still thinking"* ]]
+  [[ "$stderr" == *"timed out after 1s"* ]]
   [ -z "$(pin local)" ]
 }
