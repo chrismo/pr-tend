@@ -23,4 +23,12 @@ for cmd in pr-state pr-act pr-watch pr-config pr-review-local; do
   fi
 done
 
-"$dest" watch install
+if [[ $(uname -s) == Darwin ]]; then
+  "$dest" watch install || {
+    status=$?
+    echo "! sd is linked, but watcher installation failed; retry with: sd watch install" >&2
+    exit "$status"
+  }
+else
+  echo "! Background watcher requires macOS; sd is linked"
+fi

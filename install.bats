@@ -9,7 +9,13 @@ setup() {
   export LOCAL_BIN="$TEST_DIR/local-bin"
   export WATCH_CALLS="$TEST_DIR/watch-calls"
   INSTALLER="$TEST_DIR/repo/install.sh"
-  mkdir -p "$TEST_DIR/repo/bin"
+  mkdir -p "$TEST_DIR/repo/bin" "$TEST_DIR/fakebin"
+  cat > "$TEST_DIR/fakebin/uname" <<'EOF'
+#!/usr/bin/env bash5
+printf '%s\n' "${TEST_OS:-Darwin}"
+EOF
+  chmod +x "$TEST_DIR/fakebin/uname"
+  export PATH="$TEST_DIR/fakebin:$PATH"
   cp "$BATS_TEST_DIRNAME/install.sh" "$INSTALLER"
   cat > "$TEST_DIR/repo/bin/sd" <<'EOF'
 #!/usr/bin/env bash5
@@ -74,6 +80,16 @@ teardown() {
   run "$INSTALLER"
   [ "$status" -eq 42 ]
   [ "$(cat "$WATCH_CALLS")" = "watch install" ]
+  [[ "$output" == *"linked"*"watcher installation failed"*"sd watch install"* ]]
+}
+
+@test "on Linux links sd and explains that the background watcher requires macOS" {
+  export TEST_OS=Linux
+  run "$INSTALLER"
+  [ "$status" -eq 0 ]
+  [ -L "$LOCAL_BIN/sd" ]
+  [ ! -e "$WATCH_CALLS" ]
+  [[ "$output" == *"watcher requires macOS"* ]]
 }
 
 @test "removes pr-* links from a pr-tend install" {
