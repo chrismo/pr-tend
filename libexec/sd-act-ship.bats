@@ -140,13 +140,27 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   grep -q 'Base: this PR targets main\.' "$FX/claude.prompt"
 }
 
-@test "describe: told the base ship will use, main when sd-parent is unset, whatever the PR targets now (#105)" {
+@test "ship: a PR stacked on A with no sd-parent stays on A, and describe says so (#105)" {
   git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
-  git switch -q feat && git push -q -u origin feat 2>/dev/null
+  git switch -q feat && git rebase -q A && git push -q -u origin feat 2>/dev/null
   open_pr feat A 7
-  "$SD_ACT" describe >/dev/null
-  grep -q 'Base: this PR targets main\.' "$FX/claude.prompt"
-  [ "$(jq -r .target "$(git rev-parse --git-common-dir)/sheepdog/feat.describe.json")" = main ]
+  echo '{"data":{"viewer":{"login":"me"},"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"nodes":[{"number": 3, "state": "OPEN", "baseRefName": "main", "headRefName": "A", "headRefOid": "'"$(git rev-parse A)"'", "isCrossRepository": false}]}}}}' > "$GH/A.json"
+  run "$SD_ACT" ship
+  [ "$status" -eq 0 ]
+  grep -q 'Base: this PR is stacked on A' "$FX/claude.prompt"
+  [[ "$(calls)" == "pr edit 7 "* ]]
+  [[ "$(calls)" != *"--base"* ]]
+}
+
+@test "ship: a parent that landed on main by hand, its branch gone from origin, isn't shipped again (#105)" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A
+  git switch -q main && git merge -q --ff-only A && git push -q origin main 2>/dev/null
+  git switch -q feat && git rebase -q A && git config branch.feat.sd-parent A
+  run "$SD_ACT" ship
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no origin/A ref"* ]]
+  [[ "$output" != *"sd act ship A"* ]]
+  [ -z "$(calls)" ]
 }
 
 @test "ship: a stale description (HEAD moved) is written again" {
