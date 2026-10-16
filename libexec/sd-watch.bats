@@ -519,7 +519,7 @@ refresh() { "$SD_WATCH" refresh "$@"; }
   ps_fixture feat
   run refresh
   [ "$status" -eq 0 ]
-  [[ "$output" == *"fetch from origin failed: "*"nowhere"* ]]
+  [[ "$output" == *"fetch from origin failed: "*"nowhere"* ]] || false
   [ "$(glyph repo)" = "✅" ]
 }
 
@@ -547,7 +547,7 @@ refresh() { "$SD_WATCH" refresh "$@"; }
 @test "refresh: sd state failing is ⚠️ and exits non-zero" {
   run refresh
   [ "$status" -ne 0 ]
-  [[ "$output" == *"feat  ⚠️  sd state failed"* ]]
+  [[ "$output" == *"feat  ⚠️  sd state failed"* ]] || false
   [ "$(glyph repo)" = "⚠️" ]
 }
 
@@ -563,7 +563,7 @@ refresh() { "$SD_WATCH" refresh "$@"; }
   printf '{not json\n' > "$SHEEPDOG_CONFIG"
   run refresh
   [ "$status" -ne 0 ]
-  [[ "$output" == *"sd config failed"* ]]
+  [[ "$output" == *"sd config failed"* ]] || false
   [ ! -e "$PS_FIXTURES/calls" ]
 }
 
@@ -571,24 +571,24 @@ refresh() { "$SD_WATCH" refresh "$@"; }
   git branch other
   run refresh other
   [ "$status" -ne 0 ]
-  [[ "$output" == *"other isn't enrolled"*"sd act enroll"* ]]
+  [[ "$output" == *"other isn't enrolled"*"sd act enroll"* ]] || false
   run refresh nope
   [ "$status" -ne 0 ]
-  [[ "$output" == *"no such branch: nope"* ]]
+  [[ "$output" == *"no such branch: nope"* ]] || false
   [ ! -e "$PS_FIXTURES/calls" ]
 }
 
 @test "refresh: -h prints the help; another option or a second branch is refused" {
   run refresh -h
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Usage: sd watch"* ]]
+  [[ "$output" == *"Usage: sd watch"* ]] || false
   run refresh --nope
   [ "$status" -ne 0 ]
-  [[ "$output" == *"unknown option: --nope"* ]]
+  [[ "$output" == *"unknown option: --nope"* ]] || false
   git branch other && enroll other
   run refresh feat other
   [ "$status" -ne 0 ]
-  [[ "$output" == *"usage: sd watch refresh [<branch>]"* ]]
+  [[ "$output" == *"usage: sd watch refresh [<branch>]"* ]] || false
   [ ! -e "$PS_FIXTURES/calls" ]
 }
 
@@ -597,7 +597,7 @@ refresh() { "$SD_WATCH" refresh "$@"; }
   ps_fixture feat
   run refresh
   [ "$status" -ne 0 ]
-  [[ "$output" == *"$TMP/repo isn't registered"*"sd act enroll"* ]]
+  [[ "$output" == *"$TMP/repo isn't registered"*"sd act enroll"* ]] || false
   [ ! -e "$PS_FIXTURES/calls" ]
 }
 
