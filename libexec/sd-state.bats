@@ -434,6 +434,15 @@ lost_pin_stack() {
   [ "$(field -c .errors)" = '[]' ]
 }
 
+@test "sync: already on main, but a stale pin: still reported" {
+  git switch -qc feat && commit a.txt a
+  git update-ref refs/sheepdog/feat/base "$(git rev-parse feat)"
+  git commit -q --amend -m "rewritten"
+  state
+  [ "$(field .sync.up_to_date)" = true ]
+  [[ "$(field '.errors | join(" ")')" == *"is no longer in feat's history"* ]]
+}
+
 @test "sync: stacked on an open parent, no pin or fork-point: falls back to the merge-base with the parent" {
   local fork; fork=$(git rev-parse main)
   git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
