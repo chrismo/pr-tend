@@ -28,7 +28,7 @@
     "ahead": 3,
     "behind": 2,
     "up_to_date": false,
-    "old_base": "0000000000000000000000000000000000000000",
+    "old_base": "0000000000000000000000000000000000000000", "by_tree": false,
     "conflict": false
   },
   "push": {

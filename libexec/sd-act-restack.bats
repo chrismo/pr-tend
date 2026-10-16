@@ -234,7 +234,7 @@ base_pin() { git rev-parse -q --verify refs/sheepdog/feat/base || true; }
   git push -q origin A 2>/dev/null
   a_head=$(git rev-parse A)
   git switch -qc child A~1
-  edit 's/^d$/D/' "a2 again"
+  edit 's/^d$/DD/' "a2, changed"
   edit 's/^f$/F/' child
   git config branch.child.sd-parent A
   git update-ref refs/sheepdog/child/base "$a_head"
@@ -247,6 +247,57 @@ base_pin() { git rev-parse -q --verify refs/sheepdog/feat/base || true; }
   [[ "$output" == *"base pin ${a_head:0:7} is no longer in child's history"* ]]
   [ "$(git rev-parse child)" = "$before" ]
   ! rebase_in_progress
+  [ ! -e "$FX/claude.calls" ]
+}
+
+# orphaned_pin: A (a1, a2) squash-merged into main and deleted; child was
+# restacked onto A, then rewritten outside sheepdog: a2 is now an exact copy,
+# so the pin at A's head isn't an ancestor. Sets $a1 and $a_head.
+orphaned_pin() {
+  git switch -q main && git switch -qc A
+  edit 's/^c$/C/' a1
+  edit 's/^d$/D/' a2
+  git push -q origin A 2>/dev/null
+  a1=$(git rev-parse A~1) a_head=$(git rev-parse A)
+  git switch -qc child A~1
+  edit 's/^d$/D/' "a2 again"
+  edit 's/^f$/F/' child
+  git config branch.child.sd-parent A
+  git update-ref refs/sheepdog/child/base "$a_head"
+  (cd "$TMP/other" && git fetch -q origin && git checkout -q main && git merge -q --squash origin/A >/dev/null \
+     && git commit -qm "A (#1)" && git push -q origin main :A 2>/dev/null)
+}
+
+@test "orphaned pin, all of the parent in HEAD: one commit on main by tree, no agent" {
+  orphaned_pin
+  merged_pr A "$a_head" "$a1" "$a_head"
+  old_head=$(git rev-parse child)
+  run "$SD_ACT" restack --resolve
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"restacked child onto origin/main by tree (1 commit)"* ]]
+  [[ "$output" == *"child's commits are now one, committed by you; the old ones are at ${old_head:0:7}"* ]]
+  [ "$(git rev-parse child^)" = "$(git rev-parse origin/main)" ]
+  [ "$(git rev-list --count origin/main..child)" = 1 ]
+  [ "$(git diff origin/main child)" = "$(git diff "$a_head" "$old_head")" ]
+  [ "$(git log -1 --format=%B child)" = "child (restacked by tree onto origin/main)
+
+Replaces:
+a2 again
+child" ]
+  [ "$(git rev-parse refs/sheepdog/child/base)" = "$(git rev-parse origin/main)" ]
+  grep -qx F file.txt
+  [ ! -e "$FX/claude.calls" ]
+}
+
+@test "orphaned pin, a tree restack that would conflict: refused even with --resolve" {
+  orphaned_pin
+  upstream main 's/^f$/X/'
+  merged_pr A "$a_head" "$a1" "$a_head"
+  before=$(git rev-parse child)
+  run "$SD_ACT" restack --resolve
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"by tree would conflict"* ]]
+  [ "$(git rev-parse child)" = "$before" ]
   [ ! -e "$FX/claude.calls" ]
 }
 
