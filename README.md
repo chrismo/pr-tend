@@ -1,3 +1,5 @@
+<img src="img/sam-sheepdog-face.png" alt="Sam Sheepdog" width="110" align="right">
+
 # sheepdog
 
 Takes the busy work out of getting a branch to a merged PR and keeping it
