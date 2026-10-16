@@ -59,7 +59,9 @@ A custom local reviewer (`settings.localReview`) keeps the contract in
 ## Interfaces with other tools
 
 - `sd watch` writes a glyph per worktree to `~/.claude/tab-status/<worktree>.pr`
-  (`$STATUS_DIR`), which agent-rig's `tab-status` reads.
+  (`$STATUS_DIR`), which agent-rig's `tab-status` reads. Two watched
+  same-named worktrees on one branch get none, since tab-status couldn't tell
+  whose it is.
 - `sd watch glyph [<path>]` prints the glyph for the worktree holding `<path>`
   (default `.`) while it's still on the branch checked, from
   `$SHEEPDOG_STATE_DIR/glyphs`. It is exact by path and fast (no super, no

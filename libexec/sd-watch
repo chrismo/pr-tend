@@ -6,7 +6,8 @@
 #
 #   (none)     for each repo in global git config sheepdog.repo: fetch, then
 #              sd state every branch with branch.<name>.sheepdog=true. Writes a
-#              glyph for the branch's worktree (shown by tab-status), notifies
+#              glyph for the branch's worktree (shown by tab-status; none
+#              when two same-named worktrees are on one branch), notifies
 #              per the policy below, and records the pass. Also deletes
 #              refs/sheepdog/<b>/* whose branch no longer exists (pins outlive
 #              a branch -D), and the cached state of branches no longer
@@ -114,6 +115,18 @@ write_glyph() { # write_glyph <worktree-or-empty> <branch> <glyph>
   printf '%s\t%s\n' "$2" "$3" > "$f"
   echo "$f" >> "$WRITTEN"
   printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$GLYPHS"
+}
+
+# drop_ambiguous <index>: remove the <worktree>.pr file of a name two indexed
+# worktrees share while on the same branch, when the file holds that branch:
+# tab-status reads the file by name, and its branch check can't tell them
+# apart (sd watch glyph can).
+drop_ambiguous() {
+  local base branch f
+  while IFS=$'\t' read -r base branch; do
+    f="$STATUS_DIR/$base.pr"
+    [[ $(cut -f1 "$f" 2>/dev/null) != "$branch" ]] || rm -f "$f"
+  done < <(awk -F'\t' '!seen[$1]++ { n = $1; sub(/.*\//, "", n); if (++c[n "\t" $2] == 2) print n "\t" $2 }' "$1" 2>/dev/null)
 }
 
 # glyph_of [<path>]: the glyph the last check left for the worktree holding
@@ -374,6 +387,7 @@ run_pass() {
     [[ -e $f ]] || continue
     grep -qxF "$f" "$WRITTEN" || rm -f "$f"
   done
+  drop_ambiguous "$GLYPHS"
   mv "$GLYPHS" "$STATE_DIR/glyphs"
   { date '+last pass: %Y-%m-%d %H:%M:%S'; printf '%s' "$lines"; } > "$STATE_DIR/last-pass"
 }
@@ -412,10 +426,14 @@ refresh() {
   load_worktrees "$repo"
   line=$(check "$repo" "$name" "$b" "${worktree_of[$b]:-}") || rc=1
   # Unlocked like the state file: a pass that finishes between this read and
-  # the mv loses to the older index until the next pass.
+  # the mv loses to the older index until the next pass. Other worktrees' rows
+  # are the last pass's, so drop_ambiguous can drop a .pr file for a twin
+  # that has since gone, and check has already written the shared file; the
+  # next pass settles both.
   if [[ -s $GLYPHS ]]; then
     { awk -F'\t' -v p="${worktree_of[$b]}" '$1 != p' "$STATE_DIR/glyphs" 2>/dev/null; cat "$GLYPHS"; } > "$GLYPHS_NEW" \
       && mv "$GLYPHS_NEW" "$STATE_DIR/glyphs"
+    drop_ambiguous "$STATE_DIR/glyphs"
   fi
   show <<<"$line"
   return $rc

@@ -1203,6 +1203,79 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   [ -z "$("$SD_WATCH" glyph)" ]
 }
 
+# ── same-named worktrees (#4) ───────────────────────────────────────────────
+
+# twin <branch-in-repo2>: a second registered repo whose <branch> is checked
+# out in $TMP/y/wt, while this repo's feat is in $TMP/x/wt. sd state for
+# repo2 serves <branch>'s fixture made CI red.
+twin() {
+  git clone -q "$TMP/origin.git" "$TMP/repo2" 2>/dev/null
+  git -C "$TMP/repo2" branch -q "$1"
+  git -C "$TMP/repo2" config "branch.$1.sheepdog" true
+  register "$TMP/repo2"
+  git switch -q main
+  mkdir -p "$TMP/x" "$TMP/y"
+  git worktree add -q "$TMP/x/wt" feat
+  git -C "$TMP/repo2" worktree add -q "$TMP/y/wt" "$1"
+  ps_fixture feat
+  ps_fixture "$1"
+  jq '.ci.verdict = "red" | .ci.failing = ["lint"] | .next = [{key: "ci-red", who: "agent", say: "fix CI: lint", cmd: null}]' \
+    "$PS_FIXTURES/$1.json" > "$PS_FIXTURES/repo2-$1.json"
+  cat > "$TMP/fakebin/sd-state" <<'SH'
+#!/usr/bin/env bash
+b=${@: -1}
+echo "$PWD $b" >> "$PS_FIXTURES/calls"
+f="$PS_FIXTURES/$(basename "$PWD")-${b//\//__}.json"
+[[ -f $f ]] || f="$PS_FIXTURES/${b//\//__}.json"
+cat "$f"
+SH
+}
+
+@test "same name: two worktrees on the same branch get no shared .pr file, and glyph tells them apart" {
+  twin feat
+  pass
+  [ ! -e "$STATUS_DIR/wt.pr" ]
+  [ "$("$SD_WATCH" glyph "$TMP/x/wt")" = "✅" ]
+  [ "$("$SD_WATCH" glyph "$TMP/y/wt")" = "❌" ]
+}
+
+@test "same name: on different branches the .pr file stays, its branch telling whose it is" {
+  twin other
+  pass
+  [ "$(cat "$STATUS_DIR/wt.pr")" = $'feat\t✅' ] || [ "$(cat "$STATUS_DIR/wt.pr")" = $'other\t❌' ]
+  [ "$("$SD_WATCH" glyph "$TMP/x/wt")" = "✅" ]
+  [ "$("$SD_WATCH" glyph "$TMP/y/wt")" = "❌" ]
+}
+
+@test "same name: a refresh doesn't put the shared .pr file back" {
+  twin feat
+  pass
+  (cd "$TMP/x/wt" && "$SD_WATCH" refresh) >/dev/null
+  [ ! -e "$STATUS_DIR/wt.pr" ]
+  [ "$("$SD_WATCH" glyph "$TMP/x/wt")" = "✅" ]
+  [ "$("$SD_WATCH" glyph "$TMP/y/wt")" = "❌" ]
+}
+
+@test "same name: a third one on another branch keeps the .pr file it wrote last" {
+  twin feat
+  git clone -q "$TMP/origin.git" "$TMP/repo3" 2>/dev/null
+  git -C "$TMP/repo3" branch -q other
+  git -C "$TMP/repo3" config branch.other.sheepdog true
+  register "$TMP/repo3"
+  mkdir -p "$TMP/z"
+  git -C "$TMP/repo3" worktree add -q "$TMP/z/wt" other
+  ps_fixture other
+  pass
+  [ "$(cat "$STATUS_DIR/wt.pr")" = $'other\t✅' ]
+}
+
+@test "same name: a repo registered twice isn't its own twin" {
+  ps_fixture feat
+  git config --global --add sheepdog.repo "$TMP/repo"
+  pass
+  [ "$(glyph repo)" = "✅" ]
+}
+
 # ── status ───────────────────────────────────────────────────────────────────
 
 @test "status: prints the last pass" {
