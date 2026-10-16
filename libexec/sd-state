@@ -452,13 +452,14 @@ fn cnt(a, t): len(coalesce([unnest {t, x: a} | where x.type == t], []))
 fn matches(b, res): len(coalesce([unnest {b, re: res} | where len(regexp(re, b)) > 0], [])) > 0
 -- The bot pin, plus whether the bot has said anything since trigger posted
 -- its comment (br: the ids of its reviews and comments created after that,
--- by GitHub's clock on both sides) and how long that has been. null when
+-- by GitHub's clock on both sides) and how long that has been, up to s.now
+-- (passed in: now() would make the output differ between runs). null when
 -- there is no pin or no trigger time (a pin from before #63, or by hand).
 fn bot_pin(s, br): nul(s.r_bot) ? null : {...s.r_bot,
     triggered: s.bot_triggered,
     replied: on(s.r_bot.status == "none") or s.bot_triggered is null ? null : len(br) > 0,
     waited: on(s.r_bot.status == "none") or s.bot_triggered is null ? null
-            : cast(now() - s.bot_triggered::time, <int64>) / 1000000000}
+            : cast(s.now::time - s.bot_triggered::time, <int64>) / 1000000000}
 values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
         g: {viewer, bots: coalesce([unnest bots | values unbot(this)], []),
             ign: coalesce([unnest ignore | values unbot(this)], []), ignore_body, handled}}
@@ -567,12 +568,12 @@ refs_json=$(git for-each-ref --format='%(refname) %(objectname)' "refs/sheepdog/
 args=$(printf '{"branch": %s, "head": %s, "pr": %s, "parent": %s, "parent_source": %s, "parent_pr": %s, "parent_merged": %s, "parent_local": %s, "parent_remote": %s, "parent_unpushed": %s,
   "target": %s, "default_branch": %s, "sync_ahead": %s, "behind": %s, "up_to_date": %s, "old_base": %s, "by_tree": %s, "conflict": %s, "undone": %s,
   "remote_sha": %s, "ahead": %s, "push_behind": %s, "diverged": %s, "remote_ours": %s, "theirs": %s, "remote_made": %s, "dirty": %s, "stale": %s,
-  "r_local": %s, "r_bot": %s, "r_accepted": %s, "r_findings": %s, "r_findings_at_head": %s, "review_rounds": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s, "bot_triggered": %s, "bot_timeout": %s,
+  "r_local": %s, "r_bot": %s, "r_accepted": %s, "r_findings": %s, "r_findings_at_head": %s, "review_rounds": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s, "bot_triggered": %s, "bot_timeout": %s, "now": %s,
   "ignore": %s, "ignore_body": %s, "handled": %s, "refs": %s, "enrolled": %s, "harness": %s, "session": %s, "lock": %s, "errors": %s}\n' \
   "$(jstr "$branch")" "$(jstr "$head")" "$pr" "$(jstr "$parent")" "$(jstr "$parent_source")" "$parent_pr" "$parent_merged" "$parent_local" "$parent_remote" "$parent_unpushed" \
   "$(jstr "$target")" "$(jstr "$default_branch")" "$sync_ahead" "$behind" "$up_to_date" "$(jnull "$old_base")" "$by_tree" "$conflict" "$undone" \
   "$(jnull "$remote_sha")" "$ahead" "$push_behind" "$diverged" "$remote_ours" "$theirs" "$remote_made" "$dirty" "$stale_json" \
-  "${review[local]}" "${review[bot]}" "${review[accepted]}" "$r_findings" "$r_findings_at_head" "$review_rounds" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" "$(jnull "$bot_triggered")" "$bot_timeout" \
+  "${review[local]}" "${review[bot]}" "${review[accepted]}" "$r_findings" "$r_findings_at_head" "$review_rounds" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" "$(jnull "$bot_triggered")" "$bot_timeout" "$(jstr "$(date -u +%Y-%m-%dT%H:%M:%SZ)")" \
   "$ignore" "$ignore_body" "$(jlist "branch.$branch.sd-handled")" "$refs_json" \
   "$(jstr "$(cfg sheepdog)")" "$(jstr "$(cfg sd-harness)")" "$(jstr "$(cfg sd-session)")" "$(jstr "$(cfg sd-lock)")" "$errors_json")
 state=$(prc_json "$ASSEMBLE" "$args") || die "couldn't assemble the state"
