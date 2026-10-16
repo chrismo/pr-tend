@@ -948,6 +948,22 @@ commit_message; "needs-input" when you need a decision from the task's author
 you can't make sense of it (say why in summary).
 EOF
 
+read -r -d '' REVIEW_FIX_PROMPT <<'EOF' || true
+Fix the local review's findings below in this worktree; its branch is checked
+out. The reviewer was a separate, read-only session with no context on why the
+code looks the way it does; you have that context. Fix each finding that is
+right. Leave any you judge wrong, and say which and why in summary. Follow the
+repo's own instructions (AGENTS.md, CLAUDE.md, README) for how to work and test
+here. Edit files, but do not commit, push, or run gh: the pipeline commits your
+edits with your commit_message and runs the repo's checks.
+
+Return outcome "done" with a one-line commit_message once you have fixed what
+you agree with. If you agree with none, change nothing and return "done": the
+findings then go to the branch's owner. Return "needs-input" when you need a
+decision from the owner (put the question in summary), or "gave-up" when you
+can't make sense of them (say why in summary).
+EOF
+
 read -r -d '' IMPLEMENT_SCHEMA <<'EOF' || true
 {"type": "object", "required": ["outcome", "commit_message", "summary"],
  "properties": {"outcome": {"enum": ["done", "needs-input", "gave-up"]},
@@ -961,7 +977,14 @@ implement_run() {
   local -a rules=()
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
   task=$(git config --get "branch.$b.sd-task" || true)
-  [[ -n $task ]] || die "no task recorded for $b: git config branch.$b.sd-task \"<task>\""
+  before=$(git rev-parse "refs/heads/$b")
+  # sd act review's blocking findings on HEAD, unless the agent already declined
+  # them: then this run fixes those, with the task as context.
+  rec=$(git cat-file blob "refs/sheepdog/$b/findings" 2>/dev/null || true)
+  [[ -z $rec ]] || listed=$(prc_line "where head == \"$before\" and not on(declined)
+    | unnest findings | where coalesce(severity, \"\") != \"nit\"
+    | values f\"- {file}:{line} ({severity}) {body}\"" "$rec" 2>/dev/null || true)
+  [[ -n $task || -n $listed ]] || die "no task recorded for $b: git config branch.$b.sd-task \"<task>\""
   verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "sd config failed"
   extra=$(cd "$wt" && prc_get settings.implementAllow "$b" false) || die "sd config failed"
   # A rule's * is a wildcard, so only plain words become an exact rule.
@@ -972,13 +995,11 @@ implement_run() {
   fi
   while IFS= read -r rule; do [[ -z $rule ]] || rules+=("$rule"); done <<<"$extra"
   step_session "$b" implement
-  before=$(git rev-parse "refs/heads/$b")
-  prompt="$IMPLEMENT_PROMPT"$'\n\nTask:\n'"$task"
-  # sd act review's findings on HEAD, unless the agent already declined them.
-  rec=$(git cat-file blob "refs/sheepdog/$b/findings" 2>/dev/null || true)
-  [[ -z $rec ]] || listed=$(prc_line "where head == \"$before\" and not on(declined)
-    | unnest findings | values f\"- {file}:{line} ({severity}) {body}\"" "$rec" 2>/dev/null || true)
-  [[ -z $listed ]] || prompt+=$'\n\nThe local reviewer, a separate read-only session, found these on HEAD. Fix the ones that are right. Leave any you judge wrong and say why in your summary; if you change nothing, the findings go to chrismo:\n'"$listed"
+  if [[ -n $listed ]]; then
+    prompt="$REVIEW_FIX_PROMPT"$'\n\nFindings:\n'"$listed"$'\n\nThe task this branch was made for, for context:\n'"${task:-(none recorded)}"
+  else
+    prompt="$IMPLEMENT_PROMPT"$'\n\nTask:\n'"$task"
+  fi
   [[ -z $verify ]] || prompt+=$'\n\nThe repo\'s checks, which the pipeline runs after you: '"$verify"
   if [[ $STEP_H == claude ]] && (( ${#rules[@]} )); then
     allow+=$(printf ',%s' "${rules[@]}")
@@ -1003,7 +1024,7 @@ implement_run() {
   if [[ -n $(git -C "$wt" status --porcelain) ]]; then
     msg=$(prc_line 'values {m: coalesce(commit_message, null)}
       | values case when is(m, <string>) and grep("\\S", m) then m else "" end' "$result")
-    [[ -n $msg ]] || msg=$(head -1 <<<"$task")
+    [[ -n $msg ]] || msg=$(head -1 <<<"${task:-Fix the local review findings}")
     git -C "$wt" add -A && git -C "$wt" commit -q -m "$msg" || die "commit failed; the edits are left in $wt"
   elif [[ $(git rev-parse "refs/heads/$b") == "$before" ]]; then
     [[ -n $listed ]] || die "the agent says done but changed nothing (session $STEP_SID)"

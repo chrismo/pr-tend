@@ -300,7 +300,8 @@ pin_status() {
 
 # sd act review's record of findings that blocked (refs/sheepdog/<b>/findings).
 r_findings=$(git cat-file blob "refs/sheepdog/$branch/findings" 2>/dev/null \
-               | prc_json 'where kind(this) == "record"' 2>/dev/null) || true
+               | prc_json 'where kind(this) == "record" and is(head, <string>) and is(round, <int64>)
+                   and kind(findings) == "array"' 2>/dev/null) || true
 if git rev-parse -q --verify "refs/sheepdog/$branch/findings" >/dev/null && [[ -z $r_findings ]]; then
   errors+=("review findings: refs/sheepdog/$branch/findings isn't a findings record")
 fi
@@ -408,7 +409,8 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
          pending: coalesce([unnest ctx | where k == "pending" | values name], [])},
     review: {local: s.r_local, bot: s.r_bot, accepted: s.r_accepted,
              findings: nul(s.r_findings) ? null
-               : {sha: s.r_findings.head, round: s.r_findings.round, n: len(s.r_findings.findings),
+               : {sha: s.r_findings.head, round: s.r_findings.round,
+                  n: len(coalesce([unnest s.r_findings.findings | where coalesce(severity, "") != "nit"], [])),
                   at_head: s.r_findings.head == s.head, declined: on(s.r_findings.declined),
                   cap: s.review_rounds, items: s.r_findings.findings}},
     threads: {owed_bot: s.gh_ok ? len(ob) : null,

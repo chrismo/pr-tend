@@ -616,7 +616,7 @@ findings), and NEXT goes from it:
 |---|---|
 | at HEAD, round < `settings.reviewRounds` | `review-fix` (agent): `sd act implement`, its prompt carrying the findings |
 | at HEAD, the agent changed nothing (declined) | `review-decide` (you): fix, or `sd act review --accept` |
-| at HEAD, round = the cap | `review-decide` (you) |
+| at HEAD, round ≥ the cap | `review-decide` (you) |
 | on an older head | `review` (agent): review the new commits |
 
 `sd act review --accept` pins `accepted` at HEAD with its base: chrismo's call

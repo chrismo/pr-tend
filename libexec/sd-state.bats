@@ -692,6 +692,19 @@ lost_pin_stack() {
   [ "$(field .review.findings.at_head)" = false ]
 }
 
+@test "review: findings count only what blocks; a record missing fields is an error" {
+  git switch -qc feat && commit a.txt a
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: $h, round: 1, findings: [
+          {file: "a.txt", line: 1, severity: "warning", body: "x"}, {file: "a.txt", line: 2, severity: "nit", body: "y"}]}')
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
+  state
+  [ "$(field .review.findings.n)" = 1 ]
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<'{"head": "x"}')"
+  state
+  [ "$(field .review.findings)" = null ]
+  [[ "$(field '.errors | join(" ")')" == *"isn't a findings record"* ]]
+}
+
 @test "review: pin at HEAD is covered" {
   git switch -qc feat && commit a.txt a
   git update-ref refs/sheepdog/feat/local HEAD

@@ -429,6 +429,30 @@ findings_at() {
   [ "$(git log -1 --format=%s)" = "Add c" ]
 }
 
+@test "implement: a fix round is framed as fixing the findings, with only those that block" {
+  started
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: $h, round: 1, findings: [
+          {file: "file.txt", line: 2, severity: "error", body: "b should be B"},
+          {file: "file.txt", line: 1, severity: "nit", body: "a could be A"}]}')
+  git update-ref refs/sheepdog/feat-x/findings "$(git hash-object -w --stdin <<<"$rec")"
+  "$SD_ACT" implement >/dev/null
+  [[ "$(head -1 "$FX/claude.prompt")" == *"review"* ]]
+  ! grep -q '^Implement the task below' "$FX/claude.prompt" || false
+  grep -q 'b should be B' "$FX/claude.prompt"
+  ! grep -q 'a could be A' "$FX/claude.prompt" || false
+  grep -q 'add a third line' "$FX/claude.prompt"
+}
+
+@test "implement: review findings on HEAD run even with no task recorded" {
+  started
+  git config --unset branch.feat-x.sd-task
+  findings_at HEAD 1
+  run "$SD_ACT" implement
+  [ "$status" -eq 0 ]
+  grep -q 'b should be B' "$FX/claude.prompt"
+  grep -q '(none recorded)' "$FX/claude.prompt"
+}
+
 @test "implement: findings on an older head stay out of the prompt" {
   started
   findings_at HEAD 1
