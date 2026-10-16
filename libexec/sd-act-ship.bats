@@ -35,6 +35,10 @@ fi
 b=""
 for a; do [[ $a == branch=* ]] && b=${a#branch=}; done
 [[ -e $GH/fail-$b ]] && { echo "gh: boom for $b" >&2; exit 1; }
+if [[ -e $GH/fail-$b-after-1 ]]; then
+  [[ -e $GH/seen-$b ]] && { echo "gh: boom for $b" >&2; exit 1; }
+  touch "$GH/seen-$b"
+fi
 if [[ -f $GH/$b.json ]]; then cat "$GH/$b.json"
 else echo '{"data":{"viewer":{"login":"me"},"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"nodes":[]}}}}'
 fi
@@ -181,6 +185,15 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   [ "$status" -eq 0 ]
   [ "$(git config branch.kid.sd-parent)" = A ]
   [[ "$(calls)" == "pr create --draft --base A --head kid "* ]]
+}
+
+@test "ship: gh failing on a second lookup still opens an unrecorded stack's PR on its parent (#94)" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
+  git switch -qc kid && git commit -q --allow-empty -m kid
+  touch "$GH/fail-kid-after-1"
+  run "$SD_ACT" ship
+  [ "$(git config branch.kid.sd-parent)" = A ]
+  [[ "$(calls)" != *"--base main"* ]]
 }
 
 @test "ship: an unrecorded stack git can't orient (the parent moved on) is refused before describe or push (#94)" {

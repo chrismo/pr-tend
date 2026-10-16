@@ -111,6 +111,17 @@ stack_setup() {
   [ -z "$output" ]
 }
 
+@test "stacked_on: a moved parent whose commits came by fast-forward can't tell its child from a parent" {
+  git update-ref refs/remotes/origin/main main
+  git switch -qc up && git commit -q --allow-empty -m u1
+  git switch -q main && git switch -qc mine && git merge -q --ff-only up && git branch -qD up
+  git switch -qc kid && git commit -q --allow-empty -m k1
+  c mine m2
+  run stacked_on mine origin main
+  [ "$status" -eq 3 ]
+  [ "$output" = "kid" ]
+}
+
 @test "stacked_on: without a reflog, a moved parent still can't tell its child from a parent" {
   stack_setup
   c par p3

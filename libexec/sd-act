@@ -1411,7 +1411,7 @@ ship() {
   esac
   if [[ -z $(git config --get "branch.$b.sd-parent" || true) && $pr_state == none ]]; then
     # A plain git branch from another's tip (#94) would open on the default branch.
-    (cd "$wt" && record_lineage "$b") || die "not shipping $b until its parent is recorded"
+    (cd "$wt" && record_lineage "$b" "$state") || die "not shipping $b until its parent is recorded"
     [[ -z $(git config --get "branch.$b.sd-parent" || true) ]] \
       || state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
   fi
@@ -1910,14 +1910,15 @@ ack() {
   printf '  %s\n' "${shown[@]}"
 }
 
-# record_lineage <branch>: while the PR's base still names a stacked parent, store
+# record_lineage <branch> [<state>]: while the PR's base still names a stacked parent, store
 # it and the base pin; GitHub retargets the PR to the default branch on merge.
 # With no PR (gh answering) and no recorded parent, the branch it was made from
 # by a plain git branch, found by stacked_on. Exit 1 when git finds candidates
 # but can't pick one (a tie, or a parent that moved on), having said so.
+# <state> is the caller's sd state --json, so a second gh lookup can't disagree.
 record_lineage() {
-  local b=$1 state parent old_base def remote out rc=0
-  state=$(sd-state --json "$b" 2>/dev/null) || return 0
+  local b=$1 state=${2:-} parent old_base def remote out rc=0
+  [[ -n $state ]] || state=$(sd-state --json "$b" 2>/dev/null) || return 0
   read -r parent old_base < <(prc_line '
     where coalesce(parent.source == "pr" and parent.name != sync.default, false)
     | values f"{parent.name} {coalesce(sync.old_base, "")}"' "$state") || true
