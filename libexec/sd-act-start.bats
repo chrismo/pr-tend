@@ -492,6 +492,22 @@ findings_at() {
   [ ! -e "$FX/claude.prompt" ]
 }
 
+@test "implement: a fix round with no commit message from the agent says it fixed review findings" {
+  started
+  findings_at HEAD 1
+  echo '{"outcome": "done", "summary": "Fixed b."}' > "$FX/result.json"
+  "$SD_ACT" implement >/dev/null
+  [ "$(git log -1 --format=%s)" = "Fix the local review findings" ]
+}
+
+@test "--accept belongs to sd act review only" {
+  started
+  run "$SD_ACT" implement --accept
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--accept"* ]]
+  [ ! -e "$FX/claude.prompt" ]
+}
+
 @test "implement: findings on an older head stay out of the prompt" {
   started
   findings_at HEAD 1

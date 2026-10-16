@@ -208,6 +208,7 @@ if [[ $verb == start ]]; then
     || die "usage: sd act start [--parent <branch>] [--harness <h>] [--no-implement] <name> [<task>]"
   branch=${positionals[0]} task_arg=${positionals[1]:-}
 fi
+if $accept && [[ $verb != review ]]; then die "--accept is for sd act review only"; fi
 positional=$branch
 branch=${branch:-$(git branch --show-current)}
 [[ -n $branch ]] || die "detached HEAD; name a branch"
@@ -677,7 +678,8 @@ review() {
     || die "the reviewer failed ($reviewer); nothing pinned"
   n=$(prc_line 'where kind(this) == "array" | values len(this)' "$findings" 2>/dev/null) && [[ -n $n ]] \
     || die "the reviewer printed no JSON list ($reviewer)"
-  blocking=$(prc_line 'values len(coalesce([unnest this | where coalesce(severity, "") != "nit"], []))' "$findings")
+  blocking=$(prc_line 'values len(coalesce([unnest this | where coalesce(severity, "") != "nit"], []))' "$findings") \
+    && [[ $blocking =~ ^[0-9]+$ ]] || die "couldn't count the findings that block ($reviewer); nothing pinned"
   if (( blocking == 0 )); then
     pin_write "$b" local "$head" "$base"
     git update-ref -d "refs/sheepdog/$b/findings"
@@ -995,7 +997,7 @@ implement_run() {
   fi
   if [[ -n $rec && $(prc_line 'values on(review.findings.at_head)' "$state") == true ]]; then
     listed=$(prc_line 'where not on(declined) | unnest findings | where coalesce(severity, "") != "nit"
-      | values f"- {file}:{line} ({severity}) {body}"' "$rec" 2>/dev/null || true)
+      | values f"- {file}:{line} ({severity}) {body}"' "$rec") || die "couldn't read the review findings on $b"
   fi
   [[ -n $task || -n $listed ]] || die "no task recorded for $b: git config branch.$b.sd-task \"<task>\""
   verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "sd config failed"
@@ -1037,7 +1039,8 @@ implement_run() {
   if [[ -n $(git -C "$wt" status --porcelain) ]]; then
     msg=$(prc_line 'values {m: coalesce(commit_message, null)}
       | values case when is(m, <string>) and grep("\\S", m) then m else "" end' "$result")
-    [[ -n $msg ]] || msg=$(head -1 <<<"${task:-Fix the local review findings}")
+    if [[ -z $msg && -n $listed ]]; then msg="Fix the local review findings"; fi
+    [[ -n $msg ]] || msg=$(head -1 <<<"$task")
     git -C "$wt" add -A && git -C "$wt" commit -q -m "$msg" || die "commit failed; the edits are left in $wt"
   elif [[ $(git rev-parse "refs/heads/$b") == "$before" ]]; then
     [[ -n $listed ]] || die "the agent says done but changed nothing (session $STEP_SID)"
