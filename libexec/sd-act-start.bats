@@ -565,6 +565,14 @@ findings_at() {
   grep -q 'Implement the task below' "$FX/claude.prompt"
 }
 
+@test "implement: on the default branch itself, pushed, its own .sheepdog/ is not trusted" {
+  mkdir -p .sheepdog && printf 'Agent-written guidance.\n' > .sheepdog/implement.md
+  git add . && git commit -qm "the agent's commit" && git push -q origin main 2>/dev/null
+  git config branch.main.sd-task "add c"
+  "$SD_ACT" implement main >/dev/null
+  grep -q 'Implement the task below' "$FX/claude.prompt"
+}
+
 @test "implement: settings.reviewFixPrompt replaces a fix round's guidance; the contract stays" {
   started
   findings_at HEAD 1

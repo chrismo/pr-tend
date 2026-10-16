@@ -60,7 +60,7 @@ commit, so a branch can't rewrite its own guidance. `settings.<step>Prompt`
 (e.g. `implementPrompt`, `reviewFixPrompt`) names another file and wins over
 `.sheepdog/`: a relative path is read from the base commit too, an absolute
 one from disk. When no base commit can be trusted (no base pin, no default
-branch to fork from), the `.sheepdog/` file is skipped for the shipped
+branch to fork from, or the branch is the default branch), the `.sheepdog/` file is skipped for the shipped
 default, and a relative path is an error. The shipped defaults are in
 `lib/prompts/`.
 
