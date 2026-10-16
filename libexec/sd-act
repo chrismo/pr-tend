@@ -1025,7 +1025,7 @@ restack() {
   echo "restacked $b onto $remote/$target ($(plural "$(git rev-list --count "$new_base..$new_head")" commit)); not pushed: sd act push"
   # Until the PR targets the default branch, sd-parent is what keeps retarget
   # owed: deleting the merged parent's branch would close a PR still on it.
-  line=$(prc_line 'where not nul(pr) and on(pr.base != sync.default) | values f"PR #{pr.number} still targets {pr.base}: sd act retarget"' "$state")
+  line=$(prc_line 'where on(sync.target == sync.default) and not nul(pr) and on(pr.base != sync.default) | values f"PR #{pr.number} still targets {pr.base}: sd act retarget"' "$state")
   if [[ -n $line ]]; then echo "$line"; else parent_to_default "$b" "$state"; fi
   if $resolved; then
     echo "conflicts resolved by the agent, so $b's change is unreviewed: sd act review next"

@@ -317,10 +317,14 @@ base_pin() { git rev-parse -q --verify refs/sheepdog/feat/base || true; }
   git config branch.child.sd-parent A
   upstream A 's/^d$/D/' a2
   upstream main 's/^b$/B/'
+  open_pr A main 1
+  open_pr child A 2
   run "$SD_ACT" restack
   [ "$status" -eq 0 ]
   [ "$(git rev-parse child^)" = "$(git rev-parse origin/A)" ]
   ! grep -qx B file.txt
+  [[ "$output" != *"sd act retarget"* ]]
+  [ "$(git config branch.child.sd-parent)" = A ]
 }
 
 @test "a restack that would conflict is refused; nothing moves" {
