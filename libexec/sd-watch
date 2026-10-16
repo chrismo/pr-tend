@@ -475,10 +475,13 @@ plist_path() { echo "$LAUNCH_AGENTS/$LABEL.plist"; }
 xml() { local v=${1//&/\&amp;}; v=${v//</\&lt;}; printf '%s' "${v//>/\&gt;}"; }
 
 install_job() {
-  local plist bindir prog interval tmp
+  local plist bindir path prog interval tmp
   plist=$(plist_path)
   bindir=${LOCAL_BIN:-$HOME/.local/bin}
   prog="$bindir/sd"
+  # ~/.local/bin stays on PATH: bash5 and claude are linked there.
+  path="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+  [[ $bindir == "$HOME/.local/bin" ]] || path="$bindir:$path"
   [[ -x $prog ]] || prog=$(realpath "$(dirname "$(realpath "$0")")/../bin/sd")
   interval=$(prc_get settings.interval "" true) || { echo "sd watch: sd config failed" >&2; exit 1; }
   [[ $interval =~ ^[1-9][0-9]*$ ]] || { echo "sd watch: settings.interval must be whole seconds: $interval" >&2; exit 1; }
@@ -495,7 +498,7 @@ install_job() {
   <key>RunAtLoad</key><true/>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>$(xml "$bindir:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")</string>
+    <key>PATH</key><string>$(xml "$path")</string>
   </dict>
   <key>StandardOutPath</key><string>$(xml "$STATE_DIR/launchd.log")</string>
   <key>StandardErrorPath</key><string>$(xml "$STATE_DIR/launchd.log")</string>

@@ -1472,6 +1472,7 @@ needs_plutil() {
 }
 
 setup_launchd() {
+  unset LOCAL_BIN
   export SHEEPDOG_WATCH_LAUNCH_AGENTS="$TMP/LaunchAgents"
   cat > "$TMP/fakebin/launchctl" <<'EOF'
 #!/usr/bin/env bash
@@ -1504,7 +1505,7 @@ old_labels_retired() {
   [ "$status" -eq 0 ]
   plutil -lint "$PLIST"
   [ "$(plutil -extract StartInterval raw "$PLIST")" = 300 ]
-  [[ "$(plutil -extract EnvironmentVariables.PATH raw "$PLIST")" == "$HOME/.local/bin:"* ]]
+  [[ "$(plutil -extract EnvironmentVariables.PATH raw "$PLIST")" == "$HOME/.local/bin:/"* ]]
   grep -q "bootstrap gui/$(id -u) $PLIST" "$PS_FIXTURES/launchctl"
 }
 
@@ -1518,7 +1519,7 @@ old_labels_retired() {
   [ "$(plutil -extract ProgramArguments.1 raw "$PLIST")" = watch ]
 }
 
-@test "install: the job runs the sd in LOCAL_BIN, which leads its PATH" {
+@test "install: the job runs the sd in LOCAL_BIN, which leads its PATH ahead of ~/.local/bin" {
   needs_plutil
   setup_launchd
   mkdir -p "$TMP/local-bin"
@@ -1526,7 +1527,7 @@ old_labels_retired() {
   LOCAL_BIN="$TMP/local-bin" run "$SD_WATCH" install
   [ "$status" -eq 0 ]
   [ "$(plutil -extract ProgramArguments.0 raw "$PLIST")" = "$TMP/local-bin/sd" ]
-  [[ "$(plutil -extract EnvironmentVariables.PATH raw "$PLIST")" == "$TMP/local-bin:"* ]]
+  [[ "$(plutil -extract EnvironmentVariables.PATH raw "$PLIST")" == "$TMP/local-bin:$HOME/.local/bin:/"* ]]
 }
 
 @test "uninstall: boots out and removes the plist" {
