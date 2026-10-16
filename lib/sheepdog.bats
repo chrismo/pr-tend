@@ -12,6 +12,7 @@ setup() {
   export GIT_CONFIG_GLOBAL="$TMP/gitconfig-global"
   export GIT_CONFIG_SYSTEM=/dev/null
   printf '[user]\n\temail = t@example.com\n\tname = Tester\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
+  export SHEEPDOG_CONFIG="$TMP/global.json" SHEEPDOG_STATE_DIR="$TMP/state"
   git init -q "$TMP/repo" && cd "$TMP/repo"
   git commit -q --allow-empty -m init
   git switch -qc feat && git commit -q --allow-empty -m one
@@ -47,6 +48,7 @@ harness_stubs() {
 #!/usr/bin/env bash
 echo '{"type":"system","subtype":"init","session_id":"x"}' >&2
 echo "${ANTHROPIC_API_KEY-unset}" > "$FX/key"
+printf '%s\n' "$@" > "$FX/args"
 cat "$FX/out"
 exit "$(cat "$FX/status" 2>/dev/null || echo 0)"
 EOF
@@ -81,6 +83,93 @@ EOF
   run harness_run pi sid1 new 30 "do it" '{}'
   [ "$status" -eq 0 ]
   [ "$(cat "$FX/key")" = sk-paid ]
+}
+
+@test "harness_run: settings.stepBudget caps a claude step's spend; 0 is no cap" {
+  harness_stubs
+  run harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -eq 0 ]
+  ! grep -q -- --max-budget-usd "$FX/args" || false
+  echo '{"settings": {"stepBudget": 2.5}}' > "$SHEEPDOG_CONFIG"
+  run harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -eq 0 ]
+  [ "$(grep -A1 -x -- --max-budget-usd "$FX/args" | tail -1)" = 2.5 ]
+}
+
+@test "harness_run: pi has no budget flag" {
+  harness_stubs
+  echo '{"settings": {"stepBudget": 2.5}}' > "$SHEEPDOG_CONFIG"
+  printf 'Done.\n\n```json\n{"ok": true}\n```\n' > "$FX/out"
+  run harness_run pi sid1 new 30 "do it" '{}'
+  [ "$status" -eq 0 ]
+  ! grep -q -- budget "$FX/args" || false
+}
+
+@test "harness_run: a step that hits the budget fails and says so" {
+  harness_stubs
+  echo '{"settings": {"stepBudget": 0.1}}' > "$SHEEPDOG_CONFIG"
+  echo '{"type": "result", "is_error": true, "subtype": "error_max_budget_usd", "result": null, "total_cost_usd": 0.1353}' > "$FX/out"
+  run --separate-stderr harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"hit the step budget (settings.stepBudget 0.1 USD)"* ]]
+  [[ "$stderr" == *"0.1353"* ]]
+  # A cap from harnesses.claude.args instead: no stepBudget to blame.
+  rm "$SHEEPDOG_CONFIG"
+  run --separate-stderr harness_run claude sid1 new 30 "do it" '{}' '{"harness": "claude", "args": "--max-budget-usd 0.1"}'
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"hit the step budget"* ]]
+  [[ "$stderr" != *"settings.stepBudget"* ]]
+}
+
+@test "harness_run: a negative stepBudget, or an unreadable config, fails the step before it runs" {
+  harness_stubs
+  echo '{"settings": {"stepBudget": -1}}' > "$SHEEPDOG_CONFIG"
+  run --separate-stderr harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"settings.stepBudget must be 0 or more"* ]]
+  [ ! -e "$FX/args" ]
+  echo 'not json' > "$SHEEPDOG_CONFIG"
+  run --separate-stderr harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [ ! -e "$FX/args" ]
+}
+
+@test "harness_run: every claude step appends its usage to usage.tsv" {
+  harness_stubs
+  echo '{"type": "result", "is_error": false, "structured_output": {"ok": true}, "total_cost_usd": 0.25, "duration_ms": 4321, "num_turns": 3,
+         "usage": {"input_tokens": 10, "cache_creation_input_tokens": 200, "cache_read_input_tokens": 3000, "output_tokens": 40}}' > "$FX/out"
+  HARNESS_STEP=implement run harness_run claude sid1 resume 30 "do it" '{}'
+  [ "$status" -eq 0 ]
+  [ "$(head -1 "$SHEEPDOG_STATE_DIR/usage.tsv")" = $'time\trepo\tbranch\tstep\tharness\tsession\tmode\tstatus\tcost_usd\tinput\tcache_create\tcache_read\toutput\tduration_ms\tturns' ]
+  line=$(sed -n 2p "$SHEEPDOG_STATE_DIR/usage.tsv")
+  [[ $line =~ ^20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:]+Z$'\t'"$TMP/repo"$'\tfeat\timplement\tclaude\tsid1\tresume\t0\t0.25\t10\t200\t3000\t40\t4321\t3'$ ]]
+  run harness_run claude sid1 resume 30 "again" '{}'
+  [ "$(wc -l < "$SHEEPDOG_STATE_DIR/usage.tsv")" -eq 3 ]
+  [[ "$(sed -n 3p "$SHEEPDOG_STATE_DIR/usage.tsv")" == *$'\tclaude\tsid1\tresume\t0\t0.25\t'* ]]
+  [[ "$(sed -n 3p "$SHEEPDOG_STATE_DIR/usage.tsv")" == *$'\tfeat\t\tclaude\t'* ]]
+}
+
+@test "harness_run: HARNESS_BRANCH names the branch when the worktree is detached (restack --resolve)" {
+  harness_stubs
+  git switch -q --detach
+  HARNESS_BRANCH=feat run harness_run claude sid1 resume 30 "do it" '{}'
+  [ "$status" -eq 0 ]
+  [[ "$(sed -n 2p "$SHEEPDOG_STATE_DIR/usage.tsv")" == *$'\tfeat\t\tclaude\tsid1\t'* ]]
+  run harness_run claude sid1 resume 30 "do it" '{}'
+  [[ "$(sed -n 3p "$SHEEPDOG_STATE_DIR/usage.tsv")" == *$'\t\t\tclaude\tsid1\t'* ]]
+}
+
+@test "harness_run: a failed step is logged with its status, and pi's row has no cost" {
+  harness_stubs
+  echo 1 > "$FX/status"
+  run harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [[ "$(sed -n 2p "$SHEEPDOG_STATE_DIR/usage.tsv")" == *$'\tclaude\tsid1\tnew\t1\t'* ]]
+  rm "$FX/status"
+  printf 'Done.\n\n```json\n{"ok": true}\n```\n' > "$FX/out"
+  run harness_run pi sid2 new 30 "do it" '{}'
+  [ "$status" -eq 0 ]
+  [[ "$(sed -n 3p "$SHEEPDOG_STATE_DIR/usage.tsv")" == *$'\tpi\tsid2\tnew\t0\t\t\t\t\t\t\t' ]]
 }
 
 @test "harness_run: a successful run keeps the harness's stderr off the terminal" {

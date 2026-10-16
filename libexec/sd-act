@@ -134,7 +134,7 @@
 #                   start, implement)
 #
 # Config (sd config show):
-#   settings  remote, verify, stepTimeout, replyPrefix, botLogin, implementAllow
+#   settings  remote, verify, stepTimeout, stepBudget, replyPrefix, botLogin, implementAllow
 #   harness   model, effort, provider (pi), args
 #
 # State (git config): branch.<b>.sheepdog, .sd-task, .sd-parent, .sd-session,
@@ -409,7 +409,7 @@ address() {
   verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "sd config failed"
   [[ $verify != *$'\n'* ]] || die "verify must be a single command, not a list"
   echo "sd act: $h ($mode session $sid) is addressing $(prc_val "$findings" 'len(this)') item(s) on $b…" >&2
-  result=$(cd "$wt" && harness_run "$h" "$sid" "$mode" "$timeout" \
+  result=$(cd "$wt" && HARNESS_STEP=address HARNESS_BRANCH=$b harness_run "$h" "$sid" "$mode" "$timeout" \
              "$PROMPT"$'\n\nPR '"$(prc_val "$state" pr.url)"$'\nFindings:\n'"$(printf '%s\n' "$findings" | prc_super -i json -J -c 'values this' -)" "$SCHEMA" "$cfg") \
     || die "the $h step failed or returned no usable result (session $sid)"
   git config "branch.$b.sd-session" "$sid"
@@ -576,6 +576,7 @@ review() {
 step_session() {
   local b=$1 step=$2 stored_h
   attached_check "$b" "running the $step step on $b"
+  export HARNESS_STEP=$step HARNESS_BRANCH=$b
   stored_h=$(git config --get "branch.$b.sd-harness" || true)
   STEP_CFG=$(prc_step "$step" "$b" "${harness_opt:-$stored_h}") || die "sd config failed"
   STEP_H=$(prc_val "$STEP_CFG" harness)

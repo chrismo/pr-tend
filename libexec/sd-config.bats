@@ -1023,6 +1023,18 @@ old_super() {
   [[ "$output" == *"setings: unknown key"* ]]
 }
 
+@test "settings.stepBudget: USD per step, 0 (no cap) by default" {
+  run "$SD_CONFIG" get settings.stepBudget
+  [ "$status" -eq 0 ]
+  [ "$output" = 0 ]
+  "$SD_CONFIG" set --global --json settings.stepBudget 2.5
+  [ "$("$SD_CONFIG" get settings.stepBudget)" = 2.5 ]
+  write_global '{"settings":{"stepBudget":"abc"}}'
+  run "$SD_CONFIG" show
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"settings.stepBudget: cannot cast"* ]]
+}
+
 @test "settings.botCommand: a typed string setting, empty by default" {
   run "$SD_CONFIG" get settings.botCommand
   [ "$status" -eq 0 ]

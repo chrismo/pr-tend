@@ -11,7 +11,7 @@
 # is always piped.
 
 PRC_DEFAULTS='{"harness": "claude",
-  "settings": {"remote": "origin", "stepTimeout": 1800, "interval": 300, "replyPrefix": "🤖 ",
+  "settings": {"remote": "origin", "stepTimeout": 1800, "stepBudget": 0, "interval": 300, "replyPrefix": "🤖 ",
                "verify": "", "localReview": "", "reviewPrompt": "", "botCommand": "", "notify": "",
                "botLogin": [], "botIgnore": [], "botIgnoreBody": [], "implementAllow": []}}'
 PRC_SKELETON='{"harness": "claude", "harnesses": {"claude": {}, "pi": {}}, "steps": {}, "settings": {}}'
@@ -21,7 +21,7 @@ PRC_SKELETON='{"harness": "claude", "harnesses": {"claude": {}, "pi": {}}, "step
 PRC_HARNESSES=(claude pi)
 PRC_STEPS=(address ci-fix describe implement review)
 PRC_GLOBAL_ONLY=(remote interval notify)
-PRC_SETTINGS='stepTimeout?:uint64,replyPrefix?:string,verify?:string,localReview?:string,reviewPrompt?:string,botCommand?:string,
+PRC_SETTINGS='stepTimeout?:uint64,stepBudget?:float64,replyPrefix?:string,verify?:string,localReview?:string,reviewPrompt?:string,botCommand?:string,
               botLogin?:[string],botIgnore?:[string],botIgnoreBody?:[string],implementAllow?:[string]'
 PRC_TYPES='type hclaude = {model?:string,effort?:enum(low,medium,high,xhigh,max),args?:string,useApiKey?:bool}
 type hpi = {provider?:string,model?:string,effort?:enum(off,minimal,low,medium,high,xhigh,max),args?:string}
