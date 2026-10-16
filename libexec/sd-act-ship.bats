@@ -152,7 +152,7 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   [[ "$(calls)" != *"--base"* ]]
 }
 
-@test "ship: a parent that landed on main by hand, its branch gone from origin, isn't shipped again (#105)" {
+@test "ship: a parent that landed on main by hand, never on origin, isn't shipped again (#105)" {
   git switch -q main && git switch -qc A && git commit -q --allow-empty -m A
   git switch -q main && git merge -q --ff-only A && git push -q origin main 2>/dev/null
   git switch -q feat && git rebase -q A && git config branch.feat.sd-parent A

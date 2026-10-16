@@ -133,16 +133,16 @@
 #   describe  the agent writes the PR title and body (J6) from the task, the
 #             commits and the diff, read-only, in the branch's session; stored
 #             for HEAD and the PR's target. Spends tokens
-#   ship      describe unless one for HEAD and the target is stored, check HEAD
-#             didn't move, push, then open a draft PR on the parent (sd-parent,
-#             else the PR's base, else the default branch) and enroll; with a PR already open, fix
-#             up its title, body and base instead. Warns when the local review
-#             doesn't cover HEAD; the draft stays a draft until it does.
-#             Refuses while the parent (sd-parent) isn't on the remote, has
-#             merged (restack first), was closed, or can't be looked up; a
-#             merged parent with the branch already on the default branch
-#             ships onto it and rewrites sd-parent. Spends tokens unless HEAD
-#             already has a stored description
+#   ship      describe unless one for HEAD and the target is stored, check
+#             HEAD didn't move, push, then open a draft PR on the parent
+#             (sd-parent, else the PR's base, else the default branch) and
+#             enroll; with a PR already open, fix up its title, body and base
+#             instead. Warns when the local review doesn't cover HEAD; the
+#             draft stays a draft until it does. Refuses while the parent
+#             isn't on the remote, has merged (restack first), was closed, or
+#             can't be looked up; a merged parent with the branch already on
+#             the default branch ships onto it and rewrites sd-parent. Spends
+#             tokens unless a description for HEAD and the target is stored
 #   trigger   post settings.botCommand on the PR so the review bot runs, and
 #             pin bot at HEAD; nothing when already pinned there. HEAD must
 #             be on the remote (the bot reviews what GitHub has); the local
