@@ -1,7 +1,9 @@
 # Shared by sd act, sd state and sd watch. Source it after lib/config.sh;
 # needs bash 5 and super 0.3.0.
 #
-# See docs/pr-workflow/design.md, "Harness adapter".
+# harness_run is the harness adapter: the per-harness code, apart from the
+# tool-rule wording in implement_run (#79 Design record). with_timeout and
+# pin_write are shared helpers.
 
 # with_timeout <seconds> <cmd...>: kills the command's whole process group
 # when time runs out (its children would otherwise hold our output pipe open).
@@ -20,7 +22,7 @@ with_timeout() {
 # pin_write <branch> <kind> <sha> <base>: record a review pin and the base
 # it was taken against. sd state compares base..pin with the branch's current
 # base..HEAD, so a restack (which moves the base) doesn't make a reviewed
-# change look changed. Kinds: local, bot, accepted (see design.md, O6).
+# change look changed. Kinds: local, bot, accepted (#66 Re-review policy).
 pin_write() {
   case $2 in local|bot|accepted) ;; *) echo "unknown pin: $2 (local, bot, accepted)" >&2; return 1 ;; esac
   git update-ref -m "pin $2" "refs/sheepdog/$1/$2" "$3" \

@@ -17,8 +17,8 @@
 # tools: no edits, no gh. The prompt is the guidance (settings.reviewPrompt: a
 # path, relative ones read from SHEEPDOG_BASE so the branch can't rewrite its
 # own review; empty means lib/review-prompt.md), then the fixed reporting
-# rules (lib/review-rules.md), the task, the commits and the diff. See
-# docs/pr-workflow/design.md, "Local review".
+# rules (lib/review-rules.md), the task, the commits and the diff. Why a
+# local review before the bot: #79 (Design record).
 
 set -euo pipefail
 

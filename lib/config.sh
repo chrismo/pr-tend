@@ -1,6 +1,6 @@
 # Harness and settings for the PR pipeline. Sourced by libexec/sd-config, sd act,
-# sd watch and sd state; needs bash 5 and super 0.3.0. See docs/pr-workflow/design.md,
-# "Config files".
+# sd watch and sd state; needs bash 5 and super 0.3.0. Layers and paths: sd config --help;
+# SuperDB's edges: AGENTS.md, "SuperDB notes".
 #
 # Every function returns 1 on an error (message on stderr) and never exits:
 # callers run them as `x=$(prc_...) || die`, where errexit is off inside, so

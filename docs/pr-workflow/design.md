@@ -1,13 +1,14 @@
 # PR workflow — design (draft, 2026-10-11)
 
-> **Being consumed — not for keeping.** Every part of this file moves out as
-> soon as it has a home, and is deleted here when it does: built behavior into
-> the code and its tests (the README where users need it); unbuilt work, bugs,
-> spikes and open decisions into GitHub issues on the
-> [sheepdog project board](https://github.com/users/chrismo/projects/6). No
-> duplicate docs: don't add anything here that the code or an issue already
-> says; link the issue instead. When nothing is left, delete the file. Don't
-> treat it as current documentation of anything that exists.
+> **Consumed 2026-10-15, kept for now (chrismo).** Every section of this file,
+> `req-review.md` and `prior-art.md` was checked against the code and moved to
+> its home that day: built behavior is documented by each command's `--help`
+> and its bats tests, unbuilt work and open decisions are issues #65–#80 plus
+> comments on #12, #14, #17, #36, #44, #49, #50 and #63, and the settled
+> reasoning is #79 (Design record) and #80 (Prior art record). The design
+> rules and the SuperDB notes are in `AGENTS.md`. PR #81 has the
+> section-by-section pointers. The file stays until the current push of
+> issues is over; treat the issues as current where the two disagree.
 
 Goal: take the busy work out of getting a branch to a merged PR and keeping it
 **current** while it's open, so that with many agents running chrismo can see at

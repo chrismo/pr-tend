@@ -15,7 +15,11 @@ One command, `sd`, with a verb (`sd help` lists them):
 | `sd config`  | Show and validate settings                                |
 | `sd migrate` | Move a pr-tend install's state to sheepdog's names        |
 
-Design notes, still a working draft: [`docs/pr-workflow/design.md`](docs/pr-workflow/design.md).
+Design notes, consumed into issues and kept for now:
+[`docs/pr-workflow/design.md`](docs/pr-workflow/design.md). Decisions are
+recorded in the Decision issues on the
+[project board](https://github.com/users/chrismo/projects/6); the rules agents
+build by are in `AGENTS.md`.
 
 ## Install
 
@@ -35,6 +39,22 @@ often not the one to bill). To bill the key instead, set
 `harnesses.claude.useApiKey` to `true` (`sd config set --global --json
 harnesses.claude.useApiKey true`). pi can't use the claude.ai login, so it
 keeps the key, or runs on the provider its block names.
+
+## Agent steps
+
+`sd act implement`, `address` and `describe` each run one headless agent step
+(`claude -p` or `pi -p`) in the branch's session, as does `restack --resolve`
+under the `implement` step; `start` runs implement unless `--no-implement`,
+and `ship` runs describe unless HEAD already has a stored description.
+`sd act review`'s default reviewer runs in a fresh read-only session every
+time, so it never shares the author's context; a custom reviewer only has to
+keep the contract below, so isolation is up to it. `sd config step <step>`
+shows the harness, model and effort a step uses. The agent edits; sheepdog
+commits, pushes and talks to GitHub.
+
+A custom local reviewer (`settings.localReview`) keeps the contract in
+`libexec/sd-review-local`'s header: `SHEEPDOG_BASE`, `SHEEPDOG_HEAD` and
+`SHEEPDOG_TASK` in, a JSON list of findings out.
 
 ## Interfaces with other tools
 
