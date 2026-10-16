@@ -98,6 +98,7 @@ stack_setup() {
   git update-ref refs/remotes/origin/par par
   git switch -q par && git commit -q --amend --allow-empty -m p2b
   run stacked_on kid origin main
+  [ "$status" -eq 0 ]
   [ "$output" = "par $(git rev-parse origin/par)" ]
 }
 
@@ -114,6 +115,7 @@ stack_setup() {
   git switch -q main && git merge -q --squash par && git commit -q --allow-empty -m "par (#1)"
   git update-ref refs/remotes/origin/main main
   run stacked_on kid origin main
+  [ "$status" -eq 0 ]
   [ "$output" = "par $(git rev-parse par)" ]
 }
 
@@ -163,6 +165,7 @@ stack_setup() {
   stack_setup
   git switch -qc grandkid && git commit -q --allow-empty -m g1
   run stacked_on grandkid origin main
+  [ "$status" -eq 0 ]
   [ "$output" = "kid $(git rev-parse kid)" ]
 }
 
@@ -178,6 +181,7 @@ stack_setup() {
   stack_setup
   git update-ref refs/remotes/origin/kid kid
   run stacked_on kid origin main
+  [ "$status" -eq 0 ]
   [ "$output" = "par $(git rev-parse par)" ]
 }
 

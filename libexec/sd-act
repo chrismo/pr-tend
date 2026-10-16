@@ -1404,6 +1404,12 @@ ship() {
     none|OPEN) ;;
     *) die "PR #$(prc_val "$state" pr.number) is $(tr '[:upper:]' '[:lower:]' <<<"$pr_state"); nothing to ship" ;;
   esac
+  if [[ -z $(git config --get "branch.$b.sd-parent" || true) && $pr_state == none ]]; then
+    # A plain git branch from another's tip (#94) would open on the default branch.
+    (cd "$wt" && record_lineage "$b") || die "not shipping $b until its parent is recorded"
+    [[ -z $(git config --get "branch.$b.sd-parent" || true) ]] \
+      || state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
+  fi
   # sd state's parent: sd-parent, else the PR's base, else the default branch.
   parent=$(prc_val "$state" parent.name)
   if [[ $parent != "$(prc_val "$state" sync.default)" ]]; then
@@ -1901,7 +1907,8 @@ ack() {
 # record_lineage <branch>: while the PR's base still names a stacked parent, store
 # it and the base pin; GitHub retargets the PR to the default branch on merge.
 # With no PR (gh answering) and no recorded parent, the branch it was made from
-# by a plain git branch, found by stacked_on.
+# by a plain git branch, found by stacked_on. Exit 1 when git finds candidates
+# but can't pick one (a tie, or a parent that moved on), having said so.
 record_lineage() {
   local b=$1 state parent old_base def remote out rc=0
   state=$(sd-state --json "$b" 2>/dev/null) || return 0
@@ -1919,9 +1926,9 @@ record_lineage() {
     case $rc in
       0) read -r parent old_base <<<"$out" ;;
       2) echo "sd act: $b looks stacked on ${out// / or }: record one with git config branch.$b.sd-parent <name>" >&2
-         return 0 ;;
+         return 1 ;;
       3) echo "sd act: $b shares commits with ${out%% *}, and each has its own since, so either may be stacked on the other: git config branch.$b.sd-parent ${out%% *} if $b is, or git config branch.$b.sd-parent $def if not" >&2
-         return 0 ;;
+         return 1 ;;
       *) return 0 ;;
     esac
   fi
@@ -1947,7 +1954,7 @@ enroll_mark() {
 
 enroll_branch() {
   enroll_mark "$1"
-  record_lineage "$1"
+  record_lineage "$1" || true
 }
 
 lock_sweep "$branch"

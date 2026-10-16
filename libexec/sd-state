@@ -174,9 +174,7 @@ if [[ -z $parent ]]; then
   else
     parent=$default_branch parent_source=default
     # A plain git branch from another's tip records no parent (#94): flag it,
-    # unless gh failed and a PR we couldn't see may name the parent. An error,
-    # so ship waits: it would open the PR on the default branch with the
-    # parent's commits in it.
+    # unless gh failed and a PR we couldn't see may name the parent.
     rc=1
     if $gh_ok; then rc=0 stacked=$(stacked_on "$branch" "$remote" "$default_branch") || rc=$?; fi
     case $rc in

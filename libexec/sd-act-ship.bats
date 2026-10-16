@@ -174,6 +174,29 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   [ -z "$(calls)" ]
 }
 
+@test "ship: a branch made from another's tip with no recorded parent: records it and opens its PR on it (#94)" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
+  git switch -qc kid && git commit -q --allow-empty -m kid
+  run "$SD_ACT" ship
+  [ "$status" -eq 0 ]
+  [ "$(git config branch.kid.sd-parent)" = A ]
+  [[ "$(calls)" == "pr create --draft --base A --head kid "* ]]
+}
+
+@test "ship: an unrecorded stack git can't orient (the parent moved on) is refused before describe or push (#94)" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A1
+  git switch -qc kid && git commit -q --allow-empty -m kid
+  git switch -q A && git commit -q --allow-empty -m A2 && git push -q origin A 2>/dev/null
+  git switch -q kid
+  run "$SD_ACT" ship
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"either may be stacked on the other"* ]]
+  [ -z "$(git config branch.kid.sd-parent || true)" ]
+  [ ! -e "$FX/claude.args" ]
+  [ -z "$(remote kid)" ]
+  [ -z "$(calls)" ]
+}
+
 @test "ship: a stale description (HEAD moved) is written again" {
   "$SD_ACT" describe >/dev/null
   echo d >> file.txt && git commit -qam "add d"
