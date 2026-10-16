@@ -91,6 +91,30 @@ pin() { git rev-parse -q --verify "refs/sheepdog/feat/$1" || true; }
   [ -z "$(pin bot)" ]
 }
 
+@test "trigger: the remote ahead of HEAD (a pushed commit dropped here) is refused: push first (#86)" {
+  echo d >> file.txt && git commit -qam "add d" && git push -q origin feat 2>/dev/null
+  git reset -q --hard HEAD~1
+  git update-ref refs/sheepdog/feat/local HEAD
+  run "$SD_ACT" trigger
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"push"* ]] || false
+  [ -z "$(calls)" ]
+  [ -z "$(pin bot)" ]
+}
+
+@test "trigger: the remote ahead with someone else's commit is refused: take it first (#86)" {
+  git update-ref refs/sheepdog/feat/local HEAD
+  (cd "$TMP/repo" && git clone -q "$TMP/origin.git" "$TMP/other2" 2>/dev/null && cd "$TMP/other2" \
+     && git switch -q feat && echo t > t.txt && git add t.txt && git -c user.email=them@example.com -c user.name=Them commit -qm theirs \
+     && git push -q origin feat 2>/dev/null)
+  git fetch -q origin
+  run "$SD_ACT" trigger
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"take its commits first"* ]] || false
+  [ -z "$(calls)" ]
+  [ -z "$(pin bot)" ]
+}
+
 @test "trigger: no PR is refused" {
   rm "$GH/feat.json"
   run "$SD_ACT" trigger

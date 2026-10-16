@@ -1209,6 +1209,53 @@ review() {
   [[ "${lines[1]}" == "NEXT  you    reply to 1 human item  → sd state --long  (+"*" more)" ]]
 }
 
+@test "summary: a remote commit this copy pushed and then reset away says so (#86)" {
+  git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
+  commit b.txt b && git push -q origin feat 2>/dev/null
+  git reset -q --hard HEAD~1
+  pr_fixture feat ".headRefOid = \"$(git rev-parse origin/feat)\""
+  run "$SD_STATE"
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == *"remote +1 (was here, dropped)"* ]] || false
+  [[ "${lines[1]}" == "NEXT  run    force-push: drop 1 commit the remote has, reset away here  → sd act push"* ]]
+  state
+  [ "$(field .push.remote_made)" = true ]
+  [ "$(field .push.dirty)" = false ]
+  echo x > x.txt
+  state
+  [ "$(field .push.dirty)" = true ]
+  [ "$(field '.next[0].key')" = reset-dirty ]
+}
+
+@test "push: someone's commit taken with a fast-forward and reset away wasn't made here: take, not drop (#86)" {
+  git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
+  git -C "$TMP/other" fetch -q && git -C "$TMP/other" switch -q feat && git -C "$TMP/other" config user.email them@example.com
+  commit x.txt x "$TMP/other" && git -C "$TMP/other" push -q origin feat 2>/dev/null
+  git fetch -q && git merge -q --ff-only origin/feat && git reset -q --hard HEAD~1
+  pr_fixture feat ".headRefOid = \"$(git rev-parse origin/feat)\""
+  state
+  [ "$(field .push.remote_ours)" = true ]
+  [ "$(field .push.remote_made)" = false ]
+  [ "$(field '.next[0].key')" = take ]
+}
+
+@test "push: remote_made and dirty are null unless the remote is ahead of a reset" {
+  git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
+  state
+  [ "$(field .push.remote_made)" = null ]
+  [ "$(field .push.dirty)" = null ]
+}
+
+@test "push: a pushed commit reset away on a branch checked out nowhere: made here, dirty unknown" {
+  git switch -qc feat && commit a.txt a && commit b.txt b && git push -q -u origin feat 2>/dev/null
+  git switch -q main
+  git branch -qf feat feat~1
+  state feat
+  [ "$(field .push.remote_made)" = true ]
+  [ "$(field .push.dirty)" = null ]
+  [ "$(field '.next[0].key')" = push ]
+}
+
 @test "next: --json carries the ordered steps" {
   git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
   pr_fixture feat ".reviewThreads.nodes = [$(thread Bot copilot Bot copilot)]"

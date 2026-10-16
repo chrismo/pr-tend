@@ -35,6 +35,7 @@
 #   closed: chrismo closed it
 #   errors stale: ⚠️ sd state can't be sure, so what was notified carries over
 #   read: info-only bot items; nothing waits on them
+#   reset-dirty take: chrismo is mid-change on the branch; the 🔧 glyph shows it
 #   blocked: GitHub's branch rules, often routine; the 🔧 glyph shows it
 #   attached: chrismo is in the branch's session; like merge-wait, keeps ready
 #   bot: routine agent work, picked up when the branch is next worked on

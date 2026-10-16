@@ -83,8 +83,9 @@
 #   retarget  after the parent merged: point the PR at the default branch
 #             (gh pr edit --base; GitHub usually did it already when the
 #             parent's branch was deleted) and rewrite sd-parent to it
-#   push      publish: a plain push for new commits; rewritten history is
-#             force-pushed with a lease, only over a remote head of our own.
+#   push      publish: a plain push for new commits; rewritten history, or a
+#             pushed commit reset away, is force-pushed with a lease, only
+#             over a remote head of our own.
 #             Never over commits this copy has never had, --force or not
 #   verify    run settings.verify in the branch's worktree, zero tokens. Pass:
 #             one line. Fail: nonzero, the output trimmed to its last 40 lines
@@ -411,11 +412,6 @@ soft_gate() {
     sed 's/^/  - /' <<<"$soft"
     echo "(--force to run anyway)"; } >&2
   exit 1
-}
-
-worktree_for() { # the worktree that has refs/heads/<branch> checked out
-  git worktree list --porcelain \
-    | awk -v ref="refs/heads/$1" '/^worktree / { wt = substr($0, 10) } $0 == "branch " ref { print wt; exit }'
 }
 
 gql() { gh api graphql "$@"; }
@@ -1409,8 +1405,12 @@ values {s: this, why: sj(coalesce(errors, []), "; ")}
     when nul(s.pr) then {hard: f"no PR for {s.branch}{why != "" ? f": {why}" : ""}"}
     when on(s.pr.state != "OPEN") then {hard: f"PR #{s.pr.number} is {lower(s.pr.state)}"}
     when on(s.review.bot.status == "covered") then {done: f"the bot was already triggered on {s.head[0:7]}"}
-    when nul(s.push.remote_sha) or n(s.push.ahead) > 0 or on(s.push.diverged)
+    when n(s.push.behind) > 0 and n(s.push.ahead) == 0 and on(s.push.remote_ours) and on(s.push.remote_made) and on(s.push.dirty)
+      then {hard: f"{s.branch} isn't on the remote at HEAD; the bot reviews what GitHub has: commit or remove the worktree's changes, then sd act push"}
+    when nul(s.push.remote_sha) or n(s.push.ahead) > 0 or on(s.push.diverged) or (n(s.push.behind) > 0 and on(s.push.remote_ours) and on(s.push.remote_made))
       then {hard: f"{s.branch} isn't on the remote at HEAD; the bot reviews what GitHub has: sd act push first"}
+    when n(s.push.behind) > 0
+      then {hard: f"{s.branch} isn't on the remote at HEAD; the bot reviews what GitHub has: take its commits first (git merge --ff-only)"}
     when not (coalesce(s.review.local.status, "") in ["covered", "rewritten-same"])
       then {soft: "the local review doesn't cover HEAD (sd act review)"}
     else {} end
@@ -1443,8 +1443,8 @@ trigger() {
 plural() { if (( $1 == 1 )); then echo "1 $2"; else echo "$1 $2s"; fi; }
 
 # push_branch <branch> <remote>: publish <branch> as fetched just now. Rewritten
-# history is force-pushed with a lease on that remote head, and only when the
-# head is in the branch's reflog (we put it there).
+# history, or a pushed commit reset away, is force-pushed with a lease on that
+# remote head, and only when the head is in the branch's reflog (we put it there).
 push_branch() {
   local b=$1 remote=$2 rsha ahead behind reflog theirs
   git fetch --quiet --prune "$remote" || { echo "sd act: fetch from $remote failed" >&2; return 1; }
@@ -1459,23 +1459,59 @@ push_branch() {
   behind=$(git rev-list --count "refs/heads/$b..$rsha")
   if (( ahead == 0 && behind == 0 )); then
     echo "nothing to push on $b"
-  elif (( ahead == 0 )); then
-    echo "sd act: $remote/$b has $(plural "$behind" commit) you don't; take them with: git merge --ff-only $remote/$b" >&2
-    return 1
   elif (( behind == 0 )); then
     push_ref "$b" "$remote" "$rsha" || return
     echo "pushed $b to $remote ($(plural "$ahead" commit))"
   else
+    # The remote has commits this branch doesn't. Ours (in the branch's
+    # reflog: an amend, or a pushed commit reset away, #86) are replaced with
+    # a lease; anyone else's are never pushed over.
     # Not piped into grep -q: under pipefail, git dying of SIGPIPE would read as "not ours".
     reflog=$(git reflog show --format=%H "refs/heads/$b")
     if ! grep -qx "$rsha" <<<"$reflog"; then
-      theirs=$(commits_not_ours "$reflog" "$rsha")
-      echo "sd act: $remote/$b has $(plural "$theirs" commit) this copy has never had; not pushing over it." \
+      if (( ahead == 0 )); then
+        echo "sd act: $remote/$b has $(plural "$behind" commit) you don't; take them with: git merge --ff-only $remote/$b" >&2
+      else
+        theirs=$(commits_not_ours "$reflog" "$rsha")
+        echo "sd act: $remote/$b has $(plural "$theirs" commit) this copy has never had; not pushing over it." \
+             "Look: git log $b..$remote/$b, then rebase onto or merge $remote/$b and push again" >&2
+      fi
+      return 1
+    fi
+    if (( ahead == 0 )); then
+      # Dropping needs more than "the branch once pointed there": a commit
+      # taken with merge --ff-only (or a pull, or a rebase onto the remote)
+      # and reset away is in the reflog too, and it was someone else's work.
+      # Every commit being dropped must have been made here (made_here).
+      if ! made_here "refs/heads/$b..$rsha"; then
+        echo "sd act: $remote/$b has $(plural "$behind" commit) you don't; this branch had them but didn't make them all, so take them back with: git merge --ff-only $remote/$b" >&2
+        return 1
+      fi
+      # A soft or mixed reset looks the same as a deliberate drop, except the
+      # changes are still in the worktree: don't throw the remote commit away
+      # under them.
+      local wt st=""; wt=$(worktree_for "$b")
+      if [[ -n $wt ]] && ! st=$(git -C "$wt" status --porcelain); then
+        echo "sd act: can't read $wt's status; not dropping the remote commit" >&2
+        return 1
+      fi
+      if [[ -n $st ]]; then
+        echo "sd act: $remote/$b has $(plural "$behind" commit) this branch was reset off, and $wt has uncommitted or untracked changes:" \
+             "commit them (then push replaces the remote commit), or drop them (git reset --hard; git clean -n shows the untracked ones)" >&2
+        return 1
+      fi
+    fi
+    if (( ahead > 0 )) && ! made_here "refs/heads/$b..$rsha"; then
+      echo "sd act: $remote/$b has $(plural "$behind" commit) this branch took but didn't make; not rewriting over them." \
            "Look: git log $b..$remote/$b, then rebase onto or merge $remote/$b and push again" >&2
       return 1
     fi
     push_ref "$b" "$remote" "$rsha" --force-with-lease="refs/heads/$b:$rsha" || return
-    echo "force-pushed $b to $remote (rewritten; the remote head ${rsha:0:7} was ours)"
+    if (( ahead == 0 )); then
+      echo "force-pushed $b to $remote (dropped $(plural "$behind" commit); the remote head ${rsha:0:7} was ours)"
+    else
+      echo "force-pushed $b to $remote (rewritten; the remote head ${rsha:0:7} was ours)"
+    fi
   fi
   track "$b" "$remote"
 }
