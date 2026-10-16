@@ -60,7 +60,8 @@
 #   restack   rebase --onto the parent (the default branch once the parent
 #             merged), check the branch's own change came through unchanged,
 #             else roll back; never pushes. Once the branch lands on the
-#             default branch, sd-parent is rewritten to it. A conflict is
+#             default branch, sd-parent is rewritten to it, unless the PR
+#             still targets the parent: retarget does that. A conflict is
 #             refused, or with --resolve handed to the agent (J1): it edits
 #             the conflicting files in the branch's session, the pipeline
 #             adds and continues, up to 3 stops. A resolved rebase skips the
@@ -1022,7 +1023,10 @@ restack() {
   fi
   git update-ref -m "sd act restack" "refs/sheepdog/$b/base" "$new_base"
   echo "restacked $b onto $remote/$target ($(plural "$(git rev-list --count "$new_base..$new_head")" commit)); not pushed: sd act push"
-  parent_to_default "$b" "$state"
+  # Until the PR targets the default branch, sd-parent is what keeps retarget
+  # owed: deleting the merged parent's branch would close a PR still on it.
+  line=$(prc_line 'where not nul(pr) and on(pr.base != sync.default) | values f"PR #{pr.number} still targets {pr.base}: sd act retarget"' "$state")
+  if [[ -n $line ]]; then echo "$line"; else parent_to_default "$b" "$state"; fi
   if $resolved; then
     echo "conflicts resolved by the agent, so $b's change is unreviewed: sd act review next"
     verify_run "$wt" "$b" || die "verify failed ($VERIFY_CMD) on the resolved branch; it is kept at ${new_head:0:7}, unpushed. Fix, then sd act verify"

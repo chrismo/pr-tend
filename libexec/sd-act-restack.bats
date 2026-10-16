@@ -176,6 +176,25 @@ base_pin() { git rev-parse -q --verify refs/sheepdog/feat/base || true; }
   [ "$(git config branch.child.sd-parent)" = main ]
 }
 
+@test "parent merged but the PR still targets it: sd-parent kept, so retarget is still owed" {
+  stacked_child
+  (cd "$TMP/other" && git fetch -q origin && git checkout -q main && git merge -q --squash origin/A >/dev/null \
+     && git commit -qm "A (#1)" && git push -q origin main 2>/dev/null)
+  merged_pr A "$a_head"
+  open_pr child A 2
+  run "$SD_ACT" restack
+  [ "$status" -eq 0 ]
+  [ "$(git rev-parse child^)" = "$(git rev-parse origin/main)" ]
+  [ "$(git config branch.child.sd-parent)" = A ]
+  [[ "$output" == *"PR #2 still targets A: sd act retarget"* ]]
+  run sd-state --json child
+  [ "$(jq -r '[.next[].key] | index("retarget") != null' <<<"$output")" = true ]
+  run "$SD_ACT" retarget
+  [ "$status" -eq 0 ]
+  [ "$(cat "$GH/calls")" = "pr edit 2 --base main" ]
+  [ "$(git config branch.child.sd-parent)" = main ]
+}
+
 @test "restack onto a parent closed without merging is refused" {
   stacked_child
   closed_pr A "$a_head"
