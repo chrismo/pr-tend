@@ -137,3 +137,12 @@ EOF2
   [[ "$stderr" == *"timed out after 1s"* ]]
   [ -z "$(pin local)" ]
 }
+
+@test "a custom reviewer gets stepTimeout, with no margin" {
+  "$SD_CONFIG" set --global settings.stepTimeout 1
+  printf '#!/usr/bin/env bash\nsleep 3\necho "[]"\n' > "$TMP/reviewer"
+  run --separate-stderr "$SD_ACT" review
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"timed out after 1s"* ]]
+  [ -z "$(pin local)" ]
+}

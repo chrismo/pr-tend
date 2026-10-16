@@ -86,12 +86,6 @@ then exits. It can't ask a question mid-run; if it needs input, it ends and
 prints the question. Permission prompts go to the host or are auto-denied
 (`--permission-prompts none`).
 
-`harness_run` holds the harness's stderr (claude can put protocol JSON there)
-and shows it only when the step fails, so nothing streams while a step runs.
-It adds the harness's own account: claude's error text or subtype, or the end
-of pi's reply. Each step says on stderr when it
-starts: which harness, which session, what it is doing.
-
 **Auth and billing** (docs read 2026-10-11 by the claude-code-guide agent;
 `claude auth status` here = claude.ai, Max):
 
