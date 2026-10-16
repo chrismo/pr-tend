@@ -519,6 +519,32 @@ rebase_in_progress() { [[ -e $(git rev-parse --git-path rebase-merge) || -e $(gi
   [[ $allow == *Edit* && $allow != *"git add"* && $allow != *"rebase"* ]]
 }
 
+@test "--resolve: the agent is told which commit it is replaying, out of which" {
+  edit 's/^b$/B/' "feat two"
+  upstream main 's/^g$/X/'
+  resolver GX
+  own1=$(git rev-parse --short feat~1) own2=$(git rev-parse --short feat)
+  "$SD_ACT" restack --resolve >/dev/null
+  grep -qx "Replaying: $own1 feat" "$FX/claude.prompt"
+  grep -qx " file.txt | 2 +-" "$FX/claude.prompt"
+  [ "$(sed -n '/^Commits being replayed, oldest first:$/,/^$/p' "$FX/claude.prompt")" = "Commits being replayed, oldest first:
+$own1 feat
+$own2 feat two" ]
+}
+
+@test "--resolve: the agent saying the change is already on the target rolls back as a wrong base" {
+  upstream main 's/^g$/X/'
+  echo '{"outcome": "already-on-target", "summary": "main already has this"}' > "$FX/result.json"
+  before=$(git rev-parse HEAD) replayed=$(git rev-parse --short HEAD)
+  run "$SD_ACT" restack --resolve
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"wrong base: the agent says $replayed feat is already on origin/main (main already has this)"* ]]
+  [[ "$output" == *"rebase past it by hand: git rebase --onto origin/main $replayed feat"* ]]
+  [ "$(git rev-parse HEAD)" = "$before" ]
+  ! rebase_in_progress
+  [ -z "$(base_pin)" ]
+}
+
 @test "--resolve: a conflict partway through goes to the agent too" {
   edit 's/^e$/E/' there
   edit 's/^E$/e/' back
