@@ -1013,15 +1013,18 @@ EOF
 # guidance_base <branch>: the commit a step reads repo guidance (.sheepdog/,
 # relative prompt paths) from, which the branch's agent can't rewrite: the
 # base pin, else where the branch forked from the default branch (the remote's,
-# else the local one). Nothing when neither exists: the branch's own commits
-# are never trusted for its guidance.
+# else the local one), unless that is the branch's own tip. Nothing when none
+# qualifies: the branch's own commits are never trusted for its guidance.
 guidance_base() {
-  local remote def ref
+  local remote def ref tip mb
   git rev-parse -q --verify "refs/sheepdog/$1/base" && return
-  remote=$(prc_get settings.remote "$1" false) || remote=origin
+  remote=$(prc_get settings.remote "$1" false) || return 1
+  tip=$(git rev-parse "refs/heads/$1") || return 1
   if def=$(start_default "$remote"); then
     for ref in "refs/remotes/$remote/$def" "refs/heads/$def"; do
-      git show-ref -q --verify "$ref" && git merge-base "refs/heads/$1" "$ref" && return
+      git show-ref -q --verify "$ref" || continue
+      mb=$(git merge-base "$tip" "$ref") || continue
+      if [[ $mb != "$tip" ]]; then echo "$mb"; return; fi
     done
   fi
   return 0

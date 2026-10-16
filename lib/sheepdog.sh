@@ -56,7 +56,7 @@ made_here() {
 # step_guidance <setting> <branch> <base> <default-file>: the guidance part of a
 # step's prompt: the file settings.<setting> names; else .sheepdog/<name>.md
 # in the <base> commit, <name> being the setting without "Prompt", kebab-cased
-# (ciFixPrompt: .sheepdog/ci-fix.md); else <default-file>. A relative path is
+# (reviewFixPrompt: .sheepdog/review-fix.md); else <default-file>. A relative path is
 # read from the <base> commit, which the branch's agent can't rewrite; an
 # absolute one from disk. A named file that is missing is an error, never the
 # default. An empty <base> means none can be trusted: no .sheepdog/ lookup,

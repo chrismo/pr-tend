@@ -537,10 +537,11 @@ findings_at() {
 }
 
 @test "implement: a branch with no base pin and no remote still gets its guidance" {
-  git init -q "$TMP/bare" && cd "$TMP/bare"
+  git init -q "$TMP/local" && cd "$TMP/local"
   mkdir -p .sheepdog && printf 'Local repo guidance.\n' > .sheepdog/implement.md
   printf 'a\nb\n' > file.txt && git add . && git commit -qm init
   git switch -qc feat && git config branch.feat.sd-task "add c"
+  git commit -q --allow-empty -m "branch work"
   "$SD_ACT" implement >/dev/null
   [ "$(head -1 "$FX/claude.prompt")" = "Local repo guidance." ]
 }
@@ -552,6 +553,16 @@ findings_at() {
   git config branch.feat.sd-task "add c"
   "$SD_ACT" implement >/dev/null
   [ "$(head -1 "$FX/claude.prompt")" != "Branch-written guidance." ]
+  grep -q 'Implement the task below' "$FX/claude.prompt"
+}
+
+@test "implement: on the default branch itself, its own .sheepdog/ is not trusted" {
+  git init -q -b main "$TMP/onmain" && cd "$TMP/onmain"
+  printf 'a\nb\n' > file.txt && git add . && git commit -qm init
+  mkdir -p .sheepdog && printf 'Agent-written guidance.\n' > .sheepdog/implement.md
+  git add . && git commit -qm "the agent's commit"
+  git config branch.main.sd-task "add c"
+  "$SD_ACT" implement main >/dev/null
   grep -q 'Implement the task below' "$FX/claude.prompt"
 }
 
