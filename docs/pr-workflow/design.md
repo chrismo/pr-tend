@@ -841,9 +841,8 @@ before the agent sees anything, so ignoring is deterministic, not an
 instruction. Inline threads are matched by author only (their bodies aren't
 fetched by `sd state`).
 
-Residual: the agent's reply *text* is posted as written, so a reply could
-itself carry a `/command` or `@mention`. Not handled; a deterministic scrub
-before posting is the fix if it ever happens.
+The agent's reply *text* is scrubbed before posting (#70, 2026-10-16): a
+`/command` or `@mention` gets a lookalike glyph, see `SCRUB_Q`.
 
 ## `sd act restack` and `sd act push` — built 2026-10-13
 

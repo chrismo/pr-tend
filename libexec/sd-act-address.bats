@@ -362,12 +362,12 @@ remote_feat() { git -C "$TMP/origin.git" rev-parse feat; }
   agent_edits_nothing
   agent_result '{outcome: "needs-input", commit_message: null, summary: "",
                  items: [{id: "T1", action: "pushback", reply: "Lowercase is the convention here."},
-                         {id: "T2", action: "ask", reply: "Rename to what?"}]}'
+                         {id: "T2", action: "ask", reply: "Rename to what? /marge says @carol wants it"}]}'
   run "$SD_ACT" address
   [ "$status" -eq 0 ]
   [ "$(gh_ops)" = "nodes addPullRequestReviewThreadReply" ]
   gh_call addPullRequestReviewThreadReply | grep -q '"thread=T1"' || false
-  [[ "$output" == *"needs chrismo"*"Rename to what?"* ]]
+  [[ "$output" == *"needs chrismo"*"Rename to what? /marge says @carol wants it"* ]] || false
 }
 
 @test "an item the agent skipped is treated as ask" {
@@ -412,6 +412,21 @@ remote_feat() { git -C "$TMP/origin.git" rev-parse feat; }
   gh_call addComment | grep -qF '(https://example/pr/7#issuecomment-1)' || false
   gh_call addComment | grep -q 'Nothing to do.' || false
   ! gh_call addComment | grep -q 'marge' || false
+}
+
+@test "a reply's /commands and @mentions are defanged before posting; paths keep their slashes" {
+  state_fixture '.threads.owed_bot = 2 | .threads.items += [{id: "C1", type: "comment", kind: "bot", path: null, line: null, outdated: null, last: "review-bot"}]'
+  agent_edits_nothing
+  agent_result '{outcome: "done", commit_message: null, summary: "",
+                 items: [{id: "T1", action: "reply", reply: "Re-run /review-bot /a /b and ask @someone (@other); see src/x.sh, /tmp/out, https://x/y/marge and https://m.com/@who/p; t@e.com"},
+                         {id: "C1", action: "reply", reply: "Done.\n/marge again? cc:@carol _@dave_"}]}'
+  run "$SD_ACT" address
+  [ "$status" -eq 0 ]
+  body=$(gh_call addPullRequestReviewThreadReply | jq -r '.[] | select(startswith("body=")) | ltrimstr("body=")')
+  [ "$body" = "🤖 Re-run ∕review-bot ∕a ∕b and ask ＠someone (＠other); see src/x.sh, /tmp/out, https://x/y/marge and https://m.com/@who/p; t@e.com" ]
+  comment=$(gh_call addComment | jq -r '.[] | select(startswith("body=")) | ltrimstr("body=")')
+  [[ $comment == *$'Done.\n∕marge again? cc:＠carol _＠dave_'* ]] || false
+  [[ $comment != *"/marge"* && $comment != *"@carol"* && $comment != *"@dave"* ]] || false
 }
 
 @test "a bot thread someone else has joined goes to chrismo, not the agent" {

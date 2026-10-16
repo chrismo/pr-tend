@@ -60,7 +60,8 @@
 #             watcher's list; refuses while any branch is still enrolled
 #   address   hand owed bot feedback to an agent, then commit, verify, push,
 #             reply and resolve; items the agent marks "ask" are left for
-#             chrismo. Spends tokens
+#             chrismo. Replies are posted with /commands and @mentions
+#             defanged. Spends tokens
 #   ack       mark owed bot review bodies and comments read, with no reply:
 #             every i item, or only the --id ones (ids from sd state --json)
 #   restack   rebase --onto the parent (the default branch once the parent
@@ -257,8 +258,9 @@ For each finding below, pick exactly one action:
 
 Make fixes by editing files. Keep edits to what the findings ask for. Do not
 commit, push, or run gh: the pipeline commits your edits, runs checks, pushes,
-and posts each `reply` on the PR as written, so keep replies short and
-specific. Return one item per finding id, a one-line commit_message if you
+and posts each `reply` on the PR, so keep replies short and specific. A
+/word or @login in a reply is posted with a lookalike glyph so it can't
+trigger a bot or ping anyone; for a path, use a relative one. Return one item per finding id, a one-line commit_message if you
 changed anything (else null), and outcome "done", "needs-input" (anything you
 marked ask) or "gave-up" (you couldn't make sense of it; nothing is posted).
 EOF
@@ -332,6 +334,30 @@ read -r -d '' REPLIES <<'EOF' || true
 fn where(it): it.type == "thread" ? f"{it.path}:{it.line}" : it.type == "review" ? "review body" : "PR comment"
 unnest this | where this.type == "thread" and action != "ask"
 | values id, action, where(this), reply, "\u001e"
+EOF
+
+# A reply is posted as written, so a /command or @mention in it would run a
+# bot or ping a person. Lookalike glyphs keep the reading: a /command written
+# as a word (a /word at a line start or after whitespace, a bracket or a
+# quote, not followed by more path) gets U+2215 for its slash, which defeats
+# the line-start regexes and whitespace-delimited substring checks bots use;
+# an @login after anything but a letter, a digit or a slash gets U+FF20, which
+# GitHub doesn't read as a mention (t@e.com and medium.com/@who stay; _@who_
+# is scrubbed, since markdown runs before mention detection). Not covered: a
+# /word glued to other text (foo/marge, **/marge**, a URL ending in /marge),
+# which stays as written, and a one-segment absolute path (/tmp, /README.md),
+# which reads as a command, code spans included (so does an @ in code, like
+# `npm i @types/node`), and an @ right after a slash outside a URL (a/@who),
+# which GitHub may still read as a mention (unverified). Only posted text is
+# touched: ask items stay as the agent wrote them, since chrismo reads those,
+# and the terminal report shows the posted text, glyphs included, on purpose.
+# Two passes, because a match
+# eats the character after the command, which may be the boundary of the next
+# one ("/a /b").
+read -r -d '' SCRUB_Q <<'EOF' || true
+fn cmd(s): regexp_replace(s, "(^|[\\s(\\[\"'`])/([A-Za-z][A-Za-z0-9_-]*)($|[^A-Za-z0-9_/-])", "${1}∕${2}${3}")
+fn scrub(s): regexp_replace(cmd(cmd(s)), "(^|[^A-Za-z0-9/])@([A-Za-z0-9])", "${1}＠${2}")
+values coalesce([unnest this | values {...this, reply: is(reply, <string>) and action != "ask" ? scrub(reply) : reply}], [])
 EOF
 
 # A gate is a list of {hard}, {soft}, {warn} and {done} records (address,
@@ -436,6 +462,7 @@ address() {
   [[ -n $(git -C "$wt" status --porcelain) ]] && changed=true
   plan=$(prc_json "$PLAN_Q" "{\"f\": $findings, \"r\": $result, \"changed\": $changed, \"held\": $held}") \
     || die "couldn't read the agent's answer; edits (if any) are left uncommitted in $wt"
+  plan=$(prc_json "$SCRUB_Q" "$plan") || die "couldn't scrub the replies; edits (if any) are left uncommitted in $wt"
 
   local msg
   if $changed; then
