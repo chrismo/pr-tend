@@ -84,7 +84,9 @@ EOF
 
   state_fixture
   echo '{"state":"failure","statuses":[{"context":"RWX: tests.yml (pull request)","state":"failure","description":"Failed in 24s","target_url":"https://cloud.rwx.com/clabs/runs/01a1run"}]}' > "$FX/status.json"
-  echo '{"total_count":1,"check_runs":[{"name":"test","status":"completed","conclusion":"failure","details_url":"https://github.com/o/r/actions/runs/555/job/777","app":{"slug":"github-actions"},"output":{"title":"1 test failed","summary":"FAIL: TestThree wants THREE","text":null}}]}' > "$FX/checks.json"
+  echo '{"total_count":2,"check_runs":[
+    {"name":"test","status":"completed","conclusion":"failure","details_url":"https://github.com/o/r/actions/runs/555/job/777","app":{"slug":"github-actions"},"output":{"title":"1 test failed","summary":"FAIL: TestThree wants THREE","text":null}},
+    {"name":"lint","status":"completed","conclusion":"failure","details_url":"https://github.com/o/r/actions/runs/556/job/778","app":{"slug":"github-actions"},"output":{"title":null,"summary":null,"text":null}}]}' > "$FX/checks.json"
   echo '{"ID":"01a1run","ResultStatus":"failed","Tasks":[{"Key":"lint","ID":"task-ok","Status":{"Result":"succeeded"}},{"Key":"test","ID":"task-bad","Status":{"Result":"failed"}}]}' > "$FX/rwx-results.json"
   printf 'rwx line 1\nrwx: expected THREE, got three\n' > "$FX/rwx.log"
   printf 'gha line 1\ngha: --- FAIL: TestThree\n' > "$FX/gha.log"
@@ -201,7 +203,23 @@ recorded() { git config --get branch.feat.sd-ci-fix; }
   grep -q '^logs task-bad --output' "$FX/rwx.calls"
   ! grep -q 'task-ok' "$FX/rwx.calls" || false
   grep -q '^run view 555 --job 777 --log-failed' "$FX/gh.calls"
+  grep -q '^run view 556 --job 778 --log-failed' "$FX/gh.calls"   # a check run with no output text still gets its log
   ! grep -q graphql "$FX/gh.calls" || false
+}
+
+@test "no settings.verify: the agent is told no local checks exist, not that they pass" {
+  run "$SD_ACT" ci-fix
+  [ "$status" -eq 0 ]
+  [[ "$(prompt)" == *"No local checks are configured"* ]]
+  [[ "$(prompt)" != *"pass locally"* ]]
+}
+
+@test "verify changing the tree is refused before the agent runs" {
+  "$SD_CONFIG" set --global settings.verify "echo touched >> file.txt"
+  run "$SD_ACT" ci-fix
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"changed files"* ]]
+  [ ! -e "$FX/claude.args" ]
 }
 
 @test "the agent may run the verify command, and is told what it may run" {
@@ -252,7 +270,16 @@ recorded() { git config --get branch.feat.sd-ci-fix; }
   "$SD_CONFIG" set --global settings.verify "true"
   run "$SD_ACT" ci-fix
   [ "$status" -eq 0 ]
-  [[ "$(prompt)" == *"passes locally"* ]]
+  [[ "$(prompt)" == *"pass locally"* ]]
+}
+
+@test "flaky after editing files: not recorded, so no --force is needed once they are cleaned up" {
+  agent_result '{outcome: "flaky", commit_message: null, summary: "flaky"}'
+  run "$SD_ACT" ci-fix
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"edited files"* ]]
+  run recorded
+  [ "$status" -ne 0 ]
 }
 
 @test "flaky: nothing committed or pushed; recorded; the same red SHA is refused next time, a new one runs" {

@@ -1136,16 +1136,18 @@ ci_logs_rwx() {
 # RWX run's logs through rwx results and rwx logs) and its check runs (GitHub
 # Actions; gh run view --log-failed). Each log is cut to its last $CI_LOG_TAIL
 # lines; a source that can't be read is left out, never fatal. @tsv escapes
-# tabs and newlines in a field, which %b puts back.
+# tabs and newlines in a field, which %b puts back; the separating tabs
+# become \037, since read would merge the tabs around an empty field.
 ci_logs() {
   local sha=$1 ctx desc url name title summary
-  while IFS=$'\t' read -r ctx desc url; do
+  while IFS=$'\037' read -r ctx desc url; do
     [[ -n $ctx ]] || continue
     printf '## %b: %b\n%b\n' "$ctx" "$desc" "$url"
     [[ $url =~ cloud\.rwx\.com/[^/]+/runs/([0-9a-z]+) ]] && ci_logs_rwx "${BASH_REMATCH[1]}"
   done < <(gh api "repos/{owner}/{repo}/commits/$sha/status" \
-             --jq '.statuses[] | select(.state == "failure" or .state == "error") | [.context, .description // "", .target_url // ""] | @tsv' 2>/dev/null || true)
-  while IFS=$'\t' read -r name title summary url; do
+             --jq '.statuses[] | select(.state == "failure" or .state == "error") | [.context, .description // "", .target_url // ""] | @tsv' 2>/dev/null \
+           | tr '\t' '\037' || true)
+  while IFS=$'\037' read -r name title summary url; do
     [[ -n $name ]] || continue
     printf '## %b: %b\n%b\n%b\n' "$name" "$title" "$summary" "$url"
     if [[ $url =~ /actions/runs/([0-9]+)/job/([0-9]+) ]]; then
@@ -1153,7 +1155,8 @@ ci_logs() {
       gh run view "${BASH_REMATCH[1]}" --job "${BASH_REMATCH[2]}" --log-failed 2>/dev/null | ci_tail || true
     fi
   done < <(gh api "repos/{owner}/{repo}/commits/$sha/check-runs" \
-             --jq '.check_runs[] | select(.conclusion == "failure" or .conclusion == "timed_out") | [.name, .output.title // "", .output.summary // "", .details_url // ""] | @tsv' 2>/dev/null || true)
+             --jq '.check_runs[] | select(.conclusion == "failure" or .conclusion == "timed_out") | [.name, .output.title // "", .output.summary // "", .details_url // ""] | @tsv' 2>/dev/null \
+           | tr '\t' '\037' || true)
 }
 
 # agent_rules <worktree> <branch>: what the agent may run beyond reading and
@@ -1212,15 +1215,20 @@ ci_fix() {
     return
   fi
 
+  [[ -z $(git -C "$wt" status --porcelain) ]] \
+    || die "verify ($VERIFY_CMD) changed files in $wt (a formatter?); commit them, then sd act ci-fix"
   logs=$(cd "$wt" && ci_logs "$sha")
-  mapfile -t rules < <(agent_rules "$wt" "$b")
+  s=$(agent_rules "$wt" "$b") || die "sd config failed"
+  rules=(); [[ -z $s ]] || mapfile -t rules <<<"$s"
   verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "sd config failed"
   prompt=$(cd "$wt" && step_guidance ciFixPrompt "$b" "$base" "$SD_LIB/ci-fix-prompt.md") || die "can't read the ci-fix guidance"
   prompt+=$'\n\nTask: '"${task:-(none recorded)}"
   prompt+=$'\n\nFailing checks on '"${sha:0:7}: $failing"
   [[ -z $logs ]] || prompt+=$'\n\n'"$logs"
-  if (( vrc == 0 )); then
-    prompt+=$'\n\nThe repo\'s checks ('"${VERIFY_CMD:-none configured}"$') passes locally, so the failure may be in CI\'s environment, or in what CI runs that the local checks don\'t.'
+  if [[ -z $VERIFY_CMD ]]; then
+    prompt+=$'\n\nNo local checks are configured (settings.verify), so only CI\'s logs say what failed.'
+  elif (( vrc == 0 )); then
+    prompt+=$'\n\nThe repo\'s checks ('"$VERIFY_CMD"$') pass locally, so the failure may be in CI\'s environment, or in what CI runs that the local checks don\'t.'
   else
     prompt+=$'\n\nThe repo\'s checks ('"$VERIFY_CMD"$') fail locally too:\n'"$(<"$vout")"
   fi
@@ -1244,12 +1252,13 @@ ci_fix() {
   case $outcome in
     fixed) ;;
     flaky)
-      git config "branch.$b.sd-ci-fix" "$sha flaky"
       [[ -z $(git -C "$wt" status --porcelain) ]] || die "the agent says flaky but edited files; they are left uncommitted in $wt"
+      git config "branch.$b.sd-ci-fix" "$sha flaky"
       echo "$b: the agent calls ${sha:0:7}'s red flaky, not the change's: $summary"
-      echo "nothing committed; rerun CI (gh run rerun, or rwx retry), or look: gh pr checks"
+      if [[ -n $AUTOFIX_COMMIT ]]; then echo "autofix's commit $AUTOFIX_COMMIT is kept, unpushed: sd act push"
+      else echo "nothing committed; rerun CI (gh run rerun, or rwx retry), or look: gh pr checks"; fi
       return ;;
-    needs-input) die "the agent needs input on $b: $summary"$'\n'"Edits (if any) are left uncommitted in $wt; answer in session $STEP_SID, then sd act ci-fix" ;;
+    needs-input) die "the agent needs input on $b: $summary"$'\n'"Edits (if any) are left uncommitted in $wt: answer in the session (sd act attach), then commit or discard them, then sd act ci-fix" ;;
     gave-up) die "the agent gave up on $b: $summary. Edits (if any) are left uncommitted in $wt" ;;
     *) die "the agent returned outcome \"$outcome\"; edits (if any) are left uncommitted in $wt" ;;
   esac
