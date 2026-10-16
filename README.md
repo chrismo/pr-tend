@@ -24,8 +24,14 @@ build by are in `AGENTS.md`.
 ## Install
 
 ```bash
-./install.sh        # links bin/sd into ~/.local/bin ($LOCAL_BIN to override)
+./install.sh        # links sd and installs its launchd watcher
 ```
+
+On macOS, the installer links `bin/sd` into `~/.local/bin` (`$LOCAL_BIN` to
+change the link directory) and starts the watcher, which checks enrolled
+branches every five minutes by default. Re-run it to update both. Use
+`sd watch uninstall` to stop the background job, or `sd watch install` to
+start it again.
 
 Needs on `PATH`: `bash5` (a link to bash 5+; the commands are
 `#!/usr/bin/env bash5`), `git`, `gh`, `jq`, and SuperDB `super` **0.3.0**
@@ -92,7 +98,6 @@ config `sheepdog.*`, `SHEEPDOG_*` env vars). On a machine that ran pr-tend, afte
 ```bash
 sd migrate --dry-run   # what it would move, and anything it can't
 sd migrate
-sd watch install       # if the watcher ran there; replaces the old job
 ```
 
 ## Tests

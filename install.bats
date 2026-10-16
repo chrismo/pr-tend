@@ -1,14 +1,23 @@
 #!/usr/bin/env bats
 
-# Test suite for install.sh. LOCAL_BIN points at a temp dir so tests never
-# touch the real ~/.local/bin.
-
-INSTALLER="$BATS_TEST_DIRNAME/install.sh"
+# The fixture sd records watcher installation without touching launchd.
 OLD_COMMANDS=(pr-state pr-act pr-watch pr-config pr-review-local)
 
 setup() {
   TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sheepdog-install.XXXXXX")"
+  TEST_DIR="$(cd "$TEST_DIR" && pwd -P)"
   export LOCAL_BIN="$TEST_DIR/local-bin"
+  export WATCH_CALLS="$TEST_DIR/watch-calls"
+  INSTALLER="$TEST_DIR/repo/install.sh"
+  mkdir -p "$TEST_DIR/repo/bin"
+  cp "$BATS_TEST_DIRNAME/install.sh" "$INSTALLER"
+  cat > "$TEST_DIR/repo/bin/sd" <<'EOF'
+#!/usr/bin/env bash5
+[[ -L $LOCAL_BIN/sd ]] || exit 99
+printf '%s\n' "$*" >> "$WATCH_CALLS"
+exit "${WATCH_EXIT:-0}"
+EOF
+  chmod +x "$TEST_DIR/repo/bin/sd"
 }
 
 teardown() {
@@ -19,7 +28,7 @@ teardown() {
   run "$INSTALLER"
   [ "$status" -eq 0 ]
   [ -L "$LOCAL_BIN/sd" ]
-  [ "$(readlink "$LOCAL_BIN/sd")" = "$BATS_TEST_DIRNAME/bin/sd" ]
+  [ "$(readlink "$LOCAL_BIN/sd")" = "$TEST_DIR/repo/bin/sd" ]
 }
 
 @test "links nothing else: the verbs are reached through sd" {
@@ -33,17 +42,38 @@ teardown() {
   ln -s /somewhere/else/bin/sd "$LOCAL_BIN/sd"
   run "$INSTALLER"
   [ "$status" -eq 0 ]
-  [ "$(readlink "$LOCAL_BIN/sd")" = "$BATS_TEST_DIRNAME/bin/sd" ]
+  [ "$(readlink "$LOCAL_BIN/sd")" = "$TEST_DIR/repo/bin/sd" ]
 }
 
-@test "leaves a regular file alone and says so" {
+@test "a regular file blocks installation without being overwritten or installing the watcher" {
   mkdir -p "$LOCAL_BIN"
   echo mine > "$LOCAL_BIN/sd"
   run "$INSTALLER"
-  [ "$status" -eq 0 ]
+  [ "$status" -ne 0 ]
+  [ ! -e "$WATCH_CALLS" ]
   [ ! -L "$LOCAL_BIN/sd" ]
   [ "$(cat "$LOCAL_BIN/sd")" = mine ]
   [[ "$output" == *"sd"*"not a symlink"* ]]
+}
+
+@test "installs the watcher by default after linking sd" {
+  run "$INSTALLER"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WATCH_CALLS")" = "watch install" ]
+}
+
+@test "reinstalling sd reinstalls the watcher" {
+  "$INSTALLER"
+  run "$INSTALLER"
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$WATCH_CALLS" | tr -d ' ')" -eq 2 ]
+}
+
+@test "a watcher installation failure fails the installer" {
+  export WATCH_EXIT=42
+  run "$INSTALLER"
+  [ "$status" -eq 42 ]
+  [ "$(cat "$WATCH_CALLS")" = "watch install" ]
 }
 
 @test "removes pr-* links from a pr-tend install" {
