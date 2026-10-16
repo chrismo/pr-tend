@@ -513,8 +513,10 @@ pipeline checks for leftover markers, adds and continues; 3 stops is the cap.
 context lines, so an upstream edit inside our diff context (line 8 vs our line
 10) gave different IDs → needless escalation. `git diff -U0 | git patch-id
 --stable` gave equal IDs; `range-diff` also flagged it (`!`, context only).
-→ **Use `-U0`.** Untested: whether `-U0` still catches a wrong old-base
-(parent commits replayed into ours) — needs a fixture.
+→ **Use `-U0`.** A wrong old-base that replays commits still in the merged
+parent PR is refused before the rebase (RESTACK_GATE's `from_parent`, #44, by
+SHA: a parent rebased before it merged leaves copies it misses). Whether `-U0`
+alone catches a wrong old-base is still untested.
 
 Stack cascades are **pulled**: a child notices its parent moved on its own next
 pass (O2/O3). No cross-worktree writes.
