@@ -86,7 +86,11 @@
 #   push      publish: a plain push for new commits; rewritten history, or a
 #             pushed commit reset away, is force-pushed with a lease, only
 #             over a remote head of our own.
-#             Never over commits this copy has never had, --force or not
+#             Never over commits this copy has never had, --force or not.
+#             A reset-away drop is refused when a dropped commit wasn't
+#             authored and committed here (take it back with merge
+#             --ff-only), or when the worktree has uncommitted or untracked
+#             changes (a soft or mixed reset: commit or remove them first)
 #   verify    run settings.verify in the branch's worktree, zero tokens. Pass:
 #             one line. Fail: nonzero, the output trimmed to its last 40 lines
 #             for the fix step. A command that changes the tree fails too.

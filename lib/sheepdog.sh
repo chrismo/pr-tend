@@ -40,15 +40,17 @@ worktree_for() {
     | awk -v ref="refs/heads/$1" '/^worktree / { wt = substr($0, 10) } $0 == "branch " ref { print wt; exit }'
 }
 
-# made_here <range>: every commit in <range> was committed by this repo's
-# user (a commit, amend, cherry-pick or rebase here sets the committer; a
-# fast-forward merge, pull or rebase onto the remote keeps the original one).
-# Only those may be dropped by a force-push (#86). No user.email: nothing is.
+# made_here <range>: every commit in <range> was authored and committed by
+# this repo's user. A commit, amend, cherry-pick or rebase here sets the
+# committer (a fast-forward merge, pull or rebase onto the remote keeps the
+# original one); the author survives a rebase, so a colleague's commit that a
+# restack replayed is still theirs. Only commits made here may be dropped by
+# a force-push (#86). No user.email: nothing is.
 made_here() {
-  local me committers
+  local me people
   me=$(git config user.email) && [[ -n $me ]] || return 1
-  committers=$(git log --format=%ce "$1") || return 1
-  [[ -z $(grep -vxF "$me" <<<"$committers") ]]
+  people=$(git log --format='%ae%n%ce' "$1") || return 1
+  [[ -z $(grep -vxF "$me" <<<"$people") ]]
 }
 
 # step_guidance <setting> <branch> <base> <default-file>: the guidance part of a

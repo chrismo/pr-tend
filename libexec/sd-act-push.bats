@@ -177,6 +177,24 @@ inherit_main() { git branch -q --set-upstream-to=origin/main "${1:-feat}"; }
   [ "$(remote feat)" = "$theirs" ]
 }
 
+@test "someone's commit taken, then replayed by a restack and pushed, then reset away: still theirs, refused (#86)" {
+  inherit_main
+  upstream theirs
+  git fetch -q origin && git merge -q --ff-only origin/feat
+  (cd "$TMP/other" && git checkout -q main && git pull -q origin main && echo m >> main.txt && git add main.txt && git commit -qm m && git push -q origin main 2>/dev/null)
+  git fetch -q origin && git rebase -q origin/main
+  [ "$(git log -1 --format=%ae)" = them@example.com ]
+  [ "$(git log -1 --format=%ce)" = t@example.com ]
+  "$SD_ACT" push >/dev/null
+  pushed=$(remote feat)
+  [ "$pushed" = "$(git rev-parse feat)" ]
+  git reset -q --hard HEAD~1
+  run "$SD_ACT" push
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"didn't make them all"* ]] || false
+  [ "$(remote feat)" = "$pushed" ]
+}
+
 @test "a branch checked out nowhere has no worktree to be dirty: its own pushed commit is dropped (#86)" {
   commit oops
   "$SD_ACT" push >/dev/null
