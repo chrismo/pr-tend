@@ -79,6 +79,8 @@ harness_result() {
     | values coalesce(structured_output, parse_sup(coalesce(result, "")), null)' "$1" 2>/dev/null | harness_object
 }
 
+harness_branch() { [[ -n ${HARNESS_BRANCH:-} ]] && echo "$HARNESS_BRANCH" || git branch --show-current 2>/dev/null; }
+
 # harness_usage <harness> <session-id> <mode> <status> <claude-json>: one TSV
 # row per step in $SHEEPDOG_STATE_DIR/usage.tsv (header when new): time, repo,
 # branch, step, harness, session, mode, status, then claude's cost, tokens
@@ -87,7 +89,7 @@ harness_result() {
 harness_usage() {
   local dir=${SHEEPDOG_STATE_DIR:-$HOME/.local/state/sheepdog} repo branch nums=$'\t\t\t\t\t\t'
   repo=$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
-  branch=$(git branch --show-current 2>/dev/null)
+  branch=$(harness_branch)
   if [[ $1 == claude ]]; then
     nums=$(prc_line 'where kind(this) == "record"
       | values join([f"{coalesce(total_cost_usd, 0)}", f"{n(usage.input_tokens)}", f"{n(usage.cache_creation_input_tokens)}",
@@ -95,7 +97,8 @@ harness_usage() {
       && [[ -n $nums ]] || nums=$'\t\t\t\t\t\t'
   fi
   mkdir -p "$dir" 2>/dev/null || return 0
-  # >> for the header too: two steps at once could both see no file.
+  # >> for the header too: two first steps at once can't truncate each
+  # other's row (a doubled header is possible, and harmless).
   [[ -s $dir/usage.tsv ]] \
     || printf 'time\trepo\tbranch\tstep\tharness\tsession\tmode\tstatus\tcost_usd\tinput\tcache_create\tcache_read\toutput\tduration_ms\tturns\n' >> "$dir/usage.tsv"
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$repo" "$branch" "${HARNESS_STEP:-}" "$1" "$2" "$3" "$4" "$nums" >> "$dir/usage.tsv"
@@ -110,7 +113,9 @@ harness_usage() {
 # the key. settings.stepBudget (USD, read here for the worktree's branch)
 # caps a claude step through --max-budget-usd; 0 is no cap. Every step
 # appends a row to $SHEEPDOG_STATE_DIR/usage.tsv (harness_usage), with
-# $HARNESS_STEP as the step name when the caller sets it.
+# $HARNESS_STEP as the step name when the caller sets it. The branch is
+# $HARNESS_BRANCH, else the worktree's: a step that runs mid-rebase (restack
+# --resolve) has a detached HEAD, so callers set it.
 # The harness's stderr (claude can put protocol JSON there) shows only when
 # the step fails, and then all at once: nothing streams while it runs.
 harness_run() {
@@ -133,8 +138,7 @@ harness_run() {
       [[ $use_key == true ]] || env=(env -u ANTHROPIC_API_KEY)
       if [[ -n $model ]]; then typed+=(--model "$model"); fi
       if [[ -n $effort ]]; then typed+=(--effort "$effort"); fi
-      budget=$(prc_get settings.stepBudget "$(git branch --show-current 2>/dev/null)" false) \
-        || { (( $? == 3 )) && budget=0; } || { echo "sd config failed" >&2; rm -f "$err"; return 1; }
+      budget=$(prc_get settings.stepBudget "$(harness_branch)" false) || { echo "sd config failed" >&2; rm -f "$err"; return 1; }
       [[ $budget != -* ]] || { echo "settings.stepBudget must be 0 or more: $budget" >&2; rm -f "$err"; return 1; }
       [[ $budget =~ ^0*(\.0*)?$ ]] || { typed+=(--max-budget-usd "$budget"); cap=" (settings.stepBudget $budget USD)"; } ;;
     pi)

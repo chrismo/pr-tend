@@ -360,6 +360,8 @@ EOF
   [ -e "$FX/claude.args" ]
   run lock
   [ "$status" -ne 0 ]
+  # The step's usage row names the step and the branch.
+  [[ "$(sed -n 2p "$SHEEPDOG_STATE_DIR/usage.tsv")" == *$'\tfeat\timplement\tclaude\t'* ]]
 }
 
 @test "--force runs an agent step over a live lock" {

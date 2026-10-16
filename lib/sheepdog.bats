@@ -149,6 +149,16 @@ EOF
   [[ "$(sed -n 3p "$SHEEPDOG_STATE_DIR/usage.tsv")" == *$'\tfeat\t\tclaude\t'* ]]
 }
 
+@test "harness_run: HARNESS_BRANCH names the branch when the worktree is detached (restack --resolve)" {
+  harness_stubs
+  git switch -q --detach
+  HARNESS_BRANCH=feat run harness_run claude sid1 resume 30 "do it" '{}'
+  [ "$status" -eq 0 ]
+  [[ "$(sed -n 2p "$SHEEPDOG_STATE_DIR/usage.tsv")" == *$'\tfeat\t\tclaude\tsid1\t'* ]]
+  run harness_run claude sid1 resume 30 "do it" '{}'
+  [[ "$(sed -n 3p "$SHEEPDOG_STATE_DIR/usage.tsv")" == *$'\t\t\tclaude\tsid1\t'* ]]
+}
+
 @test "harness_run: a failed step is logged with its status, and pi's row has no cost" {
   harness_stubs
   echo 1 > "$FX/status"
