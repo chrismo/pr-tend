@@ -51,10 +51,10 @@
 # Stale enrollments: a pass unenrolls a branch (git config only; never the
 # branch, its pins, a worktree or a PR) with no local branch at once, and one
 # merged, closed or checked out nowhere once it has been so for
-# settings.vacuumAfter seconds (default 7 days; 0 turns off these three). An
-# unsure pass (errors, stale) neither starts, resets nor acts on that clock,
-# and a new reason restarts it. Each timed unenroll notifies, once; one for no
-# local branch is only a pass line.
+# settings.vacuumAfter seconds (default 7 days; 0 turns off these three). A
+# pass whose sd state reported errors or stale data neither starts, resets nor
+# acts on that clock, and a new reason restarts it. Each timed unenroll
+# notifies, once; one for no local branch is only a pass line.
 #
 # Env:    SHEEPDOG_STATE_DIR (~/.local/state/sheepdog), STATUS_DIR (~/.claude/tab-status)
 #         SHEEPDOG_WATCH_TIMEOUT (120): seconds a fetch or sd state may take
@@ -293,11 +293,14 @@ load_worktrees() {
   done < <(git -C "$1" worktree list --porcelain)
 }
 
-# dur <seconds>: whole days, else hours, else minutes.
+# dur <seconds>: whole days, else hours, minutes or seconds; a negative
+# span (a clock running behind) reads 0s.
 dur() {
-  if (( $1 >= 86400 )); then echo "$(( $1 / 86400 ))d"
-  elif (( $1 >= 3600 )); then echo "$(( $1 / 3600 ))h"
-  else echo "$(( $1 / 60 ))m"; fi
+  local s=$(( $1 < 0 ? 0 : $1 ))
+  if (( s >= 86400 )); then echo "$(( s / 86400 ))d"
+  elif (( s >= 3600 )); then echo "$(( s / 3600 ))h"
+  elif (( s >= 60 )); then echo "$(( s / 60 ))m"
+  else echo "${s}s"; fi
 }
 
 enrolled_branches() {

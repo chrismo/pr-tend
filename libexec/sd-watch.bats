@@ -878,7 +878,7 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   enrolled feat
   aged feat 604801
   pass
-  ! enrolled feat
+  ! enrolled feat || false
   grep -q "feat.*unenrolled: checked out nowhere for 7d" "$SHEEPDOG_STATE_DIR/last-pass"
   [ "$(notified)" = "repo feat|unenrolled: checked out nowhere for 7d (sd act enroll feat to watch it again)" ]
   git rev-parse -q --verify refs/heads/feat
@@ -890,7 +890,7 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   pass
   aged feat 604801
   pass
-  ! enrolled feat
+  ! enrolled feat || false
   enroll feat
   pass
   enrolled feat
@@ -974,7 +974,7 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   git update-ref -d refs/heads/feat
   enrolled feat
   pass
-  ! enrolled feat
+  ! enrolled feat || false
   grep -q "feat.*unenrolled: no local branch" "$SHEEPDOG_STATE_DIR/last-pass"
   [ ! -e "$PS_FIXTURES/calls" ]
 }
@@ -1007,12 +1007,26 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   git switch -q main
   ps_fixture feat '.ci.verdict = "pending"'
   pass
+  aged feat 90
   run "$SD_WATCH" vacuum
-  [[ "$output" == *"checked out nowhere for 0m: unenrolled after 2h"* ]] || false
+  [[ "$output" == *"checked out nowhere for 1m: unenrolled after 2h"* ]] || false
   printf '{not json\n' > "$SHEEPDOG_CONFIG"
   run "$SD_WATCH" vacuum
   [ "$status" -ne 0 ]
   [[ "$output" == *"sd config failed"* ]] || false
+}
+
+@test "vacuum: durations under a minute read in seconds, and a clock running behind reads 0s" {
+  write_cfg '{"settings":{"vacuumAfter":30}}'
+  git switch -q main
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  aged feat 5
+  run "$SD_WATCH" vacuum
+  [[ "$output" == *"checked out nowhere for "[5-9]"s: unenrolled after 30s"* ]] || false
+  aged feat -3600
+  run "$SD_WATCH" vacuum
+  [[ "$output" == *"checked out nowhere for 0s: unenrolled after 30s"* ]] || false
 }
 
 @test "stale: vacuumAfter 0 never unenrolls" {
@@ -1043,11 +1057,12 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   git worktree add -q "$TMP/other-wt" other
   pass
   aged feat 172800
+  aged other 120
   local before; before=$(cat "$SHEEPDOG_STATE_DIR/last-pass")
   run "$SD_WATCH" vacuum
   [ "$status" -eq 0 ]
   [[ "$output" == *"repo  feat  checked out nowhere for 2d: unenrolled after 7d"* ]] || false
-  [[ "$output" == *"repo  other  merged for 0m: unenrolled after 7d"* ]] || false
+  [[ "$output" == *"repo  other  merged for 2m: unenrolled after 7d"* ]] || false
   enrolled feat && enrolled other
   [ "$(cat "$SHEEPDOG_STATE_DIR/last-pass")" = "$before" ]
 }
