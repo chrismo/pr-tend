@@ -22,10 +22,14 @@
 #             (refs/sheepdog/<b>/findings), counting those that block, and
 #             whether they're about HEAD (the same commit, or the same change
 #             rebased)
+#             review.bot also has triggered (when sd act trigger posted, by
+#             GitHub's clock), replied (a bot has posted since; null with no
+#             trigger time or when gh fails) and waited (seconds since)
 #   threads   what's owed, marked ! (blocks: unresolved threads, reviews
 #             requesting changes) or i (to read: bot review bodies and PR
 #             comments not yet marked handled)
-#   bot       the review bot's trigger comment (settings.botCommand), if any
+#   bot       the review bot's trigger comment (settings.botCommand), if any,
+#             and timeout (settings.botTimeout)
 #   session   pipeline enrollment, harness, session id, takeover lock
 #   fresh     false when GitHub's PR / parent-PR head differs from the local
 #             remote-tracking ref, i.e. sync and push answers need a fetch
@@ -49,8 +53,19 @@
 # post as users, counted as bots; a [bot] suffix is optional), botIgnore (bots
 # whose posts are never owed, e.g. github-actions preview links), botIgnoreBody
 # (regexes: bot reviews and PR comments whose body matches are never owed).
+# Either also keeps a bot's post from counting as the review bot's reply
+# after sd act trigger: any other bot's post does, so a CI or preview bot
+# that comments after a push belongs in one of them. So a botIgnoreBody
+# pattern must not match the review bot's own verdict (a clean "No issues
+# found" included), or that verdict never ends the wait. A reply is a new
+# review or comment: a bot that edits one sticky comment in place isn't seen,
+# and runs into bot-silent. Nor is the commit checked: a slow reply to an earlier
+# trigger that lands after a later one counts as the later one's reply.
+# botTimeout (seconds, 3600): how long to wait on that reply before
+# bot-silent.
 # State: branch.<name>.pr-{parent,tend,harness,session,lock}, branch.<name>.sd-handled
-# (multi-valued: node ids of bot reviews/comments already dealt with).
+# (multi-valued: node ids of bot reviews/comments already dealt with),
+# branch.<name>.sd-bot-triggered (when sd act trigger posted its comment).
 
 set -euo pipefail
 
@@ -81,8 +96,8 @@ query($owner: String!, $repo: String!, $branch: String!, $commits: Boolean!) {
           first: comments(first: 1) { nodes { author { __typename login } url body } }
           last: comments(last: 1) { nodes { author { __typename login } } }
         } }
-        reviews(last: 50) { nodes { id url state body author { __typename login } } }
-        comments(last: 50) { nodes { id url body author { __typename login } } }
+        reviews(last: 50) { nodes { id url state body createdAt submittedAt author { __typename login } } }
+        comments(last: 50) { nodes { id url body createdAt author { __typename login } } }
       }
     }
   }
@@ -126,6 +141,8 @@ bots=$(prc_get settings.botLogin "$branch" false json) || die "sd config failed"
 ignore=$(prc_get settings.botIgnore "$branch" false json) || die "sd config failed"
 ignore_body=$(prc_get settings.botIgnoreBody "$branch" false json) || die "sd config failed"
 bot_command=$(prc_get settings.botCommand "$branch" false) || die "sd config failed"
+bot_timeout=$(prc_get settings.botTimeout "$branch" false) || die "sd config failed"
+bot_triggered=$(cfg sd-bot-triggered)   # when trigger posted its comment, by GitHub's clock (#63)
 review_rounds=$(prc_get settings.reviewRounds "$branch" false) || die "sd config failed"
 [[ $(prc_val "$ignore_body" 'len(coalesce([unnest this | where is_error(regexp(this, ""))], [])) == 0' 2>/dev/null) == true ]] \
   || die "botIgnoreBody has an invalid regex: $ignore_body"
@@ -448,10 +465,33 @@ fn ci_k(v): v in ["pending", "PENDING", "EXPECTED"] ? "pending"
 fn ci_class(x): ci_k(coalesce(x.__typename == "CheckRun" ? (x.status != "COMPLETED" ? "pending" : x.conclusion) : x.state, ""))
 fn cnt(a, t): len(coalesce([unnest {t, x: a} | where x.type == t], []))
 fn matches(b, res): len(coalesce([unnest {b, re: res} | where len(regexp(re, b)) > 0], [])) > 0
+-- The bot pin, plus whether the bot has said anything since trigger posted
+-- its comment (br: the ids of its reviews and comments posted after that,
+-- by GitHub's clock on both sides: a review's submittedAt, as its createdAt
+-- is when it was started; minus botIgnoreBody placeholders; a blank body
+-- counts, as a review of only inline comments has one) and how long that has
+-- been, up to s.now (passed in: now() would make the output differ between
+-- runs). null when there is no pin or no trigger time (a pin from before
+-- #63, or by hand), or gh failed. Any bot not ignored counts (see Config in
+-- the header).
+fn bot_pin(s, br): nul(s.r_bot) ? null : {...s.r_bot,
+    triggered: s.bot_triggered,
+    replied: on(s.r_bot.status == "none") or s.bot_triggered is null or not s.gh_ok ? null : len(br) > 0,
+    waited: on(s.r_bot.status == "none") or s.bot_triggered is null or not s.gh_ok ? null
+            : cast(s.now::time - s.bot_triggered::time, <int64>) / 1000000000}
 values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
         g: {viewer, bots: coalesce([unnest bots | values unbot(this)], []),
             ign: coalesce([unnest ignore | values unbot(this)], []), ignore_body, handled}}
 | values {a, c, g,
+    br: coalesce([
+      unnest {g: {...g, t: coalesce(a.bot_triggered, "~")},
+              x: [...coalesce(a.pr.reviews.nodes, []), ...coalesce(a.pr.comments.nodes, [])]}
+      -- posted strictly after the trigger, which keeps out the trigger comment
+      -- itself when the viewer is a Bot account
+      | where is_bot(coalesce(x.author, {}), g.bots) and not ignored(coalesce(x.author, {}), g.ign)
+            and coalesce(x.submittedAt, x.createdAt, "") > g.t and not matches(coalesce(x.body, ""), g.ignore_body)
+      | values x.id
+    ], []),
     ctx: coalesce([
       unnest coalesce(c.statusCheckRollup.contexts.nodes, [])
       | values {name: coalesce(name, context, null), k: ci_class(this)}
@@ -463,7 +503,7 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
       | values r
       | count {r: this, j}
     ], [])}
-| values {a, c, ctx, owed: [
+| values {a, c, ctx, br, owed: [
     ...coalesce([
       unnest {g, t: coalesce(a.pr.reviewThreads.nodes, [])}
       | where not on(t.isResolved) and coalesce(t.last.nodes[0].author.login, "") != g.viewer
@@ -492,7 +532,7 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
       | values {id: e.r.id, type: "review", path: null, line: null, outdated: null, kind: "human",
                 last: coalesce(e.r.author.login, null), mark: "!", ...detail(e.r)}
     ], [])]}
-| values {s: a, c, ctx, owed, ob: coalesce([unnest owed | where kind == "bot"], [])}
+| values {s: a, c, ctx, br, owed, ob: coalesce([unnest owed | where kind == "bot"], [])}
 | values {
     branch: s.branch, head: s.head,
     pr: nul(s.pr) ? null : {number: s.pr.number, url: s.pr.url, state: s.pr.state, draft: s.pr.isDraft,
@@ -518,7 +558,7 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
                   : len(coalesce([unnest ctx | where k == "cancelled"], [])) > 0 ? "inconclusive" : "green",
          failing: coalesce([unnest ctx | where k == "fail" | values name], []),
          pending: coalesce([unnest ctx | where k == "pending" | values name], [])},
-    review: {local: s.r_local, bot: s.r_bot, accepted: s.r_accepted,
+    review: {local: s.r_local, bot: bot_pin(s, br), accepted: s.r_accepted,
              findings: nul(s.r_findings) ? null
                : {sha: s.r_findings.head, round: s.r_findings.round,
                   n: len(coalesce([unnest s.r_findings.findings | where coalesce(severity, "") != "nit"], [])),
@@ -532,7 +572,7 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
               blocking: s.gh_ok ? len(coalesce([unnest owed | where mark == "!"], [])) : null,
               info: s.gh_ok ? len(coalesce([unnest owed | where mark == "i"], [])) : null,
               items: owed},
-    bot: {command: nn(s.bot_command)},
+    bot: {command: nn(s.bot_command), timeout: s.bot_timeout},
     session: {enrolled: s.enrolled == "true", harness: nn(s.harness), id: nn(s.session), locked: s.lock != ""},
     stored: {handled: s.handled,
              refs: unflatten(coalesce([
@@ -549,12 +589,12 @@ refs_json=$(git for-each-ref --format='%(refname) %(objectname)' "refs/sheepdog/
 args=$(printf '{"branch": %s, "head": %s, "pr": %s, "parent": %s, "parent_source": %s, "parent_pr": %s, "parent_merged": %s, "parent_local": %s, "parent_remote": %s, "parent_unpushed": %s,
   "target": %s, "default_branch": %s, "sync_ahead": %s, "behind": %s, "up_to_date": %s, "old_base": %s, "by_tree": %s, "conflict": %s, "undone": %s,
   "remote_sha": %s, "ahead": %s, "push_behind": %s, "diverged": %s, "remote_ours": %s, "theirs": %s, "remote_made": %s, "dirty": %s, "stale": %s,
-  "r_local": %s, "r_bot": %s, "r_accepted": %s, "r_findings": %s, "r_findings_at_head": %s, "review_rounds": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s,
+  "r_local": %s, "r_bot": %s, "r_accepted": %s, "r_findings": %s, "r_findings_at_head": %s, "review_rounds": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s, "bot_triggered": %s, "bot_timeout": %s, "now": %s,
   "ignore": %s, "ignore_body": %s, "handled": %s, "refs": %s, "enrolled": %s, "harness": %s, "session": %s, "lock": %s, "errors": %s}\n' \
   "$(jstr "$branch")" "$(jstr "$head")" "$pr" "$(jstr "$parent")" "$(jstr "$parent_source")" "$parent_pr" "$parent_merged" "$parent_local" "$parent_remote" "$parent_unpushed" \
   "$(jstr "$target")" "$(jstr "$default_branch")" "$sync_ahead" "$behind" "$up_to_date" "$(jnull "$old_base")" "$by_tree" "$conflict" "$undone" \
   "$(jnull "$remote_sha")" "$ahead" "$push_behind" "$diverged" "$remote_ours" "$theirs" "$remote_made" "$dirty" "$stale_json" \
-  "${review[local]}" "${review[bot]}" "${review[accepted]}" "$r_findings" "$r_findings_at_head" "$review_rounds" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" \
+  "${review[local]}" "${review[bot]}" "${review[accepted]}" "$r_findings" "$r_findings_at_head" "$review_rounds" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" "$(jnull "$bot_triggered")" "$bot_timeout" "$(jstr "$(date -u +%Y-%m-%dT%H:%M:%SZ)")" \
   "$ignore" "$ignore_body" "$(jlist "branch.$branch.sd-handled")" "$refs_json" \
   "$(jstr "$(cfg sheepdog)")" "$(jstr "$(cfg sd-harness)")" "$(jstr "$(cfg sd-session)")" "$(jstr "$(cfg sd-lock)")" "$errors_json")
 state=$(prc_json "$ASSEMBLE" "$args") || die "couldn't assemble the state"
@@ -568,7 +608,7 @@ fi
 
 read -r -d '' LINE <<'EOF' || true
 fn pin(k, p): nul(p) or on(p.status == "none") ? null
-              : f"{k} {p.status in ["covered", "rewritten-same"] ? "✓" : p.status == "uncovered" ? f"+{p.uncovered}"
+              : f"{k} {p.status in ["covered", "rewritten-same"] ? (on(p.replied == false) ? "⏳" : "✓") : p.status == "uncovered" ? f"+{p.uncovered}"
                       : p.status == "rewritten-changed" ? "✗" : "?"}"
 values [
   nul(pr) ? "no PR" : f"{pr.url} {on(pr.draft) ? "draft" : lower(pr.state)}",

@@ -3,12 +3,13 @@
 bats_require_minimum_version 1.5.0
 
 # Test suite for `sd act trigger` (A5): post settings.botCommand as a PR
-# comment and pin bot at HEAD with its base; skip when already pinned there.
+# comment and pin bot at HEAD with its base, recording when GitHub says it
+# was posted; skip when already pinned there unless --force.
 # The bot reviews what is on GitHub, so an unpushed HEAD is refused, and a
 # local review that doesn't cover HEAD is a soft refusal (--force).
 #
 # Real git and the real sd state. gh is a stub: graphql answers from
-# $GH/<branch>.json, the PR id lookup and addComment are logged to $GH/calls.
+# $GH/<branch>.json, the REST trigger comment is logged to $GH/calls.
 
 SD_ACT="$BATS_TEST_DIRNAME/sd-act"
 SD_CONFIG="$BATS_TEST_DIRNAME/sd-config"
@@ -29,11 +30,15 @@ for a; do
   [[ $a == query=* ]] && q=${a#query=}
   [[ $a == body=* || $a == subject=* || $a == url=* ]] && fields+=("$a")
 done
+# REST: the trigger comment, answered with GitHub's own created_at (or $GH/created_at's).
+if [[ $1 == api && $2 == repos/*/issues/*/comments ]]; then
+  printf 'comment %s %s\n' "$2" "${fields[*]}" >> "$GH/calls"
+  [[ -e $GH/fail-comment ]] && { echo "gh: boom" >&2; exit 1; }
+  jq -n --arg t "$(cat "$GH/created_at" 2>/dev/null || echo 2026-10-16T12:00:00Z)" '{id: 1, created_at: (if $t == "" then null else $t end)}' \
+    | { filter=""; for a; do [[ $prev == --jq ]] && filter=$a; prev=$a; done; if [[ -n $filter ]]; then jq -r "$filter"; else cat; fi; }
+  exit 0
+fi
 case $q in
-  *addComment*) printf 'addComment %s\n' "${fields[*]}" >> "$GH/calls"
-    [[ -e $GH/fail-comment ]] && { echo "gh: boom" >&2; exit 1; }
-    echo '{"data":{"addComment":{"clientMutationId":null}}}' ;;
-  *resource\(url*) printf 'resource %s\n' "${fields[*]}" >> "$GH/calls"; echo '{"data":{"resource":{"id":"PR_node7"}}}' ;;
   *) if [[ -f $GH/$b.json ]]; then cat "$GH/$b.json"
      else echo '{"data":{"viewer":{"login":"me"},"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"nodes":[]}}}}'
      fi ;;
@@ -58,27 +63,49 @@ EOF
 open_pr() { # open_pr <branch> <number> [state]
   jq -n --arg b "$1" --argjson n "$2" --arg st "${3:-OPEN}" --arg h "$(git rev-parse "$1")" '{data: {viewer: {login: "me"},
     repository: {defaultBranchRef: {name: "main"},
-      pullRequests: {nodes: [{number: $n, url: "https://example/pr/7", state: $st, isDraft: true, baseRefName: "main",
+      pullRequests: {nodes: [{number: $n, url: "https://github.com/upstream/proj/pull/\($n)", state: $st, isDraft: true, baseRefName: "main",
                               headRefName: $b, headRefOid: $h, isCrossRepository: false}]}}}}' > "$GH/$1.json"
 }
 calls() { cat "$GH/calls" 2>/dev/null; }
 pin() { git rev-parse -q --verify "refs/sheepdog/feat/$1" || true; }
 
-@test "trigger: posts the bot command on the PR and pins bot at HEAD with its base" {
+@test "trigger: posts the bot command on the PR (REST) and pins bot at HEAD with its base" {
   run "$SD_ACT" trigger
   [ "$status" -eq 0 ]
-  [[ "$(calls)" == *"addComment subject=PR_node7 body=/review-bot"* ]]
+  # The PR's repo from its URL, not {owner}/{repo}: gh's default repo may be a fork.
+  [[ "$(calls)" == *"comment repos/upstream/proj/issues/7/comments body=/review-bot"* ]]
   [ "$(pin bot)" = "$(git rev-parse HEAD)" ]
   [ "$(pin bot-base)" = "$(git rev-parse origin/main)" ]
   [[ "$output" == *"triggered"* ]]
+  [[ "$output" == *"waiting"* ]]
 }
 
-@test "trigger: already pinned at HEAD: nothing posted" {
+@test "trigger: records when the comment was posted, by GitHub's clock" {
+  echo 2026-10-16T12:34:56Z > "$GH/created_at"
+  run "$SD_ACT" trigger
+  [ "$status" -eq 0 ]
+  [ "$(git config branch.feat.sd-bot-triggered)" = 2026-10-16T12:34:56Z ]
+}
+
+@test "trigger: no created_at in the answer: the local clock, and a note" {
+  : > "$GH/created_at"
+  run --separate-stderr "$SD_ACT" trigger
+  [ "$status" -eq 0 ]
+  [[ "$(git config branch.feat.sd-bot-triggered)" =~ ^20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:]+Z$ ]]
+  [[ "$stderr" == *"local clock"* ]]
+}
+
+@test "trigger: already pinned at HEAD: nothing posted; --force posts again and resets the time" {
   git update-ref refs/sheepdog/feat/bot HEAD
+  git config branch.feat.sd-bot-triggered 2026-10-15T00:00:00Z
   run "$SD_ACT" trigger
   [ "$status" -eq 0 ]
   [[ "$output" == *"already"* ]]
   [ -z "$(calls)" ]
+  run "$SD_ACT" trigger --force
+  [ "$status" -eq 0 ]
+  [[ "$(calls)" == *"comment "* ]]
+  [ "$(git config branch.feat.sd-bot-triggered)" = 2026-10-16T12:00:00Z ]
 }
 
 @test "trigger: HEAD not on the remote yet is refused" {
@@ -115,6 +142,16 @@ pin() { git rev-parse -q --verify "refs/sheepdog/feat/$1" || true; }
   [ -z "$(pin bot)" ]
 }
 
+@test "trigger: --force on a pinned HEAD the remote doesn't have is still refused" {
+  echo d >> file.txt && git commit -qam "add d"
+  git update-ref refs/sheepdog/feat/local HEAD
+  git update-ref refs/sheepdog/feat/bot HEAD
+  run "$SD_ACT" trigger --force
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"push"* ]] || false
+  [ -z "$(calls)" ]
+}
+
 @test "trigger: no PR is refused" {
   rm "$GH/feat.json"
   run "$SD_ACT" trigger
@@ -148,9 +185,11 @@ pin() { git rev-parse -q --verify "refs/sheepdog/feat/$1" || true; }
   [ "$(pin bot)" = "$(git rev-parse HEAD)" ]
 }
 
-@test "trigger: the comment failing pins nothing" {
+@test "trigger: the comment failing pins nothing and records no time" {
   touch "$GH/fail-comment"
   run "$SD_ACT" trigger
   [ "$status" -ne 0 ]
   [ -z "$(pin bot)" ]
+  run git config --get branch.feat.sd-bot-triggered
+  [ "$status" -ne 0 ]
 }

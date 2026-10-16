@@ -149,7 +149,8 @@
 #             default branch ships onto it and rewrites sd-parent. Spends
 #             tokens unless a description for HEAD and the target is stored
 #   trigger   post settings.botCommand on the PR so the review bot runs, and
-#             pin bot at HEAD; nothing when already pinned there. HEAD must
+#             pin bot at HEAD, recording when (sd state then waits on the
+#             bot's reply); nothing when already pinned there. HEAD must
 #             be on the remote (the bot reviews what GitHub has); the local
 #             review not covering HEAD is a soft refusal
 #   attach    takeover (A9): hold branch.<b>.sd-lock, open the branch's
@@ -170,7 +171,8 @@
 #   implement, review, describe   the same
 #   attach          take over a lock another attach still holds
 #   ci-fix          run again on a red the agent already called flaky
-#   trigger         even when the local review doesn't cover HEAD
+#   trigger         even when the local review doesn't cover HEAD, or the bot
+#                   is already pinned at HEAD (trigger it again)
 #   unregister      even with branches still enrolled (the watcher drops them)
 #
 # start options:
@@ -195,7 +197,8 @@
 #
 # State (git config): branch.<b>.sheepdog, .sd-task, .sd-parent, .sd-session,
 # .sd-harness, .sd-handled, .sd-lock ("<pid>@<host> <time>" while attached),
-# .sd-ci-fix ("<sha> fixed|flaky|autofix", the last red ci-fix handled);
+# .sd-ci-fix ("<sha> fixed|flaky|autofix", the last red ci-fix handled),
+# .sd-bot-triggered (when trigger's comment was posted, by GitHub's clock);
 # sheepdog.repo (global) lists the enrolled repos.
 #
 # <branch> defaults to the current one.
@@ -1469,38 +1472,50 @@ values {s: this, why: sj(coalesce(errors, []), "; ")}
 | values case
     when nul(s.pr) then {hard: f"no PR for {s.branch}{why != "" ? f": {why}" : ""}"}
     when on(s.pr.state != "OPEN") then {hard: f"PR #{s.pr.number} is {lower(s.pr.state)}"}
-    when on(s.review.bot.status == "covered") then {done: f"the bot was already triggered on {s.head[0:7]}"}
     when n(s.push.behind) > 0 and n(s.push.ahead) == 0 and on(s.push.remote_ours) and on(s.push.remote_made) and on(s.push.dirty)
       then {hard: f"{s.branch} isn't on the remote at HEAD; the bot reviews what GitHub has: commit or remove the worktree's changes, then sd act push"}
     when nul(s.push.remote_sha) or n(s.push.ahead) > 0 or on(s.push.diverged) or (n(s.push.behind) > 0 and on(s.push.remote_ours) and on(s.push.remote_made))
       then {hard: f"{s.branch} isn't on the remote at HEAD; the bot reviews what GitHub has: sd act push first"}
     when n(s.push.behind) > 0
       then {hard: f"{s.branch} isn't on the remote at HEAD; the bot reviews what GitHub has: take its commits first (git merge --ff-only)"}
+    when on(s.review.bot.status == "covered") then {done: f"the bot was already triggered on {s.head[0:7]}"}
     when not (coalesce(s.review.local.status, "") in ["covered", "rewritten-same"])
       then {soft: "the local review doesn't cover HEAD (sd act review)"}
     else {} end
 EOF
 
+# The comment goes over REST, which answers with its created_at: the trigger
+# time by GitHub's clock, which sd state compares with the bot's replies
+# (also GitHub's clock), so a skewed laptop can't make a reply look older
+# than the trigger (#63). The repo comes from the PR's URL, not
+# {owner}/{repo}: gh's default repo may be a fork.
 trigger() {
-  local b=$branch state command gate line head base pr_id
+  local b=$branch state command gate line head base number url at
   command=$(prc_get settings.botCommand "$b" false) || die "sd config failed"
   [[ -n $command ]] || die "no settings.botCommand configured: the comment that makes the review bot run"
   state=$(sd-state --json "$b") || die "sd state failed"
   gate=$(prc_json "$TRIGGER_GATE" "$state") || die "can't parse sd state's answer"
   line=$(gate_get "$gate" hard); [[ -z $line ]] || die "$line"
-  line=$(gate_get "$gate" done); if [[ -n $line ]]; then echo "$line"; return; fi
+  line=$(gate_get "$gate" done)
+  if [[ -n $line ]] && ! $force; then echo "$line (--force to trigger again)"; return; fi
   line=$(gate_get "$gate" soft)
   if [[ -n $line ]] && ! $force; then die "not triggering the bot on $b: $line (--force to trigger anyway)"; fi
   head=$(git rev-parse "refs/heads/$b")
   base=$(prc_val "$state" 'coalesce(sync.old_base, "")')
   [[ -n $base ]] || die "can't find $b's base: $(no_base_why "$b" "$state")"
-  pr_id=$(gql -f url="$(prc_val "$state" pr.url)" \
-            -f query='query($url: URI!) { resource(url: $url) { ... on PullRequest { id } } }' \
-          | prc_line 'values data.resource.id') || die "couldn't look up PR #$(prc_val "$state" pr.number)"
-  gql -f query='mutation($subject: ID!, $body: String!) { addComment(input: {subjectId: $subject, body: $body}) { clientMutationId } }' \
-      -f subject="$pr_id" -f body="$command" >/dev/null || die "posting the trigger comment failed; nothing pinned"
+  number=$(prc_val "$state" pr.number)
+  url=$(prc_val "$state" pr.url)
+  [[ $url =~ ^https://([^/]+)/([^/]+/[^/]+)/pull/[0-9]+$ ]] || die "can't tell PR #$number's repo from its URL: $url"
+  at=$(gh api "repos/${BASH_REMATCH[2]}/issues/$number/comments" --hostname "${BASH_REMATCH[1]}" \
+         -f body="$command" --jq '.created_at // ""') \
+    || die "posting the trigger comment failed; nothing pinned"
+  if [[ ! $at =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]]; then
+    at=$(date -u +%FT%TZ)
+    echo "sd act: warning: GitHub's answer had no created_at; the trigger time is this machine's local clock" >&2
+  fi
   pin_write "$b" bot "$head" "$base"
-  echo "triggered the review bot on PR #$(prc_val "$state" pr.number) with \"$command\"; bot pinned at ${head:0:7}"
+  git config "branch.$b.sd-bot-triggered" "$at"
+  echo "triggered the review bot on PR #$number with \"$command\"; bot pinned at ${head:0:7}, waiting for its reply"
 }
 
 # ── push ─────────────────────────────────────────────────────────────────────

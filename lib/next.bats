@@ -407,6 +407,41 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(keys "${st[@]}" '.pr.draft = true' '.pr.merge_state = "DRAFT"')" = bot-trigger ]
 }
 
+@test "bot triggered, no reply yet: wait on the bot; not ready, not draft-ready" {
+  local st=('.bot = {command: "/review-bot", timeout: 3600}' '.review.bot = {sha: "h1", status: "covered", triggered: "t", replied: false, waited: 60}')
+  [ "$(keys "${st[@]}")" = bot-wait ]
+  [ "$(step bot-wait who "${st[@]}")" = wait ]
+  [ "$(step bot-wait say "${st[@]}")" = "waiting on the review bot (/review-bot)" ]
+  [ "$(step bot-wait cmd "${st[@]}")" = null ]
+  [ "$(keys "${st[@]}" '.pr.draft = true' '.pr.merge_state = "DRAFT"')" = bot-wait ]
+}
+
+@test "bot waiting and CI cancelled: the rerun (a run step) comes before the wait" {
+  [ "$(keys '.bot = {command: "/review-bot", timeout: 3600}' '.review.bot = {sha: "h1", status: "covered", triggered: "t", replied: false, waited: 60}' \
+            '.ci.verdict = "inconclusive"')" = "ci-rerun bot-wait" ]
+}
+
+@test "bot replied since the trigger: ready" {
+  [ "$(keys '.bot = {command: "/review-bot", timeout: 3600}' '.review.bot = {sha: "h1", status: "covered", triggered: "t", replied: true, waited: 60}')" = ready ]
+}
+
+@test "bot silent past settings.botTimeout: chrismo looks, or triggers again" {
+  local st=('.bot = {command: "/review-bot", timeout: 3600}' '.review.bot = {sha: "h1", status: "covered", triggered: "t", replied: false, waited: 4000}')
+  [ "$(keys "${st[@]}")" = bot-silent ]
+  [ "$(step bot-silent who "${st[@]}")" = you ]
+  [ "$(step bot-silent say "${st[@]}")" = "the review bot hasn't answered in 66 min: check it, trigger it again, or accept HEAD as reviewed (sd act review --accept)" ]
+  [ "$(step bot-silent cmd "${st[@]}")" = "sd act trigger --force" ]
+}
+
+@test "bot silent, but HEAD accepted: no wait on the bot; ready" {
+  [ "$(keys '.bot = {command: "/review-bot", timeout: 3600}' '.review.bot = {sha: "h1", status: "covered", triggered: "t", replied: false, waited: 4000}' \
+            '.review.accepted = {sha: "h1", status: "covered"}')" = ready ]
+}
+
+@test "a bot pin without a trigger time counts as reviewed, as before" {
+  [ "$(keys '.bot = {command: "/review-bot", timeout: 3600}' '.review.bot = {sha: "h1", status: "covered", triggered: null, replied: null, waited: null}')" = ready ]
+}
+
 @test "review: a pin that covers HEAD means no review step" {
   [ "$(keys '.review.local = {sha: "x", status: "uncovered", uncovered: 2}' \
            '.review.accepted = {sha: "h1", status: "covered"}')" = ready ]
