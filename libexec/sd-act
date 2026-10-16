@@ -967,13 +967,22 @@ ship() {
   parent=${parent:-$(prc_val "$state" sync.default)}
   if [[ $parent != "$(prc_val "$state" sync.default)" ]]; then
     # Like RESTACK_GATE: a parent whose state is unknown or closed is nobody's
-    # to ship onto; a merged one means restack first; a missing one, ship it.
-    case $(prc_val "$state" 'parent.merged is null ? "unknown" : on(parent.pr.state == "CLOSED") ? "closed" : on(parent.merged) ? "merged" : "open"') in
+    # to ship onto; a merged one means restack first, unless the branch is
+    # already on the target (a fast-forward or rebase merge), in which case
+    # the parent is the default branch from here on; a missing one, ship it.
+    local pstate
+    pstate=$(prc_val "$state" 'parent.merged is null ? "unknown" : on(parent.pr.state == "CLOSED") ? "closed"
+      : on(parent.merged) ? (on(sync.up_to_date) ? "merged-on-target" : "merged") : "open"') \
+      || die "can't parse sd state's answer"
+    case $pstate in
+      open) ;;
       unknown) die "can't tell whether $parent merged: $(prc_val "$state" 'sj(coalesce(errors, []), "; ")')" ;;
       closed) die "parent $parent (#$(prc_val "$state" parent.pr.number)) was closed without merging: decide what $b targets (git config branch.$b.sd-parent <branch>), then ship" ;;
       merged) die "parent $parent has merged: sd act restack first, which lands $b on $(prc_val "$state" sync.target) and rewrites sd-parent" ;;
+      merged-on-target) parent_to_default "$b" "$state"; parent=$(prc_val "$state" sync.default) ;;
+      *) die "can't read the parent's state from sd state: $pstate" ;;
     esac
-    git -C "$wt" show-ref -q --verify "refs/remotes/$remote/$parent" \
+    [[ $pstate == merged-on-target ]] || git -C "$wt" show-ref -q --verify "refs/remotes/$remote/$parent" \
       || die "parent $parent isn't on $remote: ship it first (sd act ship $parent)"
   fi
   prc_line 'where not (coalesce(review.local.status, "none") in ["covered", "rewritten-same"])

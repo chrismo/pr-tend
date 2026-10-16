@@ -218,7 +218,23 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   run "$SD_ACT" ship
   [ "$status" -ne 0 ]
   [[ "$output" == *"A (#1) was closed without merging"*"sd-parent"* ]]
+  [ ! -e "$FX/claude.args" ]
+  [ -z "$(remote feat)" ]
   [ -z "$(calls)" ]
+}
+
+@test "ship: a parent merged by fast-forward, so the branch is already on main: ships onto main and rewrites sd-parent" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
+  a_head=$(git rev-parse A)
+  git switch -q feat && git rebase -q A && git config branch.feat.sd-parent A
+  (cd "$TMP/other" && git fetch -q origin && git checkout -q main && git merge -q --ff-only origin/A \
+     && git push -q origin main 2>/dev/null && git push -q origin :A 2>/dev/null)
+  jq -n --arg h "$a_head" '{data: {viewer: {login: "me"}, repository: {defaultBranchRef: {name: "main"},
+    pullRequests: {nodes: [{number: 1, state: "MERGED", baseRefName: "main", headRefName: "A", headRefOid: $h, isCrossRepository: false}]}}}}' > "$GH/A.json"
+  run "$SD_ACT" ship
+  [ "$status" -eq 0 ]
+  [[ "$(calls)" == "pr create --draft --base main --head feat "* ]]
+  [ "$(git config branch.feat.sd-parent)" = main ]
 }
 
 @test "ship: a parent whose PR can't be looked up is refused, never shipped onto" {
@@ -228,6 +244,8 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   run "$SD_ACT" ship
   [ "$status" -ne 0 ]
   [[ "$output" == *"can't tell whether A merged"* ]]
+  [ ! -e "$FX/claude.args" ]
+  [ -z "$(remote feat)" ]
   [ -z "$(calls)" ]
 }
 
