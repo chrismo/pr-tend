@@ -738,8 +738,9 @@ from running them.
 6. **Retarget**, pulled out of the old step 6: after a parent merges, restack
    onto `main` and change the PR's base. It is stack maintenance, so it sits
    next to restack. Done 2026-10-14: `sd act retarget` edits the base (GitHub
-   usually already did, on the parent's branch delete) and both it and a
-   restack that lands on the default branch rewrite `sd-parent` to it. A
+   usually already did, on the parent's branch delete) and rewrites
+   `sd-parent` to it; a restack that lands on the default branch does too,
+   unless the PR still targets the merged parent (then retarget does it, #82). A
    parent closed without merging is a `parent-closed` step for chrismo, and
    restack and retarget refuse. [#8]
 7. `sd act verify` — the zero-token half of the old step 5. Gates every later
