@@ -60,8 +60,10 @@ harness_result() {
 # harness_run <harness> <session-id> <new|resume> <timeout> <prompt> <json-schema> [<settings-json>]
 # Runs one headless agent step in $PWD; prints the step's JSON result.
 # settings-json is prc_step's output: model, effort, provider and args.
+# The harness's stderr (claude can put protocol JSON there) shows only when
+# the step fails, and then all at once: nothing streams while it runs.
 harness_run() {
-  local h=$1 sid=$2 mode=$3 timeout=$4 prompt=$5 schema=$6 settings=${7:-'{}'} out
+  local h=$1 sid=$2 mode=$3 timeout=$4 prompt=$5 schema=$6 settings=${7:-'{}'} out err rc said
   local model effort provider args fields
   local -a typed=() extra f
   # args last, so a newline in it shifts nothing; the end marker survives $( )
@@ -72,6 +74,9 @@ harness_run() {
   [[ ${#f[@]} -ge 5 && ${f[-1]} == "<end>" ]] || return 1
   model=${f[0]} effort=${f[1]} provider=${f[2]} args=$(printf '%s\n' "${f[@]:3:${#f[@]}-4}")
   read -ra extra <<<"$args"
+  # An interrupted step leaves this file behind (no trap: harness_run runs in
+  # its caller's shell, whose traps it would replace).
+  err=$(mktemp) || return 1
   case $h in
     claude)
       if [[ -n $model ]]; then typed+=(--model "$model"); fi
@@ -89,17 +94,33 @@ harness_run() {
       # and would swallow a trailing one.
       out=$(with_timeout "$timeout" claude -p "$prompt" "${sess[@]}" --output-format json --json-schema "$schema" \
               --permission-mode acceptEdits --allowedTools "$HARNESS_CLAUDE_ALLOW" \
-              --disallowedTools "$HARNESS_CLAUDE_DENY" "${typed[@]}" "${extra[@]}" </dev/null) || return
-      harness_result "$out"
+              --disallowedTools "$HARNESS_CLAUDE_DENY" "${typed[@]}" "${extra[@]}" </dev/null 2>"$err") \
+        && harness_result "$out"
       ;;
     pi)
       # pi has no schema flag: the prompt asks for a final ```json block.
       out=$(with_timeout "$timeout" pi -p --session-id "$sid" --tools "$HARNESS_PI_TOOLS" "${typed[@]}" "${extra[@]}" \
               "$prompt"$'\n\nEnd your reply with the result as one ```json fenced block matching this JSON Schema:\n'"$schema" \
-              </dev/null) || return
-      awk '/^```json/ { buf = ""; on = 1; next } /^```/ { if (on) last = buf; on = 0; next }
-           on { buf = buf $0 "\n" } END { printf "%s", last }' <<<"$out" | harness_object
+              </dev/null 2>"$err") \
+        && awk '/^```json/ { buf = ""; on = 1; next } /^```/ { if (on) last = buf; on = 0; next }
+                on { buf = buf $0 "\n" } END { printf "%s", last }' <<<"$out" | harness_object
       ;;
-    *) echo "unknown harness: $h (claude or pi)" >&2; return 1 ;;
+    *) echo "unknown harness: $h (claude or pi)" >&2; rm -f "$err"; return 1 ;;
   esac
+  rc=$?
+  if (( rc != 0 )); then
+    tail -n 40 "$err" >&2
+    # The end of the harness's own account of the failure: claude's result
+    # text, else an error result's subtype (e.g. error_max_turns), else
+    # stdout that isn't JSON; pi's reply.
+    said=$out
+    if [[ $h == claude ]]; then
+      said=$(prc_line 'where kind(this) == "record"
+        | values coalesce(nullif(result, ""), coalesce(is_error, false) ? subtype : null, "")
+        | where this != ""' "$out" 2>/dev/null) || said=$out
+    fi
+    [[ -z $said ]] || tail -n 20 <<<"$said" >&2
+  fi
+  rm -f "$err"
+  return "$rc"
 }

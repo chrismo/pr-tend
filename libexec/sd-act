@@ -517,10 +517,17 @@ review() {
   [[ -n $base ]] || die "can't find $b's base: $(prc_val "$state" 'sj(coalesce(errors, []), "; ")')"
   head=$(git rev-parse "refs/heads/$b")
   verify_run "$wt" "$b" || die "verify failed ($VERIFY_CMD); not reviewing"
-  reviewer=$(prc_get settings.localReview "$b" false) || die "sd config failed"
-  [[ -n $reviewer ]] || reviewer="$(dirname "$(realpath "$0")")/sd-review-local"
   timeout=$(prc_get settings.stepTimeout "$b" false) || die "sd config failed"
   [[ $timeout =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $timeout"
+  reviewer=$(prc_get settings.localReview "$b" false) || die "sd config failed"
+  if [[ -z $reviewer ]]; then
+    reviewer="$(dirname "$(realpath "$0")")/sd-review-local"
+    # The default reviewer's harness_run has its own stepTimeout, which must
+    # fire first: it kills the harness and shows its stderr. This one can't
+    # reach the harness (with_timeout puts it in its own process group), so
+    # firing first would leave it running, still spending tokens.
+    timeout=$((timeout + 30))
+  fi
   task=$(git config --get "branch.$b.sd-task" || true)
   findings=$(cd "$wt" && SHEEPDOG_BASE=$base SHEEPDOG_HEAD=$head SHEEPDOG_TASK=$task \
                with_timeout "$timeout" sh -c "$reviewer" </dev/null) \

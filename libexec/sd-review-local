@@ -38,9 +38,10 @@ timeout=$(prc_get settings.stepTimeout "$branch" false) || die "sd config failed
 
 diff=$(git diff "$SHEEPDOG_BASE" "$SHEEPDOG_HEAD") || die "git diff $SHEEPDOG_BASE $SHEEPDOG_HEAD failed"
 commits=$(git log --format='- %s' "$SHEEPDOG_BASE..$SHEEPDOG_HEAD")
+range="${SHEEPDOG_BASE:0:7}..${SHEEPDOG_HEAD:0:7}"
 prompt=$(cat "$LIB/review-prompt.md")
 prompt+=$'\n\nTask: '"${SHEEPDOG_TASK:-(none recorded)}"
-prompt+=$'\n\nCommits ('"${SHEEPDOG_BASE:0:7}..${SHEEPDOG_HEAD:0:7}"$'):\n'"$commits"
+prompt+=$'\n\nCommits ('"$range"$'):\n'"$commits"
 prompt+=$'\n\nDiff:\n'"$diff"
 
 read -r -d '' SCHEMA <<'EOF' || true
@@ -56,6 +57,7 @@ EOF
 HARNESS_CLAUDE_ALLOW=$HARNESS_READONLY_ALLOW
 HARNESS_PI_TOOLS="read"
 sid=$(uuidgen | tr 'A-F' 'a-f')
+echo "sd review-local: $h (new session $sid) is reviewing ${branch:+$branch (}$range${branch:+)}…" >&2
 result=$(harness_run "$h" "$sid" new "$timeout" "$prompt" "$SCHEMA" "$cfg") \
   || die "the $h review failed or returned no usable result"
 findings=$(prc_json 'values findings | where kind(this) == "array"' "$result" 2>/dev/null) \
