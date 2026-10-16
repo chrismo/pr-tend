@@ -1932,7 +1932,7 @@ record_lineage() {
       0) read -r parent old_base <<<"$out" ;;
       2) echo "sd act: $b looks stacked on ${out// / or }: record one with git config branch.$b.sd-parent <name>" >&2
          return 1 ;;
-      3) echo "sd act: $b shares commits with ${out%% *}, and each has its own since, so git can't tell which, if either, was made from the other: git config branch.$b.sd-parent ${out%% *} if $b was, or git config branch.$b.sd-parent $def if not" >&2
+      3) echo "sd act: $b $(stacked_unclear "$b" "$out" "$def")" >&2
          return 1 ;;
       *) return 0 ;;
     esac

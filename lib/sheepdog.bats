@@ -38,13 +38,12 @@ stack_setup() {
   [ "$output" = "par $(git rev-parse par)" ]
 }
 
-@test "stacked_on: the parent moved on since; named, base where they forked, but either way round" {
+@test "stacked_on: the parent moved on since; named, but either way round" {
   stack_setup
-  local fork; fork=$(git rev-parse par)
   c par p3
   run stacked_on kid origin main
   [ "$status" -eq 3 ]
-  [ "$output" = "par $fork" ]
+  [ "$output" = "par" ]
 }
 
 @test "stacked_on: a moved parent made the fork commit itself, so its child isn't its parent" {
@@ -72,6 +71,27 @@ stack_setup() {
   [ "$output" = "par $(git rev-parse par)" ]
 }
 
+@test "stacked_on: a backup taken after the branch was rebased isn't its parent" {
+  stack_setup
+  c par p3
+  git switch -q kid && git rebase -q par
+  git branch kid-bak kid
+  c kid k2
+  run stacked_on kid origin main
+  [ "$status" -eq 0 ]
+  [ "$output" = "par $(git rev-parse par)" ]
+}
+
+@test "stacked_on: siblings that each moved on tie without a direction" {
+  stack_setup
+  git switch -q par && git switch -qc sib1 && git commit -q --allow-empty -m s1
+  git switch -q par && git switch -qc sib2 && git commit -q --allow-empty -m s2
+  git switch -q kid && git branch -qD par
+  run stacked_on kid origin main
+  [ "$status" -eq 3 ]
+  [ "$output" = "sib1 sib2" ]
+}
+
 @test "stacked_on: a branch reset onto its parent's tip still names the parent" {
   stack_setup
   git switch -q main && git switch -qc kid2 && git reset -q --hard par && git commit -q --allow-empty -m k2
@@ -93,12 +113,11 @@ stack_setup() {
 
 @test "stacked_on: without a reflog, a moved parent still can't tell its child from a parent" {
   stack_setup
-  local fork; fork=$(git rev-parse par)
   c par p3
   git reflog expire --expire=all --all
   run stacked_on par origin main
   [ "$status" -eq 3 ]
-  [ "$output" = "kid $fork" ]
+  [ "$output" = "kid" ]
 }
 
 @test "stacked_on: a moved parent skips a child that recorded it as its parent" {

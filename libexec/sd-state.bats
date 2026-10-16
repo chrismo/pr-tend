@@ -227,6 +227,16 @@ field() { jq -r "$@" <<<"$output"; }
   [[ "$(field '.errors | join(" ")')" == *"shares commits with sib, and each has its own since, so git can't tell which, if either, was made from the other"* ]]
 }
 
+@test "siblings that each moved on: all named, still without a direction" {
+  git switch -qc par && commit a.txt a
+  git switch -qc kid && commit b.txt b
+  git switch -q par && git switch -qc sib && commit c.txt c
+  git switch -q par && git switch -qc sib2 && commit d.txt d
+  git branch -qD par
+  state kid
+  [[ "$(field '.errors | join(" ")')" == *"shares commits with sib or sib2, and each has its own since, so git can't tell which, if either, was made from the other: git config branch.kid.sd-parent <name> if kid was, or git config branch.kid.sd-parent main if not"* ]]
+}
+
 @test "an unrecorded stack isn't flagged when gh failed, since a PR may name the parent" {
   git switch -qc par && commit a.txt a
   git switch -qc kid && commit b.txt b

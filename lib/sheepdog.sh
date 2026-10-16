@@ -226,14 +226,15 @@ harness_run() {
 # no one recorded it (a plain git branch from another's tip), found by the
 # commits they share that aren't on <default>, local or remote. Prints
 # "<name> <base>", base being where they forked. Exit 1: none; 2: a tie, the
-# names printed; 3: the one found has commits of its own past the fork too, so
-# git can't say which was made from which (a parent that moved on looks like a
-# child). Git only, and bounded for sd state: candidates are local branches and
-# their remote-tracking refs that hold <branch>'s oldest commit past the
-# default, two rev-lists and a merge-base each, plus one read of <branch>'s
-# reflog. A branch holding all of <branch>'s commits is its child, not its
-# parent, and so is one whose sd-parent names <branch>, and one forked at a
-# commit <branch>'s reflog shows it making itself (a child or a backup). At
+# names printed; 3: the ones found have commits of their own past the fork
+# too, so git can't say which was made from which (a parent that moved on looks
+# like a child), the names printed. Git only, and bounded for sd state:
+# candidates are local branches and their remote-tracking refs that hold
+# <branch>'s oldest commit past the default, two rev-lists and a merge-base
+# each, plus one read of <branch>'s reflog. A branch holding all of <branch>'s
+# commits is its child, not its parent, and so is one whose sd-parent names
+# <branch>, and one forked where <branch>'s reflog has it arrive other than by
+# being made, renamed, reset or fast-forwarded there (a child or a backup). At
 # equal shared commits, one with none of its own beats one with some: a
 # sibling shares the parent's commits too.
 stacked_on() {
@@ -249,7 +250,10 @@ stacked_on() {
   total=$(git rev-list --count "refs/heads/$b" "${not[@]}")
   while read -r name; do local_branch[$name]=1; done < <(git for-each-ref --format='%(refname:short)' refs/heads)
   while read -r sha msg; do
-    [[ $msg != commit* ]] || reached[$sha]=1
+    case $msg in
+      "branch: Created from "* | "Branch: renamed "* | "reset: moving to "* | "branch: Reset to "* | *": Fast-forward") ;;
+      *) reached[$sha]=1 ;;
+    esac
   done < <(git reflog show --format='%H %gs' "refs/heads/$b" -- 2>/dev/null)
   while read -r ref; do
     name=${ref#refs/heads/}; name=${name#refs/remotes/"$remote"/}
@@ -269,7 +273,17 @@ stacked_on() {
     fi
   done < <(git for-each-ref --contains "$oldest" --format='%(refname)' refs/heads "refs/remotes/$remote")
   [[ -n $best ]] || return 1
-  if (( ${#tie[@]} )); then printf '%s\n' "$best" "${!tie[@]}" | sort | paste -sd' ' -; return 2; fi
+  if (( best_theirs > 0 || ${#tie[@]} )); then
+    printf '%s\n' "$best" "${!tie[@]}" | sort | paste -sd' ' -
+    (( best_theirs == 0 )) && return 2 || return 3
+  fi
   echo "$best $best_base"
-  (( best_theirs == 0 )) || return 3
+}
+
+# stacked_unclear <branch> <names> <default>: why stacked_on exited 3, and the
+# git config either way.
+stacked_unclear() {
+  local name=$2
+  [[ $name != *" "* ]] || name="<name>"
+  echo "shares commits with ${2// / or }, and each has its own since, so git can't tell which, if either, was made from the other: git config branch.$1.sd-parent $name if $1 was, or git config branch.$1.sd-parent $3 if not"
 }
