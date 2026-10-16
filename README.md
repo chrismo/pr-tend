@@ -52,6 +52,14 @@ keep the contract below, so isolation is up to it. `sd config step <step>`
 shows the harness, model and effort a step uses. The agent edits; sheepdog
 commits, pushes and talks to GitHub.
 
+Each step's prompt is the step's guidance, then a fixed contract (what the
+agent may do, what it returns). A repo replaces a step's guidance by committing
+`.sheepdog/<step>.md`: `implement`, `review-fix`, `review`, `describe`,
+`address` or `resolve`. sheepdog reads it from the branch's base commit, so a
+branch can't rewrite its own guidance. `settings.<step>Prompt` (e.g.
+`implementPrompt`, `reviewFixPrompt`) names another file, and the shipped
+defaults are in `lib/prompts/`.
+
 A custom local reviewer (`settings.localReview`) keeps the contract in
 `libexec/sd-review-local`'s header: `SHEEPDOG_BASE`, `SHEEPDOG_HEAD` and
 `SHEEPDOG_TASK` in, a JSON list of findings out.
