@@ -4,7 +4,7 @@
 > soon as it has a home, and is deleted here when it does: built behavior into
 > the code and its tests (the README where users need it); unbuilt work, bugs,
 > spikes and open decisions into GitHub issues on the
-> [pr-tend project board](https://github.com/users/chrismo/projects/6). No
+> [sheepdog project board](https://github.com/users/chrismo/projects/6). No
 > duplicate docs: don't add anything here that the code or an issue already
 > says; link the issue instead. When nothing is left, delete the file. Don't
 > treat it as current documentation of anything that exists.
