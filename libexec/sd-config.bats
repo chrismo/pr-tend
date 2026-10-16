@@ -1000,6 +1000,15 @@ old_super() {
   [ "${#lines[@]}" -eq 2 ]
 }
 
+@test "validate: an empty block where a value belongs is still a cast error" {
+  write_global '{"harness":{},"harnesses":{"claude":{"effort":{}}}}'
+  run "$SD_CONFIG" show
+  [ "$status" -eq 1 ]
+  [[ "${lines[0]}" == *": harness: cannot cast"* ]]
+  [[ "${lines[1]}" == *": harnesses.claude.effort: cannot cast"* ]]
+  [ "${#lines[@]}" -eq 2 ]
+}
+
 @test "validate: known empty blocks are fine" {
   write_global '{"settings":{},"harnesses":{"claude":{},"pi":{}},"steps":{"address":{},"review":{"pi":{}}}}'
   run "$SD_CONFIG" show
