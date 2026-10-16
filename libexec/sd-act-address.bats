@@ -463,6 +463,17 @@ remote_feat() { git -C "$TMP/origin.git" rev-parse feat; }
   [ "$(remote_feat)" = "$(git rev-parse HEAD)" ]
 }
 
+@test "verify failing, autofix fixing it: committed, verified again, shipped" {
+  "$SD_CONFIG" set --global settings.verify "grep -q FOUR file.txt"
+  "$SD_CONFIG" set --global settings.autofix "echo FOUR >> file.txt"
+  run "$SD_ACT" address
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"autofix committed"* ]] || false
+  [ "$(git log -1 --format=%s)" = "autofix: echo FOUR >> file.txt" ]
+  [ "$(git log -2 --format=%s | tail -1)" = "Uppercase three" ]
+  [ "$(remote_feat)" = "$(git rev-parse HEAD)" ]
+}
+
 @test "agent gave up: nothing committed, pushed or posted" {
   agent_result '{outcome: "gave-up", commit_message: null, summary: "too hard", items: []}'
   before=$(git rev-parse HEAD)

@@ -194,6 +194,38 @@ implement_setup() {
   [[ "$output" == *"verify failed"* ]]
 }
 
+@test "implement: autofix failing after it changed files: reverted, the verify failure stands" {
+  implement_setup
+  autofix_cmd "echo half >> file.txt; exit 1"
+  run "$SD_ACT" implement
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"reverted"* ]]
+  [[ "$output" == *"verify failed"* ]]
+  [ -z "$(git status --porcelain)" ]
+  [ "$(git log -1 --format=%s)" = "add d" ]
+}
+
+@test "implement: autofix commits but verify still fails: nonzero, the autofix commit stays" {
+  implement_setup
+  autofix_cmd "echo more >> file.txt"
+  run "$SD_ACT" implement
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"autofix committed"* ]]
+  [[ "$output" == *"verify failed"* ]]
+  [ "$(git log -1 --format=%s)" = "autofix: echo more >> file.txt" ]
+}
+
+@test "implement: verify dirtying the tree is verify's failure; autofix doesn't run" {
+  implement_setup
+  "$SD_CONFIG" set --global settings.verify "echo touched >> file.txt"
+  autofix_cmd "echo ran > autofix-ran"
+  run "$SD_ACT" implement
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"changed files"* ]]
+  [[ "$output" != *"clean tree"* ]]
+  [ ! -e autofix-ran ]
+}
+
 @test "implement: verify passing first time never runs autofix" {
   implement_setup
   printf '#!/usr/bin/env bash\nprintf "%%s\\n" a b c d > file.txt\n' > "$FX/agent"

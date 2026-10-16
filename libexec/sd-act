@@ -539,12 +539,14 @@ verify() {
 
 # ── autofix: A11 ─────────────────────────────────────────────────────────────
 
-# autofix_run <worktree> <branch>: settings.autofix in the worktree under
-# settings.stepTimeout, from a clean tree, and a commit of what it changed:
-# AUTOFIX_COMMIT is its short sha, else empty. A failing command leaves its
-# changes uncommitted and prints its output's tail, as verify_run does.
+# autofix_run <worktree> <branch> [revert]: settings.autofix in the worktree
+# under settings.stepTimeout, from a clean tree, and a commit of what it
+# changed: AUTOFIX_COMMIT is its short sha, else empty. A failing command
+# prints its output's tail, as verify_run does, and its changes are left
+# uncommitted to look at, or with revert (the hook) put back, so the next
+# step starts from the commit it knows.
 autofix_run() {
-  local wt=$1 b=$2 timeout out rc=0 n changed
+  local wt=$1 b=$2 revert=${3:-} timeout out rc=0 n changed
   AUTOFIX_COMMIT=""
   AUTOFIX_CMD=$(cd "$wt" && prc_get settings.autofix "$b" false) || die "sd config failed"
   [[ $AUTOFIX_CMD != *$'\n'* ]] || die "autofix must be a single command, not a list"
@@ -559,7 +561,12 @@ autofix_run() {
     n=$(wc -l < "$out" | tr -d " ")
     (( n <= VERIFY_TAIL )) || echo "… (last $VERIFY_TAIL of $n lines)"
     tail -n "$VERIFY_TAIL" "$out"
-    (( changed == 0 )) || echo "autofix changed $(plural "$changed" file) in $wt before failing; left uncommitted"
+    if (( changed > 0 )) && [[ $revert == revert ]]; then
+      git -C "$wt" reset -q --hard && git -C "$wt" clean -qfd
+      echo "autofix changed $(plural "$changed" file) before failing; reverted"
+    elif (( changed > 0 )); then
+      echo "autofix changed $(plural "$changed" file) in $wt before failing; left uncommitted"
+    fi
   elif (( changed > 0 )); then
     git -C "$wt" add -A && git -C "$wt" commit -q -m "autofix: $AUTOFIX_CMD" || die "commit failed; autofix's changes are left in $wt"
     AUTOFIX_COMMIT=$(git -C "$wt" rev-parse --short HEAD)
@@ -572,10 +579,12 @@ autofix_run() {
 }
 
 # verify_autofix <worktree> <branch>: verify; when it fails, autofix, and when
-# that committed something, verify again. The zero-token pass before a fix step.
+# that committed something, verify again. The zero-token pass before a fix
+# step. A verify that dirtied the tree is verify's own failure: no autofix.
 verify_autofix() {
   verify_run "$1" "$2" && return 0
-  autofix_run "$1" "$2" || return 1
+  [[ -z $(git -C "$1" status --porcelain) ]] || return 1
+  autofix_run "$1" "$2" revert || return 1
   [[ -n $AUTOFIX_COMMIT ]] || return 1
   verify_run "$1" "$2" || return 1
   echo "verify passed after autofix ($VERIFY_CMD)"
