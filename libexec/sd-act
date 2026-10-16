@@ -80,9 +80,14 @@
 #             base. A resolved rebase skips the
 #             unchanged-change check (a resolution changes the diff), so its
 #             result is unreviewed: verify runs, then sd act review is next
+#             A PR in a native GitHub stack (sd state's pr.stack) is refused,
+#             --resolve too: GitHub restacks it itself (gh stack sync pulls that)
 #   retarget  after the parent merged: point the PR at the default branch
 #             (gh pr edit --base; GitHub usually did it already when the
-#             parent's branch was deleted) and rewrite sd-parent to it
+#             parent's branch was deleted) and rewrite sd-parent to it. A PR
+#             in a native GitHub stack (sd state's pr.stack) gets no base edit,
+#             GitHub refuses it: refused until GitHub has retargeted the PR,
+#             then only sd-parent is rewritten
 #   push      publish: a plain push for new commits; rewritten history is
 #             force-pushed with a lease, only over a remote head of our own.
 #             Never over commits this copy has never had, --force or not
@@ -133,7 +138,9 @@
 #             Refuses while the parent (sd-parent) isn't on the remote, has
 #             merged (restack first), was closed, or can't be looked up; a
 #             merged parent with the branch already on the default branch
-#             ships onto it and rewrites sd-parent. Spends tokens unless HEAD
+#             ships onto it and rewrites sd-parent, as does a PR in a native
+#             GitHub stack that GitHub already retargeted; a stacked PR never
+#             gets a base edit. Spends tokens unless HEAD
 #             already has a stored description
 #   trigger   post settings.botCommand on the PR so the review bot runs, and
 #             pin bot at HEAD; nothing when already pinned there. HEAD must
@@ -400,6 +407,18 @@ EOF
 gate_get() {
   local q="unnest (kind(this) == \"array\" ? this : [this]) | where coalesce($2, null) is not null | values $2"
   prc_line "$q" "$1"
+}
+
+# stack_guard <state>: a PR in a native GitHub stack (#17) is GitHub's to
+# restack and retarget; sheepdog refuses, and says how to pull GitHub's rewrite.
+stack_guard() {
+  local st
+  st=$(prc_val "$1" 'coalesce(pr.stack, null) is null ? "" : f"{pr.number}|{pr.stack.number}|{pr.stack.position}|{pr.stack.size}"') \
+    || die "can't parse sd state's answer"
+  [[ -n $st ]] || return 0
+  local IFS='|'; local -a f; read -r -a f <<<"$st"
+  echo "sd act: PR #${f[0]} is in GitHub stack #${f[1]} (${f[2]} of ${f[3]}): GitHub restacks and retargets it itself; once it has, gh stack sync pulls the result" >&2
+  return 1
 }
 
 # soft_gate <gate-json> <doing>: unless --force, list the soft refusals and exit.
@@ -1371,7 +1390,16 @@ ship() {
               || die "parent $parent isn't on $remote: ship it first (sd act ship $parent)" ;;
       unknown) die "can't tell whether $parent merged: $(prc_val "$state" 'sj(coalesce(errors, []), "; ")')" ;;
       closed) die "parent $parent (#$(prc_val "$state" parent.pr.number)) was closed without merging: decide what $b targets (git config branch.$b.sd-parent <branch>), then ship" ;;
-      merged) die "parent $parent has merged: sd act restack first, which lands $b on $(prc_val "$state" sync.target) and rewrites sd-parent" ;;
+      merged) if [[ $(prc_val "$state" 'coalesce(pr.stack, null) is not null and on(pr.base == sync.default) and not on(sync.parent_in_history)') == true ]]; then
+                # GitHub already retargeted a stacked PR; only sd-parent is behind.
+                # The state is read again: its base was found against the old parent.
+                parent_to_default "$b" "$state"
+                state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
+                parent=$(prc_val "$state" sync.default)
+              else
+                stack_guard "$state" || exit 1
+                die "parent $parent has merged: sd act restack first, which lands $b on $(prc_val "$state" sync.target) and rewrites sd-parent"
+              fi ;;
       merged-on-target) parent_to_default "$b" "$state"; parent=$(prc_val "$state" sync.default) ;;
       *) die "can't read the parent's state from sd state: $pstate" ;;
     esac
@@ -1394,7 +1422,15 @@ ship() {
     enroll_branch "$b"
   else
     number=$(prc_val "$state" pr.number)
-    [[ $(prc_val "$state" pr.base) == "$parent" ]] || base_arg=(--base "$parent")
+    local stack base; stack=$(prc_val "$state" 'coalesce(pr.stack.number, "")') base=$(prc_val "$state" pr.base)
+    if [[ $base != "$parent" ]]; then
+      if [[ -n $stack ]]; then
+        # GitHub refuses a base edit on a stacked PR, and retargets it itself.
+        echo "PR #$number targets $base, not $parent: in GitHub stack #$stack, so the base is GitHub's to change"
+      else
+        base_arg=(--base "$parent")
+      fi
+    fi
     gh pr edit "$number" --title "$title" --body "$body" "${base_arg[@]}" >/dev/null \
       || die "gh pr edit failed for PR #$number; $b is pushed"
     echo "shipped $b: PR #$number updated$( (( ${#base_arg[@]} )) && echo ", base now $parent")"
@@ -1561,6 +1597,7 @@ restack() {
   remote=$(prc_get settings.remote "$b" false) || die "sd config failed"
   git -C "$wt" fetch --quiet --prune "$remote" || die "fetch from $remote failed"
   state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
+  stack_guard "$state" || exit 1
   old_base=$(prc_val "$state" 'coalesce(sync.old_base, "")')
   replay='[]'
   if [[ -n $old_base && $(prc_val "$state" 'on(parent.merged) and on(sync.up_to_date == false)') == true ]]; then
@@ -1747,6 +1784,7 @@ retarget() {
     echo "$line"
   else
     number=$(gate_get "$gate" edit)
+    stack_guard "$state" || exit 1   # GitHub refuses the base edit and does it itself (#17)
     gh pr edit "$number" --base "$default" >/dev/null || die "gh pr edit --base $default failed for PR #$number"
     echo "PR #$number now targets $default (was $(prc_val "$state" pr.base))"
   fi

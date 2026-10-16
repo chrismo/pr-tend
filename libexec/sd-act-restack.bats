@@ -636,3 +636,58 @@ $own2 feat two" ]
   [ ! -e "$FX/claude.calls" ]
   [ "$(git rev-parse feat^)" = "$(git rev-parse origin/main)" ]
 }
+
+# ── native GitHub stacks (#17) ───────────────────────────────────────────────
+
+# in_stack <branch>: the PR in $GH/<branch>.json is in GitHub stack #29, position 2 of 2.
+in_stack() {
+  jq '.data.repository.pullRequests.nodes[0] += {stack: {number: 29, size: 2}, stackEntry: {position: 2}}' \
+    "$GH/$1.json" > "$GH/$1.tmp" && mv "$GH/$1.tmp" "$GH/$1.json"
+}
+
+@test "restack: a PR in a gh stack is refused: GitHub restacks it, sync instead" {
+  stacked_child
+  git switch -q A && edit 's/^d$/D/' a2 && git push -q origin A 2>/dev/null
+  git switch -q child
+  open_pr A main 1
+  open_pr child A 2 && in_stack child
+  local before; before=$(git rev-parse child)
+  run "$SD_ACT" restack
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PR #2 is in GitHub stack #29"* ]]
+  [[ "$output" == *"gh stack sync"* ]]
+  [ "$(git rev-parse child)" = "$before" ]
+}
+
+@test "restack --resolve: a PR in a gh stack is refused before any agent call" {
+  stacked_child
+  git switch -q A && edit 's/^f$/X/' a2 && git push -q origin A 2>/dev/null
+  git switch -q child
+  open_pr A main 1
+  open_pr child A 2 && in_stack child
+  run "$SD_ACT" restack --resolve
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"GitHub stack #29"* ]]
+  [ ! -e "$FX/claude.calls" ]
+}
+
+@test "retarget: a PR in a gh stack that GitHub already retargeted: no edit, sd-parent rewritten" {
+  stacked_child
+  merged_pr A "$a_head"
+  open_pr child main 2 && in_stack child
+  run "$SD_ACT" retarget
+  [ "$status" -eq 0 ]
+  [ ! -e "$GH/calls" ]
+  [ "$(git config branch.child.sd-parent)" = main ]
+}
+
+@test "retarget: a PR in a gh stack still on its merged parent: the base edit is GitHub's, refused" {
+  stacked_child
+  merged_pr A "$a_head"
+  open_pr child A 2 && in_stack child
+  run "$SD_ACT" retarget
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"GitHub stack #29"* ]]
+  [ ! -e "$GH/calls" ]
+  [ "$(git config branch.child.sd-parent)" = A ]
+}

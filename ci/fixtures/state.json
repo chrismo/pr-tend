@@ -14,7 +14,8 @@
     "review_requests": [
       "alice",
       "core"
-    ]
+    ],
+    "stack": null
   },
   "parent": {
     "name": "main",

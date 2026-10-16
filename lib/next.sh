@@ -12,6 +12,16 @@
 
 # Behind the default branch alone is no step: it moves too often to chase.
 # A conflict with it is, and so is a restack after the parent merged.
+# A PR in a native GitHub stack (pr.stack) is never restacked or retargeted
+# here: GitHub does that itself when the PR below merges (and rewrites the
+# branch), and refuses base edits and plain merges. The same cases get one
+# stack step instead: stack-rewritten pulls GitHub's rewrite with gh stack sync
+# (notified, like foreign); stack-conflict is chrismo's, through gh stack
+# (notified, like conflict); stack-sync, also gh stack sync, rebases a stack
+# behind its open parent or GitHub's BEHIND (mechanical, like behind);
+# stack-wait is GitHub's turn, with no command: the parent merged and the PR
+# still targets it or still carries its commits. A merged parent is never
+# chased, and sd-parent may still name it after GitHub retargeted the PR.
 # Only bot items are ever marked i, so owed_bot - info is the blocking bot count.
 # on() and n() come from lib/config.sh's PRC_FNS: a null or missing
 # field compares to nothing in SuperDB, and they make it false and 0.
@@ -24,6 +34,9 @@ fn why_blocked(m): m == "BLOCKED" ? "the merge is blocked"
 values {...s, remote}
 | put open:=(pr is null or on(pr.state == "OPEN")), has_pr:=on(pr.state == "OPEN"),
       foreign:=(on(push.remote_ours == false) and n(push.theirs) > 0),
+      native:=(coalesce(pr.stack, null) is not null),
+      stack_waiting:=(coalesce(pr.stack, null) is not null and on(parent.merged)
+                      and (on(pr.base != sync.default) or on(sync.parent_in_history))),
       bot_blocking:=(n(threads.owed_bot) - n(threads.info)),
       to_push:=(push.remote_sha is null or n(push.ahead) > 0),
       chase:=(on(sync.target != sync.default) or on(parent.merged)),
@@ -54,7 +67,11 @@ values {...s, remote}
            f"git fetch --prune {remote}") : null,
     open and on(session.locked)
       ? step("attached", "wait", "attached: the branch'"'"'s session is open interactively; agent steps wait until it exits", null) : null,
-    open and foreign
+    open and native and foreign
+      ? step("stack-rewritten", "you",
+             f"{remote}/{branch} has {plural(push.theirs, "commit")} this copy has never had, GitHub'"'"'s rewrite of stack #{pr.stack.number} ({pr.stack.position} of {pr.stack.size}) most likely: pull it (git log HEAD..{remote}/{branch} to look first)",
+             "gh stack sync") : null,
+    open and foreign and not native
       ? step("foreign", "you", f"{remote}/{branch} has {plural(push.theirs, "commit")} this copy has never had",
              f"git log HEAD..{remote}/{branch}") : null,
     open and n(threads.owed_human) > 0
@@ -63,12 +80,21 @@ values {...s, remote}
       ? step("restack-undone", "you",
              f"the restack was undone ({sync.undone} of {sync.target}'"'"'s commits {sync.undone == 1 ? "is a copy" : "are copies"} on {branch}; a plain git push after a restack?): redo it, and don'"'"'t sd act push before that, which would publish the copies",
              f"{restack} && sd act push") : null,
-    open and not undone and not parent_closed and on(sync.up_to_date == false) and on(sync.conflict)
+    open and native and not undone and not foreign and not parent_closed and not stack_waiting and on(sync.up_to_date == false) and on(sync.conflict)
+      ? step("stack-conflict", "you", f"conflicts with {sync.target} in GitHub stack #{pr.stack.number} ({pr.stack.position} of {pr.stack.size}): resolve it through gh stack, not sd act restack",
+             "gh stack sync") : null,
+    open and native and not undone and not foreign and not parent_closed and not on(sync.conflict)
+         and ((on(sync.up_to_date == false) and on(sync.target != sync.default)) or (gh_behind and not stack_waiting))
+      ? step("stack-sync", "run", f"behind {sync.target} in GitHub stack #{pr.stack.number} ({pr.stack.position} of {pr.stack.size}): gh stack rebases it, not sd act restack",
+             "gh stack sync") : null,
+    open and stack_waiting and not undone and not foreign and not parent_closed
+      ? step("stack-wait", "wait", f"waiting on GitHub to retarget and rewrite this PR (stack #{pr.stack.number})", null) : null,
+    open and not native and not undone and not parent_closed and on(sync.up_to_date == false) and on(sync.conflict)
       ? step("conflict", "agent", f"restack onto {sync.target} conflicts: resolve it", "sd act restack --resolve") : null,
-    open and not undone and not parent_closed and on(sync.up_to_date == false) and not on(sync.conflict) and chase
+    open and not native and not undone and not parent_closed and on(sync.up_to_date == false) and not on(sync.conflict) and chase
       ? step("behind", "run", f"restack onto {sync.target} ({sync.behind} behind)",
              sync.old_base is null ? restack : "sd act restack")
-      : has_pr and not undone and not parent_closed and not on(sync.conflict) and gh_behind
+      : has_pr and not native and not undone and not parent_closed and not on(sync.conflict) and gh_behind
       ? step("behind", "run", f"restack onto {sync.default} ({n(sync.behind)} behind): GitHub requires branches to be up to date",
              "sd act restack") : null,
     has_pr and on(ci.verdict == "red") and on(ci.for_head) and not to_push
@@ -101,7 +127,7 @@ values {...s, remote}
              "gh pr checks --watch") : null,
     has_pr and parent_closed
       ? step("parent-closed", "you", f"{parent.name} (#{parent.pr.number}) was closed without merging: decide what this PR targets", null) : null,
-    has_pr and stacked and on(parent.merged)
+    has_pr and stacked and on(parent.merged) and not native
       ? step("retarget", "run", f"{pr.base} already merged: point this PR at {sync.default}", "sd act retarget") : null,
     has_pr and review_required
       ? step("review-wait", "wait", len(coalesce(pr.review_requests, [])) > 0
@@ -109,7 +135,7 @@ values {...s, remote}
     has_pr and stacked and not on(parent.merged)
       ? step("parent-wait", "wait", f"waiting on {parent.name} (#{parent.pr.number}) to merge first", null) : null,
     has_pr and not review_required and not stacked and not parent_closed and not gh_behind and not on(pr.draft)
-      ? (merge_state in ["CLEAN", "UNSTABLE", "HAS_HOOKS"] ? step("ready", "you", "ready to merge", "gh pr merge")
+      ? (merge_state in ["CLEAN", "UNSTABLE", "HAS_HOOKS"] ? step("ready", "you", "ready to merge", native ? f"gh stack merge {pr.number}" : "gh pr merge")
          : merge_state == "UNKNOWN" ? step("merge-wait", "wait", "GitHub hasn'"'"'t decided whether it can merge yet", null)
          : step("blocked", "you", f"GitHub says {why_blocked(merge_state)}: see why", "gh pr view --web")) : null
   ]

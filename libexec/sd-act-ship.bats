@@ -347,3 +347,83 @@ tracks() { git rev-parse --abbrev-ref "$1@{upstream}" 2>/dev/null; }
   [ "$(tracks feat)" = origin/feat ]
   [ "$(git rev-parse feat)" = "$head" ]
 }
+
+# ── native GitHub stacks (#17) ───────────────────────────────────────────────
+
+@test "ship: a PR in a gh stack is fixed up without a base edit, which GitHub refuses" {
+  git push -q -u origin feat 2>/dev/null
+  echo d >> file.txt && git commit -qam "add d"
+  open_pr feat main 7
+  jq '.data.repository.pullRequests.nodes[0] += {stack: {number: 29, size: 2}, stackEntry: {position: 2}}' \
+    "$GH/feat.json" > "$GH/feat.tmp" && mv "$GH/feat.tmp" "$GH/feat.json"
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
+  git switch -q feat && git config branch.feat.sd-parent A
+  run "$SD_ACT" ship
+  [ "$status" -eq 0 ]
+  [ "$(remote feat)" = "$(git rev-parse HEAD)" ]
+  [[ "$(calls)" == "pr edit 7 --title Add c --body "* ]]
+  [[ "$(calls)" != *"--base"* ]]
+  [[ "$output" == *"GitHub stack #29"* ]]
+}
+
+@test "ship: a PR in a gh stack whose parent merged is GitHub's to restack: refused with gh stack sync, not sd act restack" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
+  a_head=$(git rev-parse A)
+  git switch -q feat && git config branch.feat.sd-parent A
+  git push -q -u origin feat 2>/dev/null
+  (cd "$TMP/other" && git fetch -q origin && git checkout -q main && git merge -q --squash origin/A \
+     && git commit -qm "A (#1)" --allow-empty && git push -q origin main 2>/dev/null)
+  jq -n --arg h "$a_head" '{data: {viewer: {login: "me"}, repository: {defaultBranchRef: {name: "main"},
+    pullRequests: {nodes: [{number: 1, state: "MERGED", baseRefName: "main", headRefName: "A", headRefOid: $h, isCrossRepository: false}]}}}}' > "$GH/A.json"
+  open_pr feat A 7
+  jq '.data.repository.pullRequests.nodes[0] += {stack: {number: 29, size: 2}, stackEntry: {position: 2}}' \
+    "$GH/feat.json" > "$GH/feat.tmp" && mv "$GH/feat.tmp" "$GH/feat.json"
+  run "$SD_ACT" ship
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"GitHub stack #29"*"gh stack sync"* ]]
+  [[ "$output" != *"sd act restack"* ]]
+  [ ! -e "$FX/claude.args" ]
+  [ -z "$(calls)" ]
+}
+
+@test "ship: a PR in a gh stack that GitHub already retargeted and rewrote, sd-parent stale and main moved on: ships, sd-parent rewritten" {
+  # feat stacked on A; A squash-merged; GitHub rebases feat onto the squash and retargets it; then main moves again.
+  git switch -q main && git switch -qc A && echo a > a.txt && git add a.txt && git commit -qm A && git push -q origin A 2>/dev/null
+  a_head=$(git rev-parse A)
+  git switch -q feat && git rebase -q A && git config branch.feat.sd-parent A
+  (cd "$TMP/other" && git fetch -q origin && git checkout -q main && git merge -q --squash origin/A \
+     && git commit -qm "A (#1)" && git push -q origin main 2>/dev/null)
+  git fetch -q origin && git rebase -q --onto origin/main A feat && git push -q -f -u origin feat 2>/dev/null
+  (cd "$TMP/other" && git checkout -q main && echo z > z.txt && git add z.txt && git commit -qm z && git push -q origin main 2>/dev/null)
+  git fetch -q origin
+  jq -n --arg h "$a_head" '{data: {viewer: {login: "me"}, repository: {defaultBranchRef: {name: "main"},
+    pullRequests: {nodes: [{number: 1, state: "MERGED", baseRefName: "main", headRefName: "A", headRefOid: $h, isCrossRepository: false}]}}}}' > "$GH/A.json"
+  open_pr feat main 7
+  jq '.data.repository.pullRequests.nodes[0] += {stack: {number: 29, size: 2}, stackEntry: {position: 2}}' \
+    "$GH/feat.json" > "$GH/feat.tmp" && mv "$GH/feat.tmp" "$GH/feat.json"
+  run "$SD_ACT" ship
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$(calls)" == "pr edit 7 --title Add c --body "* ]]
+  [[ "$(calls)" != *"--base"* ]]
+  [ "$(git config branch.feat.sd-parent)" = main ]
+}
+
+@test "ship: a PR in a gh stack GitHub retargeted but hasn't rewritten yet (the parent's commits still in it) is refused" {
+  git switch -q main && git switch -qc A && echo a > a.txt && git add a.txt && git commit -qm A && git push -q origin A 2>/dev/null
+  a_head=$(git rev-parse A)
+  git switch -q feat && git rebase -q A && git config branch.feat.sd-parent A && git push -q -u origin feat 2>/dev/null
+  (cd "$TMP/other" && git fetch -q origin && git checkout -q main && git merge -q --squash origin/A \
+     && git commit -qm "A (#1)" && git push -q origin main 2>/dev/null)
+  git fetch -q origin
+  jq -n --arg h "$a_head" '{data: {viewer: {login: "me"}, repository: {defaultBranchRef: {name: "main"},
+    pullRequests: {nodes: [{number: 1, state: "MERGED", baseRefName: "main", headRefName: "A", headRefOid: $h, isCrossRepository: false}]}}}}' > "$GH/A.json"
+  open_pr feat main 7
+  jq '.data.repository.pullRequests.nodes[0] += {stack: {number: 29, size: 2}, stackEntry: {position: 2}}' \
+    "$GH/feat.json" > "$GH/feat.tmp" && mv "$GH/feat.tmp" "$GH/feat.json"
+  run "$SD_ACT" ship
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"GitHub stack #29"* ]]
+  [ ! -e "$FX/claude.args" ]
+  [ -z "$(calls)" ]
+  [ "$(git config branch.feat.sd-parent)" = A ]
+}

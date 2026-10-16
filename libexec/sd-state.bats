@@ -1251,3 +1251,76 @@ review() {
   [[ "${lines[0]}" == "no PR · "* ]] || false
   [[ "$output" == *"1 unpushed"* ]]
 }
+
+# ── native GitHub stacks (#17) ───────────────────────────────────────────────
+
+@test "pr.stack: a PR in a gh stack reports the stack's number, its position and size" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat '.stack = {number: 29, size: 2} | .stackEntry = {position: 2}'
+  state
+  [ "$(field -c .pr.stack)" = '{"number":29,"position":2,"size":2}' ]
+}
+
+@test "pr.stack: null for a PR outside a stack, and for a branch with no PR" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat
+  state
+  [ "$(field .pr.stack)" = null ]
+  git switch -qc lone && commit b.txt b
+  state
+  [ "$(field .pr)" = null ]
+}
+
+@test "pr.stack: a base pin GitHub's rewrite left behind is no error; the base is the merge base with the target" {
+  git switch -qc feat && commit a.txt a
+  git update-ref refs/sheepdog/feat/base "$(git -C "$TMP/other" rev-parse HEAD)"   # an ancestor: fine
+  commit b.txt b
+  git -C "$TMP/other" switch -qc elsewhere && commit c.txt c "$TMP/other"
+  git fetch -q "$TMP/other" elsewhere
+  git update-ref refs/sheepdog/feat/base FETCH_HEAD                              # not in feat's history
+  pr_fixture feat '.stack = {number: 29, size: 2} | .stackEntry = {position: 2}'
+  state
+  [ "$(field -c .errors)" = '[]' ]
+  [ "$(field .sync.old_base)" = "$(git merge-base origin/main feat)" ]
+  pr_fixture feat
+  state
+  [[ "$(field -c .errors)" == *"base pin"*"no longer in feat's history"* ]]
+}
+
+@test "sync.parent_in_history: whether a merged parent's head is still in the branch" {
+  git switch -qc A && commit a.txt a && git push -q origin A 2>/dev/null
+  local a_head; a_head=$(git rev-parse A)
+  git switch -qc feat && commit b.txt b
+  git config branch.feat.sd-parent A
+  jq -n --arg h "$a_head" '{data: {viewer: {login: "me"}, repository: {defaultBranchRef: {name: "main"},
+    pullRequests: {nodes: [{number: 1, state: "MERGED", baseRefName: "main", headRefName: "A", headRefOid: $h, isCrossRepository: false}]}}}}' > "$GH_FIXTURES/A.json"
+  pr_fixture feat
+  state
+  [ "$(field .sync.parent_in_history)" = true ]
+  git push -q origin A:main 2>/dev/null && git fetch -q origin     # a fast-forward merge: the head is in main too
+  state
+  [ "$(field .sync.parent_in_history)" = false ]
+  git push -q -f origin "$(git rev-parse origin/main~1)":main 2>/dev/null && git fetch -q origin
+  git rebase -q --onto origin/main A feat                          # GitHub's rewrite after a squash
+  state
+  [ "$(field .sync.parent_in_history)" = false ]
+  pr_fixture feat '.baseRefName = "main"' && git config --unset branch.feat.sd-parent
+  state
+  [ "$(field .sync.parent_in_history)" = null ]
+}
+
+@test "pr.stack: with no pin at all, a native PR's base comes from the usual chain (the merged parent's head)" {
+  git switch -qc A && commit a.txt a && git push -q origin A 2>/dev/null
+  local a_head; a_head=$(git rev-parse A)
+  git switch -qc feat && commit b.txt b
+  git config branch.feat.sd-parent A
+  (cd "$TMP/other" && git fetch -q origin && git merge -q --squash origin/A && git commit -qm "A (#1)" && git push -q origin main 2>/dev/null)
+  git fetch -q origin
+  jq -n --arg h "$a_head" '{data: {viewer: {login: "me"}, repository: {defaultBranchRef: {name: "main"},
+    pullRequests: {nodes: [{number: 1, state: "MERGED", baseRefName: "main", headRefName: "A", headRefOid: $h, isCrossRepository: false}]}}}}' > "$GH_FIXTURES/A.json"
+  pr_fixture feat '.stack = {number: 29, size: 2} | .stackEntry = {position: 2}'
+  state
+  [ "$(field .sync.old_base)" = "$a_head" ]
+  [ "$(field .sync.conflict)" = false ]
+  [ "$(field .sync.parent_in_history)" = true ]
+}

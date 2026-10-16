@@ -476,3 +476,88 @@ lines_for() { # lines_for <one|all> <jq-assignment...>
   [ "${lines[0]}" = "NEXT  agent  address 1 bot item  → sd act address" ]
   [ "${lines[1]}" = "then  run    push 1 commit  → sd act push" ]
 }
+
+# A PR in a native GitHub stack (gh stack): GitHub restacks it server-side
+# (retarget and force-push when the PR below merges) and refuses base edits
+# and plain merges, so sheepdog never restacks or retargets it; every stack
+# step goes through gh stack sync.
+NATIVE=('.pr.stack = {number: 29, position: 2, size: 2}')
+
+@test "native stack: up to date and ready, merged with gh stack merge, not gh pr merge" {
+  [ "$(keys "${NATIVE[@]}")" = ready ]
+  [ "$(step ready cmd "${NATIVE[@]}")" = "gh stack merge 7" ]
+}
+
+@test "native stack: behind the parent is one sync step, not a restack" {
+  [ "$(keys "${NATIVE[@]}" "${STACKED[@]}" '.pr.base = "base"' '.parent.pr = {number: 3, state: "OPEN"}')" = "stack-sync parent-wait" ]
+  [ "$(step stack-sync who "${NATIVE[@]}" "${STACKED[@]}")" = run ]
+  [ "$(step stack-sync say "${NATIVE[@]}" "${STACKED[@]}")" = "behind base in GitHub stack #29 (2 of 2): gh stack rebases it, not sd act restack" ]
+  [ "$(step stack-sync cmd "${NATIVE[@]}" "${STACKED[@]}")" = "gh stack sync" ]
+}
+
+@test "native stack: a conflict is chrismo's, through gh stack, never sd act restack --resolve" {
+  local c=('.sync.up_to_date = false' '.sync.behind = 1' '.sync.conflict = true')
+  [ "$(keys "${NATIVE[@]}" "${c[@]}")" = "stack-conflict" ]
+  [ "$(step stack-conflict who "${NATIVE[@]}" "${c[@]}")" = you ]
+  [ "$(step stack-conflict say "${NATIVE[@]}" "${c[@]}")" = "conflicts with main in GitHub stack #29 (2 of 2): resolve it through gh stack, not sd act restack" ]
+  [ "$(step stack-conflict cmd "${NATIVE[@]}" "${c[@]}")" = "gh stack sync" ]
+}
+
+@test "native stack: a parent closed without merging is still chrismo's call, no stack step" {
+  local closed=('.pr.base = "base"' '.parent.name = "base"' '.parent.pr = {number: 3, state: "CLOSED"}'
+                '.sync.target = "base"' '.sync.up_to_date = false' '.sync.behind = 1')
+  [ "$(keys "${NATIVE[@]}" "${closed[@]}")" = parent-closed ]
+}
+
+@test "native stack: only behind the default branch is still no step" {
+  [ "$(keys "${NATIVE[@]}" '.sync.up_to_date = false' '.sync.behind = 40')" = ready ]
+}
+
+@test "native stack: GitHub's BEHIND (required up-to-date branches) is the sync step, never empty" {
+  local behind=('.pr.merge_state = "BEHIND"' '.sync.up_to_date = false' '.sync.behind = 3')
+  [ "$(keys "${behind[@]}")" = behind ]
+  [ "$(keys "${NATIVE[@]}" "${behind[@]}")" = stack-sync ]
+}
+
+@test "native stack: BEHIND with the parent just merged is GitHub's turn alone, not sync and wait together" {
+  local both=('.pr.merge_state = "BEHIND"' '.pr.base = "base"' '.parent.name = "base"' '.parent.merged = true'
+              '.parent.pr = {number: 3, state: "MERGED"}' '.sync.up_to_date = false' '.sync.behind = 1')
+  [ "$(keys "${NATIVE[@]}" "${both[@]}")" = stack-wait ]
+}
+
+@test "native stack: the parent merged: no retarget and no restack, GitHub does both" {
+  local merged=('.pr.base = "base"' '.parent.name = "base"' '.parent.merged = true'
+                '.parent.pr = {number: 3, state: "MERGED"}' '.sync.up_to_date = false' '.sync.behind = 1')
+  [ "$(keys "${merged[@]}")" = "behind retarget" ]
+  [ "$(keys "${NATIVE[@]}" "${merged[@]}")" = stack-wait ]
+  [ "$(step stack-wait who "${NATIVE[@]}" "${merged[@]}")" = wait ]
+  [ "$(step stack-wait say "${NATIVE[@]}" "${merged[@]}")" = "waiting on GitHub to retarget and rewrite this PR (stack #29)" ]
+  # GitHub's rewrite then shows up on the remote: pull it
+  [ "$(keys "${NATIVE[@]}" "${merged[@]}" '.push.remote_sha = "h2"' '.push.diverged = true' '.push.remote_ours = false' '.push.theirs = 2')" = stack-rewritten ]
+}
+
+@test "native stack: after GitHub retargeted and rewrote the PR, a stale sd-parent and behind main is still no step" {
+  local after=('.parent.name = "base"' '.parent.merged = true' '.parent.pr = {number: 3, state: "MERGED"}'
+               '.sync.up_to_date = false' '.sync.behind = 3' '.sync.parent_in_history = false')
+  [ "$(keys "${NATIVE[@]}" "${after[@]}")" = ready ]
+  # retargeted but not rewritten yet: the merged parent's commits are still ours to lose
+  [ "$(keys "${NATIVE[@]}" "${after[@]}" '.sync.parent_in_history = true')" = stack-wait ]
+  # ... even when the probe sees a conflict with main (it replays the parent's commits)
+  [ "$(keys "${NATIVE[@]}" "${after[@]}" '.sync.parent_in_history = true' '.sync.conflict = true')" = stack-wait ]
+  # a stale sd-parent with GitHub's BEHIND is still a sync, never an empty list
+  [ "$(keys "${NATIVE[@]}" "${after[@]}" '.pr.merge_state = "BEHIND"')" = stack-sync ]
+}
+
+@test "native stack: GitHub's rewrite on the remote is stack-rewritten, not a foreign push" {
+  local rewritten=('.push.remote_sha = "h2"' '.push.behind = 2' '.push.diverged = true' '.push.remote_ours = false' '.push.theirs = 2')
+  [ "$(keys "${rewritten[@]}")" = foreign ]
+  [ "$(keys "${NATIVE[@]}" "${rewritten[@]}")" = "stack-rewritten" ]
+  [ "$(step stack-rewritten say "${NATIVE[@]}" "${rewritten[@]}")" \
+    = "origin/feat has 2 commits this copy has never had, GitHub's rewrite of stack #29 (2 of 2) most likely: pull it (git log HEAD..origin/feat to look first)" ]
+  [ "$(step stack-rewritten cmd "${NATIVE[@]}" "${rewritten[@]}")" = "gh stack sync" ]
+  [ "$(step stack-rewritten who "${NATIVE[@]}" "${rewritten[@]}")" = you ]
+}
+
+@test "native stack: our own unpushed commits still push" {
+  [ "$(keys "${NATIVE[@]}" '.push.ahead = 1')" = "push" ]
+}

@@ -63,6 +63,10 @@ query($owner: String!, $repo: String!, $branch: String!, $commits: Boolean!) {
       nodes {
         number url state isDraft isCrossRepository headRepositoryOwner { login } baseRefName headRefOid mergeable mergedAt
         mergeStateStatus reviewDecision
+        # A native GitHub stack (gh stack): null outside one. In github.com's public schema with no
+        # preview header (checked 2026-10-16); a GitHub Enterprise Server schema was not checked, and
+        # one without these fields fails the whole query (gh_ok false for every branch).
+        stack { number size } stackEntry { position }
         reviewRequests(first: 20) { nodes { requestedReviewer {
           ... on User { login } ... on Bot { login } ... on Mannequin { login } ... on Team { slug } } } }
         # GitHub takes up to 250 on a PR's commits, not the usual 100.
@@ -214,7 +218,7 @@ holds_parent_commits() {
 }
 
 target_ref=$(ref "refs/remotes/$remote/$target")
-sync_ahead=null behind=null up_to_date=null old_base="" conflict=null
+sync_ahead=null behind=null up_to_date=null old_base="" conflict=null parent_in_history=null
 if [[ -z $target_ref ]]; then
   errors+=("no $remote/$target ref (not fetched?)")
 else
@@ -222,10 +226,23 @@ else
   behind=$(count "$head..$target_ref")
   base_pin=$(ref "refs/sheepdog/$branch/base")
   merged_head=$(prc_val "$parent_pr" 'coalesce(headRefOid, "")')
+  # A pin GitHub's rewrite of a native stack (#17) left behind is no error:
+  # GitHub keeps such a PR rebased on its base, so the base is the merge base.
+  rewritten=false
   if [[ -n $base_pin ]] && ! is_ancestor "$base_pin" "$head" && (( undone == 0 )); then
-    errors+=("base pin ${base_pin:0:7} is no longer in $branch's history (rewritten outside sheepdog?)")
+    if [[ $(prc_val "$pr" 'coalesce(stack, null) is not null') == true ]]; then rewritten=true
+    else errors+=("base pin ${base_pin:0:7} is no longer in $branch's history (rewritten outside sheepdog?)")
+    fi
   fi
-  if [[ -n $base_pin ]] && is_ancestor "$base_pin" "$head"; then
+  # The merged parent's head still in the branch, and not in the target (a
+  # squash or rebase merge left it behind): GitHub's rewrite hasn't landed.
+  if [[ $parent_merged == true && -n $merged_head ]]; then
+    parent_in_history=false
+    is_ancestor "$merged_head" "$head" && ! is_ancestor "$merged_head" "$target_ref" && parent_in_history=true
+  fi
+  if $rewritten; then
+    old_base=$(git merge-base "$target_ref" "$head" || true)
+  elif [[ -n $base_pin ]] && is_ancestor "$base_pin" "$head"; then
     old_base=$base_pin
   elif [[ $parent_merged == true && -n $merged_head ]] && is_ancestor "$merged_head" "$head"; then
     old_base=$merged_head
@@ -426,6 +443,7 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
     pr: nul(s.pr) ? null : {number: s.pr.number, url: s.pr.url, state: s.pr.state, draft: s.pr.isDraft,
                             base: s.pr.baseRefName, head_sha: s.pr.headRefOid, mergeable: s.pr.mergeable,
                             merge_state: s.pr.mergeStateStatus, review_decision: s.pr.reviewDecision,
+                            stack: nul(s.pr.stack) ? null : {number: s.pr.stack.number, position: coalesce(s.pr.stackEntry.position, null), size: s.pr.stack.size},
                             review_requests: coalesce([
                               unnest coalesce(s.pr.reviewRequests.nodes, [])
                               | values coalesce(requestedReviewer.login, requestedReviewer.slug, null)
@@ -435,7 +453,8 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
              pr: nul(s.parent_pr) ? null : {number: s.parent_pr.number, state: s.parent_pr.state, head_sha: s.parent_pr.headRefOid,
                                        commits: coalesce([unnest coalesce(s.parent_pr.allCommits.nodes, []) | values commit.oid], [])}},
     sync: {target: s.target, default: s.default_branch, ahead: s.sync_ahead, behind: s.behind, up_to_date: s.up_to_date,
-           old_base: s.old_base, conflict: s.conflict, undone: s.undone},
+           old_base: s.old_base, conflict: s.conflict, undone: s.undone,
+           parent_in_history: s.parent_in_history},
     push: {remote_sha: s.remote_sha, ahead: s.ahead, behind: s.push_behind, diverged: s.diverged, remote_ours: s.remote_ours, theirs: s.theirs},
     fresh: s.gh_ok and s.parent_ok ? len(s.stale) == 0 : null, stale: s.stale,
     ci: {sha: coalesce(c.oid, null), for_head: nul(c) ? null : c.oid == s.head,
@@ -474,12 +493,12 @@ errors_json='[]'
 (( ${#errors[@]} == 0 )) || errors_json=$(printf '%s\n' "${errors[@]}" | prc_strings)
 refs_json=$(git for-each-ref --format='%(refname) %(objectname)' "refs/sheepdog/$branch/" | prc_strings)
 args=$(printf '{"branch": %s, "head": %s, "pr": %s, "parent": %s, "parent_source": %s, "parent_pr": %s, "parent_merged": %s,
-  "target": %s, "default_branch": %s, "sync_ahead": %s, "behind": %s, "up_to_date": %s, "old_base": %s, "conflict": %s, "undone": %s,
+  "target": %s, "default_branch": %s, "sync_ahead": %s, "behind": %s, "up_to_date": %s, "old_base": %s, "conflict": %s, "undone": %s, "parent_in_history": %s,
   "remote_sha": %s, "ahead": %s, "push_behind": %s, "diverged": %s, "remote_ours": %s, "theirs": %s, "stale": %s,
   "r_local": %s, "r_bot": %s, "r_accepted": %s, "r_findings": %s, "r_findings_at_head": %s, "review_rounds": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s,
   "ignore": %s, "ignore_body": %s, "handled": %s, "refs": %s, "enrolled": %s, "harness": %s, "session": %s, "lock": %s, "errors": %s}\n' \
   "$(jstr "$branch")" "$(jstr "$head")" "$pr" "$(jstr "$parent")" "$(jstr "$parent_source")" "$parent_pr" "$parent_merged" \
-  "$(jstr "$target")" "$(jstr "$default_branch")" "$sync_ahead" "$behind" "$up_to_date" "$(jnull "$old_base")" "$conflict" "$undone" \
+  "$(jstr "$target")" "$(jstr "$default_branch")" "$sync_ahead" "$behind" "$up_to_date" "$(jnull "$old_base")" "$conflict" "$undone" "$parent_in_history" \
   "$(jnull "$remote_sha")" "$ahead" "$push_behind" "$diverged" "$remote_ours" "$theirs" "$stale_json" \
   "${review[local]}" "${review[bot]}" "${review[accepted]}" "$r_findings" "$r_findings_at_head" "$review_rounds" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" \
   "$ignore" "$ignore_body" "$(jlist "branch.$branch.sd-handled")" "$refs_json" \

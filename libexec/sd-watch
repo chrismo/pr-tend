@@ -27,6 +27,8 @@
 #   ci-red conflict human foreign parent-closed restack-undone: ❌ the PR is
 #     stuck or wrong
 #     until chrismo, or an agent chrismo starts, deals with it
+#   stack-rewritten stack-conflict: ❌ a PR in a native GitHub stack that GitHub
+#     rewrote, or that conflicts; chrismo pulls or resolves it through gh stack
 #   merged ready: chrismo acts (clean up, merge)
 #   review-decide: ❌ the local review still blocks after
 #     settings.reviewRounds rounds, or the agent declined its findings:
@@ -39,8 +41,8 @@
 #   attached: chrismo is in the branch's session; like merge-wait, keeps ready
 #   bot: routine agent work, picked up when the branch is next worked on
 #   review review-fix: the same
-#   behind push open-pr draft bot-trigger ci-rerun retarget: mechanical
-#   ci-wait review-wait parent-wait merge-wait: waiting; merge-wait (GitHub
+#   behind push open-pr draft bot-trigger ci-rerun retarget stack-sync: mechanical
+#   ci-wait review-wait parent-wait merge-wait stack-wait: waiting; merge-wait (GitHub
 #     recomputing after the base moved) keeps ready notified
 # A notification that fails is tried once more, on the next pass that still
 # shows its step, then given up on.
@@ -68,7 +70,7 @@ TIMEOUT=${SHEEPDOG_WATCH_TIMEOUT:-120}
 read -r -d '' CLASSIFY <<'EOF' || true
 values {next: kind(next) == "array" ? next : []}
 | values {next, k: coalesce([unnest next | values key], []),
-          red: coalesce([unnest next | where key in ["ci-red", "conflict", "human", "foreign", "parent-closed", "review-decide", "restack-undone"] | values {key, msg: say}], []),
+          red: coalesce([unnest next | where key in ["ci-red", "conflict", "human", "foreign", "parent-closed", "review-decide", "restack-undone", "stack-rewritten", "stack-conflict"] | values {key, msg: say}], []),
           waiting: len(coalesce([unnest next | where who != "wait"], [])) == 0}
 | values {carry: len(next) == 0 or "errors" in k or "stale" in k,
           keep: k == ["merge-wait"] or k == ["attached"] ? ["ready"] : [], ...(case

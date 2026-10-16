@@ -1203,3 +1203,16 @@ write_cfg() {
   [ "$status" -ne 0 ]
   [ ! -e "$PLIST" ]
 }
+
+@test "policy: GitHub's rewrite of a PR in a native stack is ❌ and notifies; behind its open parent is 🔧 and quiet" {
+  ps_fixture feat '.pr.stack = {number: 29, position: 2, size: 2} | .push = {remote_sha: "def", ahead: 0, behind: 2, diverged: true, remote_ours: false, theirs: 2}'
+  pass
+  [ "$(glyph repo)" = "❌" ]
+  [[ "$(notified)" == "repo feat|origin/feat has 2 commits this copy has never had, GitHub's rewrite of stack #29"* ]]
+  rm -rf "$SHEEPDOG_STATE_DIR" "$PS_FIXTURES/notified"
+  ps_fixture feat '.pr.stack = {number: 29, position: 2, size: 2} | .pr.base = "par" | .parent = {name: "par", merged: false, pr: {number: 5, state: "OPEN"}}
+    | .sync = {target: "par", default: "main", behind: 1, up_to_date: false, conflict: false}'
+  pass
+  [ "$(glyph repo)" = "🔧" ]
+  [ -z "$(notified)" ]
+}
