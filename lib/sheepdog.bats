@@ -72,6 +72,25 @@ stack_setup() {
   [ "$output" = "par $(git rev-parse par)" ]
 }
 
+@test "stacked_on: a branch reset onto its parent's tip still names the parent" {
+  stack_setup
+  git switch -q main && git switch -qc kid2 && git reset -q --hard par && git commit -q --allow-empty -m k2
+  run stacked_on kid2 origin main
+  [ "$status" -eq 0 ]
+  [ "$output" = "par $(git rev-parse par)" ]
+}
+
+@test "stacked_on: a recorded child with no commits of its own isn't its parent's parent, reflog or not" {
+  stack_setup
+  git switch -q par && git branch -qD kid
+  git branch fresh par && git config branch.fresh.sd-parent par
+  c par p3
+  git reflog expire --expire=all --all
+  run stacked_on par origin main
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
 @test "stacked_on: without a reflog, a moved parent still can't tell its child from a parent" {
   stack_setup
   local fork; fork=$(git rev-parse par)
@@ -172,6 +191,16 @@ stack_setup() {
   git switch -qc topic && git commit -q --allow-empty -m t1
   run stacked_on topic origin main
   [ "$status" -eq 1 ]
+}
+
+@test "stacked_on: two topics made from unpushed commits on the local default branch aren't stacked" {
+  git update-ref refs/remotes/origin/main main
+  c main m1
+  git switch -qc t1 && git commit -q --allow-empty -m t1
+  git switch -q main && git switch -qc t2 && git commit -q --allow-empty -m t2
+  run stacked_on t1 origin main
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
 }
 
 @test "stacked_on: a branch's own child isn't its parent" {
