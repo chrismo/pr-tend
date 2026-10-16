@@ -664,11 +664,12 @@ autofix() {
 }
 
 # no_base_why <branch> <state>: why sd state found no base: its errors, else a
-# parent that exists only here, which sd state reports as a step (#105).
+# parent that exists only here, which sd state reports as a step (#105; the
+# same test as next.sh's parent_unpushed, and RESTACK_GATE's why).
 no_base_why() {
   local remote; remote=$(prc_get settings.remote "$1" false) || remote=origin
   prc_val "$2" "len(coalesce(errors, [])) > 0 ? sj(errors, \"; \")
-    : on(parent.local) and on(parent.on_remote == false)
+    : on(parent.local) and on(parent.on_remote == false) and on(parent.merged == false) and nul(parent.pr)
       ? f\"parent {parent.name} isn't on $remote yet: ship it first (sd act ship {parent.name})\" : \"\""
 }
 
@@ -1584,7 +1585,7 @@ patch_id() { git diff -U0 "$1" "$2" | git patch-id --stable | cut -d' ' -f1; }
 read -r -d '' RESTACK_GATE <<'EOF' || true
 values {remote, resolve, s, onto: f"{remote}/{s.sync.target}",
         why: len(coalesce(s.errors, [])) > 0 ? sj(s.errors, "; ")
-             : on(s.parent.local) and on(s.parent.on_remote == false)
+             : on(s.parent.local) and on(s.parent.on_remote == false) and on(s.parent.merged == false) and nul(s.parent.pr)
                ? f"parent {s.parent.name} isn't on {remote} yet: ship it first (sd act ship {s.parent.name})" : "",
         from_parent: coalesce([unnest {p: coalesce(s.parent.pr.commits, []), r: replay} | where r in p | values r], [])}
 | values [
