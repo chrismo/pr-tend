@@ -242,20 +242,25 @@ parent_in_head() {
 # the same here, an open one is on GitHub but not fetched, a failed gh
 # lookup leaves both unknown, and one already on the default branch landed
 # without a PR.
-parent_local=null parent_remote=null parent_unpushed=false
+parent_local=null parent_remote=null parent_unpushed=false parent_landed=false
 if [[ $parent != "$default_branch" ]]; then
   if git show-ref -q --verify "refs/heads/$parent"; then parent_local=true; else parent_local=false; fi
   if [[ -n $(ref "refs/remotes/$remote/$parent") ]]; then parent_remote=true; else parent_remote=false; fi
-  [[ $parent_local == true && $parent_remote == false && $parent_merged == false \
-     && $(prc_val "$parent_pr" 'this is null') == true ]] \
-    && ! is_ancestor "refs/heads/$parent" "refs/remotes/$remote/$default_branch" && parent_unpushed=true
+  if [[ $parent_local == true && $parent_remote == false && $parent_merged == false \
+        && $(prc_val "$parent_pr" 'this is null') == true ]]; then
+    if is_ancestor "refs/heads/$parent" "refs/remotes/$remote/$default_branch"; then parent_landed=true
+    else parent_unpushed=true; fi
+  fi
 fi
 
 target_ref=$(ref "refs/remotes/$remote/$target")
 sync_ahead=null behind=null up_to_date=null old_base="" conflict=null by_tree=false
 if [[ -z $target_ref ]]; then
-  [[ $target == "$parent" && $parent_unpushed == true ]] \
-    || errors+=("no $remote/$target ref (not fetched?)")
+  if [[ $target == "$parent" && $parent_landed == true ]]; then
+    errors+=("$parent has no commits beyond $remote/$default_branch and isn't on $remote: if it landed, point sd-parent at $default_branch; else commit to it and ship it first")
+  elif [[ $target != "$parent" || $parent_unpushed != true ]]; then
+    errors+=("no $remote/$target ref (not fetched?)")
+  fi
 else
   sync_ahead=$(count "$target_ref..$head")
   behind=$(count "$head..$target_ref")

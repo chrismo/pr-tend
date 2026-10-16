@@ -727,6 +727,7 @@ squash_parent_away() {
   [ "$(field .parent.on_remote)" = false ]
   [ "$(field .parent.unpushed)" = false ]
   [ "$(field '[.next[].key] | index("ship-parent")')" = null ]
+  [[ "$(field '.errors | join(" ")')" == *"parent has no commits beyond origin/main and isn't on origin"* ]]
 }
 
 @test "parent: a parent that exists nowhere is still an error" {

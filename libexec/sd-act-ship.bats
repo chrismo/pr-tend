@@ -158,7 +158,7 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   git switch -q feat && git rebase -q A && git config branch.feat.sd-parent A
   run "$SD_ACT" ship
   [ "$status" -ne 0 ]
-  [[ "$output" == *"no origin/A ref"* ]]
+  [[ "$output" == *"A has no commits beyond origin/main"*"point sd-parent at main"* ]]
   [[ "$output" != *"sd act ship A"* ]]
   [ -z "$(calls)" ]
 }
