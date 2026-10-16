@@ -750,6 +750,16 @@ lost_pin_stack() {
   [ "$(field .review.findings.at_head)" = false ]
 }
 
+@test "review: a findings record whose base is gone is just not at HEAD" {
+  git switch -qc feat && commit a.txt a
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: "0123456789abcdef0123456789abcdef01234567", round: 1,
+          findings: [{file: "a.txt", line: 1, severity: "error", body: "x"}]}')
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
+  commit b.txt b
+  state
+  [ "$(field .review.findings.at_head)" = false ]
+}
+
 @test "review: a pin's recorded base keeps it covered across a restack past a squash-merged parent" {
   git switch -qc p && commit p.txt p
   git switch -qc feat && commit a.txt a

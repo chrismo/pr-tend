@@ -482,6 +482,16 @@ findings_at() {
   grep -q 'c should be C' "$FX/claude.prompt"
 }
 
+@test "implement: with a findings record, sd state failing is a failure, not the task prompt" {
+  started
+  findings_at HEAD 1
+  mkdir -p "$TMP/broken" && printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP/broken/sd-state" && chmod +x "$TMP/broken/sd-state"
+  PATH="$TMP/broken:$PATH" run "$SD_ACT" implement
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"sd state failed"* ]]
+  [ ! -e "$FX/claude.prompt" ]
+}
+
 @test "implement: findings on an older head stay out of the prompt" {
   started
   findings_at HEAD 1

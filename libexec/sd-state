@@ -318,9 +318,10 @@ if [[ $r_findings != null ]]; then
   f_head=$(prc_val "$r_findings" head) f_base=$(prc_val "$r_findings" 'coalesce(base, "")')
   if [[ $f_head == "$head" ]]; then
     r_findings_at_head=true
-  elif [[ -n $f_base && -n ${old_base:-} ]] && git cat-file -e "$f_head^{commit}" 2>/dev/null; then
-    f_patch=$(patch_id "$f_base" "$f_head")
-    [[ -n $f_patch && $f_patch == "$(patch_id "$old_base" "$head")" ]] && r_findings_at_head=true
+  elif [[ -n $f_base && -n ${old_base:-} ]] && git cat-file -e "$f_head^{commit}" 2>/dev/null \
+       && git cat-file -e "$f_base^{commit}" 2>/dev/null; then
+    f_patch=$(patch_id "$f_base" "$f_head" || true)
+    [[ -n $f_patch && $f_patch == "$(patch_id "$old_base" "$head" || true)" ]] && r_findings_at_head=true
   fi
 fi
 

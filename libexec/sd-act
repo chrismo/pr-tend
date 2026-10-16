@@ -99,8 +99,15 @@
 #             libexec/sd-review-local) over the branch's own change, base..HEAD.
 #             Clean, or only nits: pin local at HEAD. Errors or warnings:
 #             printed as JSON and recorded (refs/sheepdog/<b>/findings: head,
-#             base, round, findings), nothing pinned; each such review is the
-#             next round. A failed reviewer is never clean. Spends tokens.
+#             base, round, findings; implement adds declined and reason),
+#             nothing pinned; each such review is the next round, until a pin
+#             clears the record. A failed reviewer is never clean. sd state
+#             shows the record and NEXT follows it: findings about HEAD (the
+#             same change, even rebased) go to the agent (review-fix: sd act
+#             implement, its prompt carrying them) below settings.reviewRounds,
+#             and to chrismo (review-decide) at the cap or once the agent
+#             declines them by changing nothing; findings on an older head get
+#             a new review. Spends tokens.
 #             --accept: pin accepted at HEAD instead, reviewing nothing (HEAD
 #             is reviewed enough), and drop the findings
 #   describe  the agent writes the PR title and body (J6) from the task, the
@@ -974,7 +981,7 @@ EOF
 
 # implement_run <branch> <worktree>
 implement_run() {
-  local b=$1 wt=$2 task verify before prompt result outcome summary msg extra rule rec listed="" allow=$HARNESS_CLAUDE_ALLOW
+  local b=$1 wt=$2 task verify before prompt result outcome summary msg extra rule rec state listed="" allow=$HARNESS_CLAUDE_ALLOW
   local -a rules=()
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
   task=$(git config --get "branch.$b.sd-task" || true)
@@ -983,8 +990,10 @@ implement_run() {
   # them: then this run fixes those, with the task as context.
   rec=$(git cat-file blob "refs/sheepdog/$b/findings" 2>/dev/null || true)
   # sd state decides whether they're about HEAD, so NEXT and this agree.
-  if [[ -n $rec ]] \
-     && [[ $(cd "$wt" && sd-state --json "$b" | prc_line 'values on(review.findings.at_head)') == true ]]; then
+  if [[ -n $rec ]]; then
+    state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
+  fi
+  if [[ -n $rec && $(prc_line 'values on(review.findings.at_head)' "$state") == true ]]; then
     listed=$(prc_line 'where not on(declined) | unnest findings | where coalesce(severity, "") != "nit"
       | values f"- {file}:{line} ({severity}) {body}"' "$rec" 2>/dev/null || true)
   fi

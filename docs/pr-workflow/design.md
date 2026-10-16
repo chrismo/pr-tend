@@ -201,8 +201,6 @@ repeat offender means the step-contract prompt needs tightening.
 | SHA last locally reviewed clean | `refs/sheepdog/<branch>/local` |
 | SHA bot was triggered on | `refs/sheepdog/<branch>/bot` |
 | SHA accepted as reviewed enough (J5 "no") | `refs/sheepdog/<branch>/accepted` |
-| Open local review findings | `refs/sheepdog/<branch>/findings`: a blob, `{head, base, round, findings, declined?, reason?}` |
-| Review rounds before chrismo decides | `settings.reviewRounds` (config files), 3 by default |
 | Bot command / login | `settings.botCommand`, `settings.botLogin` (config files) |
 | Local reviewer script | `settings.localReview` (config files) |
 | Local review guidance | `settings.reviewPrompt` (config files): a path; relative ones read from the base commit |
@@ -604,24 +602,6 @@ step. `sd act review` gives the default reviewer 30 s over `stepTimeout`, so the
 harness's own timeout fires first. `sd act review` runs it after `sd act verify`
 passes, over `base..HEAD`; an empty list pins `local` (with its base),
 findings are printed as JSON, and a failed reviewer pins nothing.
-
-**Findings, rounds and accepting (#84, built 2026-10-16).** Nits never block:
-a review with only nits pins `local` and prints them. A review with an error or
-a warning writes `refs/sheepdog/<branch>/findings`, a blob holding head, base,
-round and the findings. Each such review is the next round, and a pin clears
-the record. `sd state` shows the record (`review.findings`; `--long` lists the
-findings), and NEXT goes from it:
-
-| Record | NEXT |
-|---|---|
-| at HEAD, round < `settings.reviewRounds` | `review-fix` (agent): `sd act implement`, its prompt carrying the findings |
-| at HEAD, the agent changed nothing (declined) | `review-decide` (you): fix, or `sd act review --accept` |
-| at HEAD, round ≥ the cap | `review-decide` (you) |
-| on an older head | `review` (agent): review the new commits |
-
-`sd act review --accept` pins `accepted` at HEAD with its base: chrismo's call
-that HEAD is reviewed enough. It's J5's "no re-review" made by hand. The
-automatic J5 and the labels are #66.
 
 **Contract:**
 
