@@ -32,17 +32,23 @@ commits_not_ours() {
   sed -n 's/^./^&/p' <<<"$1" | git rev-list --count --stdin "$2"
 }
 
-# step_guidance <setting> <branch> <default-file>: the guidance part of a step's
-# prompt: the file settings.<setting> names (relative to the worktree's top),
-# else <default-file>. A named file that is missing is an error, never the
-# default. The same shape fits any step whose guidance is configurable.
+# step_guidance <setting> <branch> <base> <default-file>: the guidance part of a
+# step's prompt: the file settings.<setting> names, else <default-file>. A
+# relative path is read from the <base> commit, which the branch's agent can't
+# rewrite; an absolute one from disk. A named file that is missing is an error,
+# never the default. The same shape fits any step whose guidance is configurable.
 step_guidance() {
   local path
   path=$(prc_get "settings.$1" "$2" false) || return 1
-  [[ -n $path ]] || path=$3
-  [[ $path == /* ]] || path="$(git rev-parse --show-toplevel)/$path" || return 1
-  [[ -f $path ]] || { echo "settings.$1: no such file: $path" >&2; return 1; }
-  cat "$path"
+  if [[ -z $path ]]; then
+    cat "$4"
+  elif [[ $path == /* ]]; then
+    [[ -f $path ]] || { echo "settings.$1: no such file: $path" >&2; return 1; }
+    cat "$path"
+  else
+    git show "$3:$path" 2>/dev/null \
+      || { echo "settings.$1: no such file in ${3:0:7}: $path" >&2; return 1; }
+  fi
 }
 
 # Claude may read and edit; the pipeline commits, pushes and talks to GitHub.

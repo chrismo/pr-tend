@@ -92,7 +92,7 @@ EOF
 @test "a fresh session each run, read-only tools, a schema" {
   "$REVIEW" >/dev/null
   grep -qx -- --session-id "$FX/claude.args"
-  ! grep -qx -- --resume "$FX/claude.args"
+  ! grep -qx -- --resume "$FX/claude.args" || false
   grep -qx -- --json-schema "$FX/claude.args"
   allow=$(grep -A1 -x -- --allowedTools "$FX/claude.args" | tail -1)
   [[ $allow != *Edit* && $allow != *Write* ]]
@@ -141,17 +141,23 @@ EOF
   "$SD_CONFIG" set --global settings.reviewPrompt "$TMP/guide.md"
   "$REVIEW" >/dev/null
   grep -q 'Look only for off-by-one errors.' "$FX/claude.prompt"
-  ! grep -q 'Find what a careful reviewer would flag' "$FX/claude.prompt"
+  ! grep -q 'Find what a careful reviewer would flag' "$FX/claude.prompt" || false
   grep -q 'No findings is a valid' "$FX/claude.prompt"
   grep -q '^+three added' "$FX/claude.prompt"
 }
 
-@test "settings.reviewPrompt: a relative path resolves against the worktree, not the cwd" {
+@test "settings.reviewPrompt: a relative path is read from the base commit, not the worktree" {
+  git switch -q --detach "$BASE"
   mkdir -p .sheepdog sub
-  printf 'Repo guidance.\n' > .sheepdog/review-prompt.md
+  printf 'Base guidance.\n' > .sheepdog/review-prompt.md
+  git add .sheepdog && git commit -qm "review guidance"
+  BASE=$(git rev-parse HEAD)
+  printf 'Weaker guidance.\n' > .sheepdog/review-prompt.md
+  git commit -qam "the branch rewrites it"
+  export SHEEPDOG_BASE=$BASE SHEEPDOG_HEAD=$(git rev-parse HEAD)
   "$SD_CONFIG" set --global settings.reviewPrompt .sheepdog/review-prompt.md
   (cd sub && "$REVIEW" >/dev/null)
-  grep -q 'Repo guidance.' "$FX/claude.prompt"
+  [ "$(head -1 "$FX/claude.prompt")" = "Base guidance." ]
 }
 
 @test "settings.reviewPrompt: a missing file fails, nothing on stdout, no review run" {
@@ -161,4 +167,13 @@ EOF
   [ -z "$output" ]
   [[ "$stderr" == *nope.md* ]]
   [ ! -e "$FX/claude.args" ]
+}
+
+@test "settings.reviewPrompt: a relative path only the worktree has is missing" {
+  mkdir -p .sheepdog && printf 'Uncommitted.\n' > .sheepdog/review-prompt.md
+  "$SD_CONFIG" set --global settings.reviewPrompt .sheepdog/review-prompt.md
+  run --separate-stderr "$REVIEW"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *".sheepdog/review-prompt.md"* ]]
 }

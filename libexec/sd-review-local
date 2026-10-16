@@ -14,10 +14,11 @@
 #
 # Harness, model and effort come from `sd config step review`. Every run is a
 # new session (fresh context, never the authoring conversation) with read-only
-# tools: no edits, no gh. The prompt is the guidance (settings.reviewPrompt, a
-# file relative to the worktree; empty means lib/review-prompt.md), then the
-# fixed reporting rules (lib/review-rules.md), the task, the commits and the
-# diff. See docs/pr-workflow/design.md, "Local review".
+# tools: no edits, no gh. The prompt is the guidance (settings.reviewPrompt: a
+# path, relative ones read from SHEEPDOG_BASE so the branch can't rewrite its
+# own review; empty means lib/review-prompt.md), then the fixed reporting
+# rules (lib/review-rules.md), the task, the commits and the diff. See
+# docs/pr-workflow/design.md, "Local review".
 
 set -euo pipefail
 
@@ -41,8 +42,10 @@ timeout=$(prc_get settings.stepTimeout "$branch" false) || die "sd config failed
 diff=$(git diff "$SHEEPDOG_BASE" "$SHEEPDOG_HEAD") || die "git diff $SHEEPDOG_BASE $SHEEPDOG_HEAD failed"
 commits=$(git log --format='- %s' "$SHEEPDOG_BASE..$SHEEPDOG_HEAD")
 range="${SHEEPDOG_BASE:0:7}..${SHEEPDOG_HEAD:0:7}"
-prompt=$(step_guidance reviewPrompt "$branch" "$LIB/review-prompt.md") || die "can't read the review guidance"
-prompt+=$'\n\n'"$(cat "$LIB/review-rules.md")"
+prompt=$(step_guidance reviewPrompt "$branch" "$SHEEPDOG_BASE" "$LIB/review-prompt.md") \
+  || die "can't read the review guidance"
+rules=$(cat "$LIB/review-rules.md") || die "can't read $LIB/review-rules.md"
+prompt+=$'\n\n'"$rules"
 prompt+=$'\n\nTask: '"${SHEEPDOG_TASK:-(none recorded)}"
 prompt+=$'\n\nCommits ('"$range"$'):\n'"$commits"
 prompt+=$'\n\nDiff:\n'"$diff"
