@@ -16,9 +16,10 @@
 # new session (fresh context, never the authoring conversation) with read-only
 # tools: no edits, no gh. The prompt is the guidance (settings.reviewPrompt: a
 # path, relative ones read from SHEEPDOG_BASE so the branch can't rewrite its
-# own review; empty means lib/review-prompt.md), then the fixed reporting
-# rules (lib/review-rules.md), the task, the commits and the diff. Why a
-# local review before the bot: #79 (Design record).
+# own review; empty means .sheepdog/review.md in the base commit, else
+# lib/prompts/review.md), then the fixed reporting rules (lib/review-rules.md),
+# the task, the commits and the diff. Why a local review before the bot: #79
+# (Design record).
 
 set -euo pipefail
 
@@ -42,7 +43,7 @@ timeout=$(prc_get settings.stepTimeout "$branch" false) || die "sd config failed
 diff=$(git diff "$SHEEPDOG_BASE" "$SHEEPDOG_HEAD") || die "git diff $SHEEPDOG_BASE $SHEEPDOG_HEAD failed"
 commits=$(git log --format='- %s' "$SHEEPDOG_BASE..$SHEEPDOG_HEAD")
 range="${SHEEPDOG_BASE:0:7}..${SHEEPDOG_HEAD:0:7}"
-prompt=$(step_guidance reviewPrompt "$branch" "$SHEEPDOG_BASE" "$LIB/review-prompt.md") \
+prompt=$(step_guidance reviewPrompt "$branch" "$SHEEPDOG_BASE" "$LIB/prompts/review.md") \
   || die "can't read the review guidance"
 rules=$(cat "$LIB/review-rules.md") || die "can't read $LIB/review-rules.md"
 prompt+=$'\n\n'"$rules"
