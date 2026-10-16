@@ -217,7 +217,24 @@ inherit_main() { git branch -q --set-upstream-to=origin/main "${1:-feat}"; }
   [[ "$output" == "force-pushed feat to origin (dropped 1 commit;"* ]] || false
 }
 
-@test "a rewrite over commits this branch had keeps pushing with a lease, whoever made them (a restack past a colleague's squash) (#86)" {
+@test "a restack past a colleague's squash-merged commit drops it from the branch: pushed with a lease (#86)" {
+  inherit_main
+  upstream theirs
+  git fetch -q origin && git merge -q --ff-only origin/feat
+  commit mine
+  "$SD_ACT" push >/dev/null
+  (cd "$TMP/other" && git checkout -q main && git pull -q origin main \
+     && echo theirs >> other.txt && git add other.txt \
+     && git -c user.email=them@example.com -c user.name=Them commit -qm "theirs (#1)" && git push -q origin main 2>/dev/null)
+  git fetch -q origin && git rebase -q origin/main
+  [ "$(git log --format=%s origin/main..feat)" = "$(printf '%s\n' mine feat)" ]
+  run "$SD_ACT" push
+  [ "$status" -eq 0 ]
+  [ "$(remote feat)" = "$(git rev-parse feat)" ]
+  [[ "$output" == "force-pushed feat to origin (rewritten;"* ]] || false
+}
+
+@test "taken, reset away, then a new commit: the rewrite path leases over the taken commit, as before #86 (only a pure drop checks who made it)" {
   inherit_main
   upstream theirs
   git fetch -q origin && git merge -q --ff-only origin/feat
