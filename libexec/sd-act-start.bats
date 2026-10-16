@@ -2,14 +2,15 @@
 
 bats_require_minimum_version 1.5.0
 
-# Test suite for `sd act start` (A0: a worktree beside this one on a branch of
-# the same name, set up by the repo's hook, with the task, parent and base
+# Test suite for `sd act start` (A0: a worktree beside the main worktree, named
+# after the branch with slashes as dashes, set up by the repo's hook, with the task, parent and base
 # recorded and the branch enrolled; then implement) and `sd act implement`
 # (J0: the agent edits in the branch's session, the pipeline commits and runs
 # verify).
 #
-# The worktree half duplicates agent-rig's wt-new (#14): same placement, same
-# branch resolution, same hook locations, stdout exactly the path.
+# The worktree half duplicates agent-rig's wt-new (#14): same branch
+# resolution, same hook locations, stdout exactly the path. Placement differs
+# since #85: beside the main worktree, never beside a linked one.
 #
 # Real git (a bare origin, our clone at $TMP/repo, $TMP/other for pushes that
 # aren't ours). gh is a stub with no PRs. claude edits through $FX/agent and
@@ -78,14 +79,14 @@ sha() { git rev-parse "$1"; }
   [ ! -e "$TMP/feat-x" ]
 }
 
-@test "start: a worktree beside this one, on a new branch of the same name; stdout is only its path" {
+@test "start: a worktree beside the main one, on a new branch of the same name; stdout is only its path" {
   run --separate-stderr "$SD_ACT" start --no-implement feat-x
   [ "$status" -eq 0 ]
   [ "$output" = "$TMP/feat-x" ]
   [ "$(git -C "$TMP/feat-x" branch --show-current)" = feat-x ]
 }
 
-@test "start: placed beside the current worktree's root, from a subdirectory too" {
+@test "start: placed beside the main worktree, from a subdirectory too" {
   mkdir -p sub/deeper && cd sub/deeper
   run --separate-stderr "$SD_ACT" start --no-implement feat-x
   [ "$status" -eq 0 ]

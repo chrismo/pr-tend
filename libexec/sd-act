@@ -574,8 +574,12 @@ step_store() {
 
 # ── start: A0 ───────────────────────────────────────────────────────────────
 
-# Duplicates agent-rig's wt-new (#14), hook locations included, so a repo set
-# up for new_wt needs nothing more.
+# Duplicates agent-rig's wt-new (#14), hook locations and branch resolution
+# included, so a repo set up for new_wt needs nothing more. Placement differs
+# (#85): beside the main worktree, not beside the current one.
+
+# main_worktree: the repo's main worktree, where sheepdog's shared files live.
+main_worktree() { git worktree list --porcelain | sed -n '1s/^worktree //p'; }
 
 # start_default <remote>
 start_default() {
@@ -615,15 +619,14 @@ start_hook() {
 }
 
 start() {
-  local b=$branch remote src main dst from="" base="" default rc=0
+  local b=$branch remote src dst from="" base="" default rc=0
   git check-ref-format --branch "$b" >/dev/null 2>&1 || die "not a valid branch name: $b"
   $no_implement || [[ -n $task_arg ]] || die "no task: sd act start $b \"<task>\" (or --no-implement)"
   src=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a worktree"
   # Beside the main worktree, whichever worktree this runs from, so a stack
   # built with cd "$(sd act start ...)" stays in one place; a slash in the
   # branch name would make directories, so it becomes a dash (#85).
-  main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-  dst="$(dirname "$main")/${b//\//-}"
+  dst="$(dirname "$(main_worktree)")/${b//\//-}"
   [[ ! -e $dst ]] || die "$dst already exists"
   remote=$(prc_get settings.remote "$b" false) || die "sd config failed"
   git fetch --quiet --prune "$remote" || die "fetch from $remote failed"
@@ -1219,7 +1222,7 @@ enroll_mark() {
   local b=$1 main_worktree
   git rev-parse -q --verify "refs/heads/$b" >/dev/null || die "no such branch: $b"
   git config "branch.$b.sheepdog" true
-  main_worktree=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+  main_worktree=$(main_worktree)
   if ! grep -qxF "$main_worktree" <<<"$(git config --global --get-all sheepdog.repo || true)"; then
     git config --global --add sheepdog.repo "$main_worktree"
   fi
@@ -1242,7 +1245,7 @@ case $verb in
     echo "forgot $branch"
     ;;
   unregister)
-    path=${positional:-$(git worktree list --porcelain | sed -n '1s/^worktree //p')}
+    path=${positional:-$(main_worktree)}
     if ! $force && [[ -d $path ]]; then
       mapfile -t enrolled < <(git -C "$path" config --get-regexp '^branch\..*\.sheepdog$' 2>/dev/null \
         | awk '$2 == "true" { sub(/^branch\./, "", $1); sub(/\.sheepdog$/, "", $1); print $1 }')
