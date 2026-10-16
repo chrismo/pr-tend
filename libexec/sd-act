@@ -96,13 +96,14 @@
 #             review not covering HEAD is a soft refusal
 #   attach    takeover (A9): hold branch.<b>.sd-lock, open the branch's
 #             session interactively in its worktree (claude --resume, or pi
-#             --session-id; a new session when none is stored), release the
-#             lock when the session exits, Ctrl-C included. While the lock is
-#             held, agent steps (implement, address, restack --resolve,
-#             review, describe) and the verbs that publish refuse to run;
-#             verify and the rest of sd state's mechanics go on. A lock whose
-#             process is gone from this host is stale: attach replaces it, an
-#             agent step clears it and runs
+#             --session-id; a new session when none is stored, kept once the
+#             harness wrote its transcript), with the harness block's model,
+#             effort, provider and args; release the lock when the session
+#             exits, Ctrl-C included. While the lock is held, agent steps
+#             (implement, address, restack --resolve, review, describe) and
+#             the verbs that publish refuse to run; verify and the rest of
+#             sd state's mechanics go on. A lock whose process is gone from
+#             this host is stale, and every sd act verb clears it first
 #
 # --force:
 #   address         run even if the branch is unpushed, diverged or taken over
@@ -593,16 +594,22 @@ lock_stale() {
   ! kill -0 "$pid" 2>/dev/null
 }
 
+# lock_sweep <branch>: clear a stale lock, so every verb's gate sees only live ones.
+lock_sweep() {
+  local lock
+  lock=$(git config --get "branch.$1.sd-lock" 2>/dev/null || true)
+  [[ -n $lock ]] && lock_stale "$lock" || return 0
+  echo "sd act: clearing a stale lock on $1 ($lock)" >&2
+  git config --unset "branch.$1.sd-lock"
+}
+
 # attached_check <branch> <doing>: an agent step on an attached branch is
-# refused (--force runs it anyway); a stale lock is cleared and the step runs.
+# refused; --force runs it anyway.
 attached_check() {
   local lock
   lock=$(git config --get "branch.$1.sd-lock" || true)
   [[ -n $lock ]] || return 0
-  if lock_stale "$lock"; then
-    echo "sd act: clearing a stale lock on $1 ($lock)" >&2
-    git config --unset "branch.$1.sd-lock"
-  elif $force; then
+  if $force; then
     echo "sd act: warning: $1 is attached ($lock); running anyway" >&2
   else
     die "not $2: attached ($lock). Exit that session, or --force"
@@ -615,17 +622,41 @@ attach_release() {
   git config --unset "branch.$1.sd-lock"
 }
 
+# harness_flags <harness> <branch>: the harness block's model, effort,
+# provider and args as the TUI's flags, the typed ones as harness_run
+# passes them. Printed one per line; args split on whitespace.
+harness_flags() {
+  local h=$1 b=$2 k v rc
+  for k in provider model effort args; do
+    v=$(prc_get "harnesses.$h.$k" "$b" false) || { rc=$?; (( rc == 3 )) || die "sd config failed"; continue; }
+    [[ -n $v ]] || continue
+    case $h:$k in
+      claude:model|pi:model) printf -- '--model\n%s\n' "$v" ;;
+      claude:effort) printf -- '--effort\n%s\n' "$v" ;;
+      pi:effort) printf -- '--thinking\n%s\n' "$v" ;;
+      pi:provider) printf -- '--provider\n%s\n' "$v" ;;
+      *:args) tr -s ' \t' '\n\n' <<<"$v" | sed '/^$/d' ;;
+    esac
+  done
+}
+
+# session_exists <harness> <id>: the harness wrote a transcript for the session.
+session_exists() {
+  case $1 in
+    claude) find "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -maxdepth 2 -name "$2.jsonl" 2>/dev/null | grep -q . ;;
+    pi) find "${PI_CODING_AGENT_SESSION_DIR:-$HOME/.pi/agent/sessions}" -maxdepth 2 -name "*_$2.jsonl" 2>/dev/null | grep -q . ;;
+  esac
+}
+
 attach() {
   local b=$branch wt lock stored_h h sid mode rc=0
-  local -a cmd
+  local -a cmd flags
   wt=$(worktree_for "$b")
   [[ -n $wt ]] || die "$b isn't checked out in any worktree"
   lock=$(git config --get "branch.$b.sd-lock" || true)
   if [[ -n $lock ]]; then
-    if lock_stale "$lock"; then echo "sd act: replacing a stale lock on $b ($lock)" >&2
-    elif $force; then echo "sd act: taking over $b's lock ($lock)" >&2
-    else die "$b is already attached ($lock); exit that session, or --force to take it over"
-    fi
+    $force || die "$b is already attached ($lock); exit that session, or --force to take it over"
+    echo "sd act: taking over $b's lock ($lock)" >&2
   fi
   stored_h=$(git config --get "branch.$b.sd-harness" || true)
   sid=$(git config --get "branch.$b.sd-session" || true)
@@ -643,20 +674,21 @@ attach() {
     pi) cmd=(pi --session-id "$sid") ;;
     *) die "unknown harness: $h (claude or pi)" ;;
   esac
+  mapfile -t flags < <(harness_flags "$h" "$b")
   ATTACH_LOCK="$$@$(hostname) $(date -u +%FT%TZ)"
   git config "branch.$b.sd-lock" "$ATTACH_LOCK"
-  # A signal while the TUI runs is handled once it exits (bash waits for the
-  # foreground child); the EXIT trap then releases the lock either way.
+  # The TUI gets Ctrl-C and a closed terminal before this shell does, and bash
+  # holds a signal until the foreground child exits; the no-op traps then let
+  # the session be recorded, and the EXIT trap releases the lock either way.
   trap 'attach_release "$b"' EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
-  trap 'exit 129' HUP
+  trap : INT TERM HUP
   echo "sd act: attached to $b: $h ($mode session $sid) in $wt; agent steps wait until you exit" >&2
-  (cd "$wt" && "${cmd[@]}") || rc=$?
-  # The session exists once the TUI ran; 127 is the harness not running at all.
-  if (( rc != 127 )); then
+  (cd "$wt" && "${cmd[@]}" "${flags[@]}") || rc=$?
+  if [[ $mode == resume ]] || session_exists "$h" "$sid"; then
     git config "branch.$b.sd-session" "$sid"
     git config "branch.$b.sd-harness" "$h"
+  else
+    echo "sd act: $h wrote no transcript for session $sid, so nothing is stored; attach again to start one" >&2
   fi
   exit "$rc"
 }
@@ -1310,6 +1342,7 @@ enroll_branch() {
   record_lineage "$1"
 }
 
+lock_sweep "$branch"
 case $verb in
   enroll) enroll_branch "$branch" ;;
   unenroll)

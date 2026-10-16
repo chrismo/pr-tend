@@ -10,7 +10,8 @@ bats_require_minimum_version 1.5.0
 # claude and pi are stubs standing in for the TUI: they record their args,
 # cwd and the lock as it is while they run, then exit as $FX says
 # ($FX/agent runs first, $FX/exit is the status, $FX/hang waits for a
-# signal). gh is a stub with
+# signal), and write the session's transcript where the real ones do
+# ($CLAUDE_CONFIG_DIR, $PI_CODING_AGENT_SESSION_DIR), unless $FX/no-transcript. gh is a stub with
 # no PRs, for the verbs that read sd state first.
 
 SD_ACT="$BATS_TEST_DIRNAME/sd-act"
@@ -27,11 +28,15 @@ setup() {
 #!/usr/bin/env bash
 echo '{"data":{"viewer":{"login":"me"},"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"nodes":[]}}}}'
 EOF
+  export CLAUDE_CONFIG_DIR="$TMP/claude" PI_CODING_AGENT_SESSION_DIR="$TMP/pi"
+  mkdir -p "$CLAUDE_CONFIG_DIR/projects/-repo" "$PI_CODING_AGENT_SESSION_DIR/--repo--"
   for h in claude pi; do
     cat > "$TMP/fakebin/$h" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$@" > "\$FX/$h.args"
 pwd > "\$FX/$h.cwd"
+sid=\$(grep -A1 -x -e --resume -e --session-id "\$FX/$h.args" | tail -1)
+[[ -e \$FX/no-transcript ]] || { [[ $h == claude ]] && touch "\$CLAUDE_CONFIG_DIR/projects/-repo/\$sid.jsonl" || touch "\$PI_CODING_AGENT_SESSION_DIR/--repo--/2026-10-16T00-00-00-000Z_\$sid.jsonl"; }
 git config --get branch.feat.sd-lock > "\$FX/$h.lock" || echo "(no lock)" > "\$FX/$h.lock"
 echo \$\$ > "\$FX/$h.pid"
 [[ -x \$FX/agent ]] && "\$FX/agent"
@@ -115,6 +120,40 @@ wait_for() { local i; for ((i = 0; i < 100; i++)); do [[ -e $1 ]] && return 0; s
   [ "$(git config branch.feat.sd-harness)" = claude ]
 }
 
+@test "attach: no session yet, and the harness wrote no transcript: nothing stored, and it says so" {
+  git config --unset branch.feat.sd-session
+  touch "$FX/no-transcript"
+  run --separate-stderr "$SD_ACT" attach
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"no transcript"* ]]
+  run git config --get branch.feat.sd-session
+  [ "$status" -ne 0 ]
+  run lock
+  [ "$status" -ne 0 ]
+}
+
+@test "attach: a resumed session stays stored even when the harness wrote nothing" {
+  touch "$FX/no-transcript"
+  run "$SD_ACT" attach
+  [ "$status" -eq 0 ]
+  [ "$(git config branch.feat.sd-session)" = 11111111-2222-4333-8444-555555555555 ]
+}
+
+@test "attach: the harness block's model, effort and args become the TUI's flags" {
+  echo '{"harnesses": {"claude": {"model": "opus", "effort": "high", "args": "--verbose --fast"}}}' > "$SHEEPDOG_CONFIG"
+  run "$SD_ACT" attach
+  [ "$status" -eq 0 ]
+  [ "$(tr '\n' ' ' < "$FX/claude.args")" = "--resume 11111111-2222-4333-8444-555555555555 --model opus --effort high --verbose --fast " ]
+}
+
+@test "attach: pi's flags: provider, model, thinking" {
+  echo '{"harnesses": {"pi": {"provider": "cf", "model": "haiku", "effort": "low"}}}' > "$SHEEPDOG_CONFIG"
+  git config branch.feat.sd-harness pi
+  run "$SD_ACT" attach
+  [ "$status" -eq 0 ]
+  [ "$(tr '\n' ' ' < "$FX/pi.args")" = "--session-id 11111111-2222-4333-8444-555555555555 --provider cf --model haiku --thinking low " ]
+}
+
 @test "attach: pi: pi --session-id, no -p" {
   git config branch.feat.sd-harness pi
   run "$SD_ACT" attach
@@ -160,6 +199,20 @@ wait_for() { local i; for ((i = 0; i < 100; i++)); do [[ -e $1 ]] && return 0; s
   [[ "$(lock)" =~ ^[0-9]+@ ]]
   kill -INT "$pid" "$(cat "$FX/claude.pid")"
   wait "$pid" || true
+  run lock
+  [ "$status" -ne 0 ]
+}
+
+@test "attach: a new session is still recorded when the TUI was interrupted" {
+  git config --unset branch.feat.sd-session
+  touch "$FX/hang"
+  "$SD_ACT" attach 2>/dev/null &
+  pid=$!
+  wait_for "$FX/claude.pid"
+  touch "$CLAUDE_CONFIG_DIR/projects/-repo/$(grep -A1 -x -- --session-id "$FX/claude.args" | tail -1).jsonl"
+  kill -INT "$pid" "$(cat "$FX/claude.pid")"
+  wait "$pid" || true
+  [[ "$(git config branch.feat.sd-session)" =~ ^[0-9a-f-]{36}$ ]]
   run lock
   [ "$status" -ne 0 ]
 }
@@ -260,6 +313,15 @@ EOF
   echo '{"settings": {"verify": "true"}}' > "$SHEEPDOG_CONFIG"
   run "$SD_ACT" verify
   [ "$status" -eq 0 ]
+}
+
+@test "every verb clears a stale lock first" {
+  dead_lock
+  run --separate-stderr "$SD_ACT" enroll
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"stale lock"* ]]
+  run lock
+  [ "$status" -ne 0 ]
 }
 
 @test "a stale lock is cleared and the step runs" {
