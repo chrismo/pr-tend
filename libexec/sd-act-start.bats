@@ -536,6 +536,15 @@ findings_at() {
   [ "$(head -1 "$FX/claude.prompt")" = "Repo implement guidance." ]
 }
 
+@test "implement: a branch with no base pin and no remote still gets its guidance" {
+  git init -q "$TMP/bare" && cd "$TMP/bare"
+  mkdir -p .sheepdog && printf 'Local repo guidance.\n' > .sheepdog/implement.md
+  printf 'a\nb\n' > file.txt && git add . && git commit -qm init
+  git switch -qc feat && git config branch.feat.sd-task "add c"
+  "$SD_ACT" implement >/dev/null
+  [ "$(head -1 "$FX/claude.prompt")" = "Local repo guidance." ]
+}
+
 @test "implement: settings.reviewFixPrompt replaces a fix round's guidance; the contract stays" {
   started
   findings_at HEAD 1

@@ -1012,12 +1012,18 @@ EOF
 
 # guidance_base <branch>: the commit a step reads repo guidance (.sheepdog/,
 # relative prompt paths) from, which the branch's agent can't rewrite: the
-# base pin, else where the branch forked from the default branch.
+# base pin, else where the branch forked from the default branch (the remote's,
+# else the local one), else the branch's own HEAD as a last resort.
 guidance_base() {
-  local remote def
+  local remote def ref
   git rev-parse -q --verify "refs/sheepdog/$1/base" && return
-  remote=$(prc_get settings.remote "$1" false) && def=$(start_default "$remote") \
-    && git merge-base "refs/heads/$1" "refs/remotes/$remote/$def"
+  remote=$(prc_get settings.remote "$1" false) || remote=origin
+  if def=$(start_default "$remote"); then
+    for ref in "refs/remotes/$remote/$def" "refs/heads/$def"; do
+      git show-ref -q --verify "$ref" && git merge-base "refs/heads/$1" "$ref" && return
+    done
+  fi
+  git rev-parse "refs/heads/$1"
 }
 
 read -r -d '' IMPLEMENT_SCHEMA <<'EOF' || true
