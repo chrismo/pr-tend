@@ -1092,6 +1092,15 @@ old_super() {
   [ "$status" -eq 1 ]
 }
 
+@test "settings.<step>Prompt: typed string settings, empty by default, per branch" {
+  local k
+  for k in implementPrompt reviewFixPrompt describePrompt addressPrompt resolvePrompt; do
+    [ -z "$("$SD_CONFIG" get "settings.$k")" ] || { echo "$k not empty"; return 1; }
+    write_branch feat "{\"settings\":{\"$k\":\"p/$k.md\"}}"
+    [ "$("$SD_CONFIG" get "settings.$k")" = "p/$k.md" ] || { echo "$k not set"; return 1; }
+  done
+}
+
 @test "settings.implementAllow: a typed list setting, empty by default" {
   run "$SD_CONFIG" get settings.implementAllow
   [ "$status" -eq 0 ]
