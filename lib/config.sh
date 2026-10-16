@@ -33,12 +33,24 @@ type global_settings = {remote?:string,interval?:uint64,notify?:string,'"$PRC_SE
 
 # One line per problem: a key the layer's type doesn't have, or a value that
 # doesn't cast. cast drops unknown keys silently, hence the diff of the input's
-# leaves against the cast's.
-PRC_CHECK='fork
-    ( unnest flatten(this) | values {k: join(key, "."), ok: false, err: ""} )
-    ( unnest flatten(cast(this, <config>))
+# leaves against the cast's. An empty block ({}) has no leaves, and flatten()
+# and fields() both drop it, so the third branch reads those paths off the
+# type instead (typeof keeps them): an empty block is unknown unless it is,
+# or is a prefix of, a path in the cast's type, which cast fills in for a
+# known block. Only the unknown ones are emitted, so a known path's cast
+# error (harness: {}) still shows. The replace runs over the type's text,
+# so a key named like "a:{}" would be misnamed in the message.
+PRC_CHECK='fn mt(v): parse_sup(replace(typeof(v)::string, ":{}", ":null"))
+fn paths(v): coalesce([unnest fields(v) | values join(this, ".")], [])
+values {r: this, cp: paths(mt(cast(this, <config>)))}
+| fork
+    ( unnest flatten(r) | values {k: join(key, "."), ok: false, err: ""} )
+    ( unnest flatten(cast(r, <config>))
       | values {k: join(key, "."), ok: not is_error(value),
                 err: is_error(value) ? f"{under(value).message}: {under(value).on}" : ""} )
+    ( unnest {cp, k: coalesce([unnest {ls: paths(typeof(r)), p: paths(mt(r))} | where not (p in ls) | values p], [])}
+      | where len(coalesce([unnest {k, c: cp} | where c == k or c[0:len(k)+1] == f"{k}." | values c], [])) == 0
+      | values {k, ok: false, err: ""} )
 | aggregate ok:=or(ok), errs:=collect(err) by k
 | where not ok | sort k
 | values {k, err: join(errs, "")}
