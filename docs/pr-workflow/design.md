@@ -898,7 +898,7 @@ short-lived, so it can't own children like their daemons do. Plan:
 - ~~`--resume -p` keeps context across processes~~ observed for Claude (fork
   spike, below); `pi -p --session` still unverified [#23]
 - resuming a session that's open interactively elsewhere — what breaks? (the
-  lock exists to prevent it; confirm it's needed) [#20]
+  lock exists to prevent it; confirm it's needed) [#14]
 - ~~`--json-schema` for the describe step~~ verified for Claude on the sandbox
   (ship smoke test, 2026-10-14); pi's fenced-json fallback still needs a real
   model run (its default provider's quota was exhausted) [#21]
@@ -1029,7 +1029,6 @@ clones in `~/modev/pr-workflow-prior-art/` (sortie, av, gh-stack, attractor, sym
 [#16]: https://github.com/chrismo/sheepdog/issues/16
 [#17]: https://github.com/chrismo/sheepdog/issues/17
 [#18]: https://github.com/chrismo/sheepdog/issues/18
-[#20]: https://github.com/chrismo/sheepdog/issues/20
 [#21]: https://github.com/chrismo/sheepdog/issues/21
 [#22]: https://github.com/chrismo/sheepdog/issues/22
 [#23]: https://github.com/chrismo/sheepdog/issues/23
