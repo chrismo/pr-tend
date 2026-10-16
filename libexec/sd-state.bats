@@ -430,6 +430,7 @@ lost_pin_stack() {
   pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p1\""
   state
   [ "$(field .sync.up_to_date)" = true ]
+  [ "$(field .sync.old_base)" = "$(git rev-parse origin/main)" ]
   [ "$(field -c .errors)" = '[]' ]
 }
 

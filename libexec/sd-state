@@ -207,6 +207,8 @@ else
 
   if is_ancestor "$target_ref" "$head"; then
     up_to_date=true conflict=false
+    # Everything past the target is the branch's own.
+    [[ -n $old_base ]] || old_base=$target_ref
   elif [[ -z $old_base ]]; then
     up_to_date=false
     if [[ $target == "$parent" ]]; then
