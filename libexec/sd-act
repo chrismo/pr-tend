@@ -98,7 +98,8 @@
 #             session interactively in its worktree (claude --resume, or pi
 #             --session-id; a new session when none is stored, kept once the
 #             harness wrote its transcript), with the harness block's model,
-#             effort, provider and args; release the lock when the session
+#             effort, provider and args, and for claude without
+#             ANTHROPIC_API_KEY unless useApiKey; release the lock when the session
 #             exits, Ctrl-C included. While the lock is held, agent steps
 #             (implement, address, restack --resolve, review, describe) and
 #             the verbs that publish refuse to run; verify and the rest of
@@ -656,7 +657,7 @@ session_exists() {
 }
 
 attach() {
-  local b=$branch wt lock stored_h h sid mode rc=0
+  local b=$branch wt lock stored_h h sid mode use_key rc=0
   local -a cmd flags
   wt=$(worktree_for "$b")
   [[ -n $wt ]] || die "$b isn't checked out in any worktree"
@@ -677,7 +678,11 @@ attach() {
     sid=$(uuidgen | tr 'A-F' 'a-f') mode=new
   fi
   case $h in
-    claude) if [[ $mode == resume ]]; then cmd=(claude --resume "$sid"); else cmd=(claude --session-id "$sid"); fi ;;
+    claude)
+      # Same rule as harness_run (#68): the claude.ai login unless useApiKey.
+      use_key=$(prc_get harnesses.claude.useApiKey "$b" false) || use_key=false
+      [[ $use_key == true ]] || cmd=(env -u ANTHROPIC_API_KEY)
+      if [[ $mode == resume ]]; then cmd+=(claude --resume "$sid"); else cmd+=(claude --session-id "$sid"); fi ;;
     pi) cmd=(pi --session-id "$sid") ;;
     *) die "unknown harness: $h (claude or pi)" ;;
   esac

@@ -35,6 +35,7 @@ EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$@" > "\$FX/$h.args"
 pwd > "\$FX/$h.cwd"
+echo "\${ANTHROPIC_API_KEY-unset}" > "\$FX/$h.key"
 sid=\$(grep -A1 -x -e --resume -e --session-id "\$FX/$h.args" | tail -1)
 [[ -e \$FX/no-transcript ]] || { [[ $h == claude ]] && touch "\$CLAUDE_CONFIG_DIR/projects/-repo/\$sid.jsonl" || touch "\$PI_CODING_AGENT_SESSION_DIR/--repo--/2026-10-16T00-00-00-000Z_\$sid.jsonl"; }
 git config --get branch.feat.sd-lock > "\$FX/$h.lock" || echo "(no lock)" > "\$FX/$h.lock"
@@ -144,6 +145,25 @@ wait_for() { local i; for ((i = 0; i < 100; i++)); do [[ -e $1 ]] && return 0; s
   run "$SD_ACT" attach
   [ "$status" -eq 0 ]
   [ "$(tr '\n' ' ' < "$FX/claude.args")" = "--resume 11111111-2222-4333-8444-555555555555 --model opus --effort high --verbose --fast " ]
+}
+
+@test "attach: claude runs without ANTHROPIC_API_KEY unless harnesses.claude.useApiKey" {
+  export ANTHROPIC_API_KEY=sk-no-credit
+  run "$SD_ACT" attach
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FX/claude.key")" = unset ]
+  echo '{"harnesses": {"claude": {"useApiKey": true}}}' > "$SHEEPDOG_CONFIG"
+  run "$SD_ACT" attach
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FX/claude.key")" = sk-no-credit ]
+}
+
+@test "attach: pi keeps ANTHROPIC_API_KEY" {
+  export ANTHROPIC_API_KEY=sk-paid
+  git config branch.feat.sd-harness pi
+  run "$SD_ACT" attach
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FX/pi.key")" = sk-paid ]
 }
 
 @test "attach: pi's flags: provider, model, thinking" {
