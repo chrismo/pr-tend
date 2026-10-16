@@ -27,6 +27,9 @@
 #   ci-red conflict human foreign parent-closed: ❌ the PR is stuck or wrong
 #     until chrismo, or an agent chrismo starts, deals with it
 #   merged ready: chrismo acts (clean up, merge)
+#   review-decide: ❌ the local review still blocks after
+#     settings.reviewRounds rounds, or the agent declined its findings:
+#     chrismo fixes them or accepts HEAD
 # Not notified:
 #   closed: chrismo closed it
 #   errors stale: ⚠️ sd state can't be sure, so what was notified carries over
@@ -34,7 +37,7 @@
 #   blocked: GitHub's branch rules, often routine; the 🔧 glyph shows it
 #   attached: chrismo is in the branch's session; like merge-wait, keeps ready
 #   bot: routine agent work, picked up when the branch is next worked on
-#   review: the same
+#   review review-fix: the same
 #   behind push open-pr draft bot-trigger ci-rerun retarget: mechanical
 #   ci-wait review-wait parent-wait merge-wait: waiting; merge-wait (GitHub
 #     recomputing after the base moved) keeps ready notified
@@ -64,7 +67,7 @@ TIMEOUT=${SHEEPDOG_WATCH_TIMEOUT:-120}
 read -r -d '' CLASSIFY <<'EOF' || true
 values {next: kind(next) == "array" ? next : []}
 | values {next, k: coalesce([unnest next | values key], []),
-          red: coalesce([unnest next | where key in ["ci-red", "conflict", "human", "foreign", "parent-closed"] | values {key, msg: say}], []),
+          red: coalesce([unnest next | where key in ["ci-red", "conflict", "human", "foreign", "parent-closed", "review-decide"] | values {key, msg: say}], []),
           waiting: len(coalesce([unnest next | where who != "wait"], [])) == 0}
 | values {carry: len(next) == 0 or "errors" in k or "stale" in k,
           keep: k == ["merge-wait"] or k == ["attached"] ? ["ready"] : [], ...(case

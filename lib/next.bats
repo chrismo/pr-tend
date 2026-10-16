@@ -284,6 +284,41 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(keys '.review.local = {sha: "x", status: "unknown"}')" = review ]
 }
 
+@test "review findings at HEAD: the agent fixes them, not another review" {
+  local st=('.review.local = {sha: "x", status: "uncovered", uncovered: 2}'
+            '.review.findings = {sha: "h1", round: 1, n: 2, at_head: true, declined: false, cap: 3, items: []}')
+  [ "$(keys "${st[@]}")" = review-fix ]
+  [ "$(step review-fix who "${st[@]}")" = agent ]
+  [ "$(step review-fix cmd "${st[@]}")" = "sd act implement" ]
+  [ "$(step review-fix say "${st[@]}")" = "fix 2 review findings (round 1/3)" ]
+  # findings on an older head: the new commits get reviewed
+  [ "$(keys "${st[@]}" '.review.findings.at_head = false')" = review ]
+}
+
+@test "review findings at the cap, or declined by the agent: chrismo fixes or accepts" {
+  local st=('.review.local = {sha: "x", status: "uncovered", uncovered: 2}'
+            '.review.findings = {sha: "h1", round: 3, n: 1, at_head: true, declined: false, cap: 3, items: []}')
+  [ "$(keys "${st[@]}")" = review-decide ]
+  [ "$(step review-decide who "${st[@]}")" = you ]
+  [ "$(step review-decide cmd "${st[@]}")" = "sd act review --accept" ]
+  [ "$(step review-decide say "${st[@]}")" \
+    = "1 review finding after 3 rounds: fix it, or accept HEAD as reviewed (sd state --long lists them)" ]
+  [ "$(keys "${st[@]}" '.review.findings.round = 1' '.review.findings.declined = true')" = review-decide ]
+  [ "$(step review-decide say "${st[@]}" '.review.findings.round = 1' '.review.findings.declined = true')" \
+    = "the agent declined 1 review finding: fix it, or accept HEAD as reviewed (sd state --long lists them)" ]
+}
+
+@test "review findings on an older head, before any PR or pin: the next review is due" {
+  [ "$(keys '.pr = null' '.review.local = {sha: null, status: "none"}' \
+           '.review.findings = {sha: "x", round: 1, n: 1, at_head: false, declined: false, cap: 3, items: []}')" = "open-pr review" ]
+}
+
+@test "review findings an accepted pin covers: no review step" {
+  [ "$(keys '.review.local = {sha: "x", status: "uncovered", uncovered: 2}' \
+           '.review.findings = {sha: "h1", round: 3, n: 1, at_head: true, declined: false, cap: 3, items: []}' \
+           '.review.accepted = {sha: "h1", status: "covered"}')" = ready ]
+}
+
 @test "bot configured and HEAD pushed and locally reviewed but not bot-reviewed: trigger it" {
   local st=('.bot = {command: "/review-bot"}' '.review.bot = {sha: null, status: "none"}')
   [ "$(keys "${st[@]}")" = bot-trigger ]

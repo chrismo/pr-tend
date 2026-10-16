@@ -665,6 +665,52 @@ lost_pin_stack() {
   [ "$(field .review.bot.status)" = none ]
 }
 
+@test "review: no findings record is null" {
+  git switch -qc feat && commit a.txt a
+  state
+  [ "$(field .review.findings)" = null ]
+}
+
+@test "review: a findings record at HEAD, with its round, count and the cap" {
+  git switch -qc feat && commit a.txt a
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: $h, round: 2,
+          findings: [{file: "a.txt", line: 1, severity: "error", body: "x"}]}')
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
+  state
+  [ "$(field .review.findings.round)" = 2 ]
+  [ "$(field .review.findings.n)" = 1 ]
+  [ "$(field .review.findings.at_head)" = true ]
+  [ "$(field .review.findings.declined)" = false ]
+  [ "$(field .review.findings.cap)" = 3 ]
+  [ "$(field '.review.findings.items[0].body')" = x ]
+  run "$SD_STATE"
+  [[ "$output" == *"review: 1 finding (round 2/3)"* ]]
+  run "$SD_STATE" --long
+  [[ "$output" == *"error  a.txt:1  x"* ]]
+  rec=$(git cat-file blob refs/sheepdog/feat/findings | jq -c '. + {declined: true, reason: "x is fine"}')
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
+  run "$SD_STATE" --long
+  [[ "$output" == *"the agent declined them: x is fine"* ]]
+  run "$SD_STATE"
+  [[ "$output" == *"review: 1 finding (round 2/3, declined)"* ]]
+  commit b.txt b
+  state
+  [ "$(field .review.findings.at_head)" = false ]
+}
+
+@test "review: findings count only what blocks; a record missing fields is an error" {
+  git switch -qc feat && commit a.txt a
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: $h, round: 1, findings: [
+          {file: "a.txt", line: 1, severity: "warning", body: "x"}, {file: "a.txt", line: 2, severity: "nit", body: "y"}]}')
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
+  state
+  [ "$(field .review.findings.n)" = 1 ]
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<'{"head": "x"}')"
+  state
+  [ "$(field .review.findings)" = null ]
+  [[ "$(field '.errors | join(" ")')" == *"isn't a findings record"* ]]
+}
+
 @test "review: pin at HEAD is covered" {
   git switch -qc feat && commit a.txt a
   git update-ref refs/sheepdog/feat/local HEAD
@@ -688,6 +734,38 @@ lost_pin_stack() {
   git fetch -q && git rebase -q origin/main
   state
   [ "$(field .review.local.status)" = rewritten-same ]
+}
+
+@test "review: findings stay at HEAD across a rebase that keeps the change" {
+  git switch -qc feat && commit a.txt a
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" --arg b "$(git rev-parse main)" '{head: $h, base: $b, round: 3,
+          findings: [{file: "a.txt", line: 1, severity: "error", body: "x"}]}')
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
+  commit b.txt b "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
+  git fetch -q && git rebase -q origin/main
+  state
+  [ "$(field .review.findings.at_head)" = true ]
+  commit c.txt c
+  state
+  [ "$(field .review.findings.at_head)" = false ]
+}
+
+@test "review: --long lists a finding missing fields as itself" {
+  git switch -qc feat && commit a.txt a
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: $h, round: 1, findings: [{file: "a.txt", body: "x"}]}')
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
+  run "$SD_STATE" --long
+  [[ "$output" == *"r  ?  a.txt:?  x"* ]]
+}
+
+@test "review: a findings record whose base is gone is just not at HEAD" {
+  git switch -qc feat && commit a.txt a
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: "0123456789abcdef0123456789abcdef01234567", round: 1,
+          findings: [{file: "a.txt", line: 1, severity: "error", body: "x"}]}')
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
+  commit b.txt b
+  state
+  [ "$(field .review.findings.at_head)" = false ]
 }
 
 @test "review: a pin's recorded base keeps it covered across a restack past a squash-merged parent" {

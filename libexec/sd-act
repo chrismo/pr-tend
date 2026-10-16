@@ -16,7 +16,7 @@
 #   sd act push     [--force] [<branch>]
 #   sd act verify   [<branch>]
 #   sd act autofix  [<branch>]
-#   sd act review   [<branch>]
+#   sd act review   [--accept] [<branch>]
 #   sd act describe [<branch>]
 #   sd act ship     [--force] [<branch>]
 #   sd act trigger  [--force] [<branch>]
@@ -50,7 +50,9 @@
 #             only read-only git, the verify command when it's plain words (no
 #             globs, pipes or quotes), and settings.implementAllow's rules; pi
 #             runs nothing. "needs-input" prints the agent's question and
-#             leaves the edits uncommitted. Spends tokens
+#             leaves the edits uncommitted. Review findings recorded on HEAD
+#             (sd act review) go into the prompt; changing nothing for them
+#             declines them, which hands them to chrismo. Spends tokens
 #   enroll    mark the branch for sd watch, and register this repo; for a
 #             stacked PR, store its parent and base before a merge erases them
 #   unenroll  clear the mark
@@ -95,8 +97,19 @@
 #             again (A11); the loop will run it before ci-fix (#49)
 #   review    verify, then the local reviewer (settings.localReview, default
 #             libexec/sd-review-local) over the branch's own change, base..HEAD.
-#             Clean: pin local at HEAD. Findings: printed as JSON, nothing
-#             pinned. A failed reviewer is never clean. Spends tokens
+#             Clean, or only nits: pin local at HEAD. Errors or warnings:
+#             printed as JSON and recorded (refs/sheepdog/<b>/findings: head,
+#             base, round, findings; implement adds declined and reason),
+#             nothing pinned; each such review of a changed HEAD is the next
+#             round, until a pin clears the record. A failed reviewer is never clean. sd state
+#             shows the record and NEXT follows it: findings about HEAD (the
+#             same change, even rebased) go to the agent (review-fix: sd act
+#             implement, its prompt carrying them) below settings.reviewRounds,
+#             and to chrismo (review-decide) at the cap or once the agent
+#             declines them by changing nothing; findings on an older head get
+#             a new review. Spends tokens.
+#             --accept: pin accepted at HEAD instead, reviewing nothing (HEAD
+#             is reviewed enough), and drop the findings
 #   describe  the agent writes the PR title and body (J6) from the task, the
 #             commits and the diff, read-only, in the branch's session; stored
 #             for HEAD. Spends tokens
@@ -169,11 +182,12 @@ usage() { help >&2; exit 1; }
 verb=$1; shift
 if [[ $verb == -h || $verb == --help ]]; then help; exit 0; fi
 
-force=false no_publish=false resolve=false no_implement=false harness_opt="" parent_opt="" branch=""
+force=false accept=false no_publish=false resolve=false no_implement=false harness_opt="" parent_opt="" branch=""
 ids=() positionals=()
 while (( $# )); do
   case $1 in
     --force) force=true ;;
+    --accept) accept=true ;;
     --no-publish) no_publish=true ;;
     --resolve) resolve=true ;;
     --no-implement) no_implement=true ;;
@@ -194,6 +208,7 @@ if [[ $verb == start ]]; then
     || die "usage: sd act start [--parent <branch>] [--harness <h>] [--no-implement] <name> [<task>]"
   branch=${positionals[0]} task_arg=${positionals[1]:-}
 fi
+if $accept && [[ $verb != review ]]; then die "--accept is for sd act review only"; fi
 positional=$branch
 branch=${branch:-$(git branch --show-current)}
 [[ -n $branch ]] || die "detached HEAD; name a branch"
@@ -630,7 +645,7 @@ autofix() {
 # ── review ───────────────────────────────────────────────────────────────────
 
 review() {
-  local b=$branch wt state base head task timeout reviewer findings n
+  local b=$branch wt state base head task timeout reviewer findings n blocking round rec prev keep
   wt=$(worktree_for "$b")
   [[ -n $wt ]] || die "$b isn't checked out in any worktree"
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
@@ -639,6 +654,12 @@ review() {
   base=$(prc_val "$state" 'coalesce(sync.old_base, "")')
   [[ -n $base ]] || die "can't find $b's base: $(prc_val "$state" 'sj(coalesce(errors, []), "; ")')"
   head=$(git rev-parse "refs/heads/$b")
+  if $accept; then
+    pin_write "$b" accepted "$head" "$base"
+    git update-ref -d "refs/sheepdog/$b/findings"
+    echo "accepted: $b at ${head:0:7} against ${base:0:7}; pinned accepted"
+    return
+  fi
   verify_run "$wt" "$b" || die "verify failed ($VERIFY_CMD); not reviewing"
   timeout=$(prc_get settings.stepTimeout "$b" false) || die "sd config failed"
   [[ $timeout =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $timeout"
@@ -657,11 +678,34 @@ review() {
     || die "the reviewer failed ($reviewer); nothing pinned"
   n=$(prc_line 'where kind(this) == "array" | values len(this)' "$findings" 2>/dev/null) && [[ -n $n ]] \
     || die "the reviewer printed no JSON list ($reviewer)"
-  if (( n == 0 )); then
+  blocking=$(prc_line 'values len(coalesce([unnest this | where coalesce(severity, "") != "nit"], []))' "$findings") \
+    && [[ $blocking =~ ^[0-9]+$ ]] || die "couldn't count the findings that block ($reviewer); nothing pinned"
+  if (( blocking == 0 )); then
     pin_write "$b" local "$head" "$base"
-    echo "clean: $b at ${head:0:7} reviewed against ${base:0:7}; pinned local"
+    git update-ref -d "refs/sheepdog/$b/findings"
+    if (( n == 0 )); then
+      echo "clean: $b at ${head:0:7} reviewed against ${base:0:7}; pinned local"
+    else
+      echo "clean: $b at ${head:0:7} reviewed against ${base:0:7}; pinned local ($(plural "$n" nit))"
+      printf '%s\n' "$findings"
+    fi
   else
-    echo "sd act: $(plural "$n" finding) on $b; nothing pinned" >&2
+    prev=$(git cat-file blob "refs/sheepdog/$b/findings" 2>/dev/null || true)
+    round=$(prc_line 'values coalesce(round, 0)' "${prev:-null}" 2>/dev/null || true)
+    [[ $round =~ ^[0-9]+$ ]] || round=0
+    # The same HEAD (or the same change rebased, as sd state judged it) reviewed
+    # again isn't a new round, and keeps what the agent declined.
+    keep='{}'
+    if [[ $(prc_val "$state" 'on(review.findings.at_head)') == true ]]; then
+      keep=$(prc_json 'values {declined: coalesce(declined, false), reason: coalesce(reason, null)}' "$prev")
+    else
+      round=$(( round + 1 ))
+    fi
+    rec=$(prc_json 'values {...k, head: h, base: b, round: r, findings: f}' \
+            "{\"k\": $keep, \"h\": \"$head\", \"b\": \"$base\", \"r\": $round, \"f\": $findings}") \
+      && git update-ref -m "review round $round" "refs/sheepdog/$b/findings" "$(git hash-object -w --stdin <<<"$rec")" \
+      || die "couldn't record the findings"
+    echo "sd act: $(plural "$n" finding) on $b, $blocking blocking (review round $round); nothing pinned" >&2
     printf '%s\n' "$findings"
   fi
 }
@@ -922,6 +966,22 @@ commit_message; "needs-input" when you need a decision from the task's author
 you can't make sense of it (say why in summary).
 EOF
 
+read -r -d '' REVIEW_FIX_PROMPT <<'EOF' || true
+Fix the local review's findings below in this worktree; its branch is checked
+out. The reviewer was a separate, read-only session with no context on why the
+code looks the way it does; you have that context. Fix each finding that is
+right. Leave any you judge wrong, and say which and why in summary. Follow the
+repo's own instructions (AGENTS.md, CLAUDE.md, README) for how to work and test
+here. Edit files, but do not commit, push, or run gh: the pipeline commits your
+edits with your commit_message and runs the repo's checks.
+
+Return outcome "done" with a one-line commit_message once you have fixed what
+you agree with. If you agree with none, change nothing and return "done": the
+findings then go to the branch's owner. Return "needs-input" when you need a
+decision from the owner (put the question in summary), or "gave-up" when you
+can't make sense of them (say why in summary).
+EOF
+
 read -r -d '' IMPLEMENT_SCHEMA <<'EOF' || true
 {"type": "object", "required": ["outcome", "commit_message", "summary"],
  "properties": {"outcome": {"enum": ["done", "needs-input", "gave-up"]},
@@ -931,11 +991,24 @@ EOF
 
 # implement_run <branch> <worktree>
 implement_run() {
-  local b=$1 wt=$2 task verify before prompt result outcome summary msg extra rule allow=$HARNESS_CLAUDE_ALLOW
+  local b=$1 wt=$2 task verify before prompt result outcome summary msg extra rule rec state listed="" allow=$HARNESS_CLAUDE_ALLOW
   local -a rules=()
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
   task=$(git config --get "branch.$b.sd-task" || true)
-  [[ -n $task ]] || die "no task recorded for $b: git config branch.$b.sd-task \"<task>\""
+  before=$(git rev-parse "refs/heads/$b")
+  # A fix round: sd act review's blocking findings, when they're about HEAD and
+  # not yet declined. The task goes along as context.
+  rec=$(git cat-file blob "refs/sheepdog/$b/findings" 2>/dev/null || true)
+  # sd state decides whether they're about HEAD, so NEXT and this agree.
+  if [[ -n $rec ]]; then
+    state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
+  fi
+  if [[ -n $rec && $(prc_line 'values on(review.findings.at_head)' "$state") == true ]]; then
+    listed=$(prc_line 'where not on(declined) | unnest findings | where coalesce(severity, "") != "nit"
+      | values f"- {coalesce(file, "?")}:{coalesce(line, "?")} ({coalesce(severity, "?")}) {coalesce(body, "")}"' "$rec") \
+      || die "couldn't read the review findings on $b"
+  fi
+  [[ -n $task || -n $listed ]] || die "no task recorded for $b: git config branch.$b.sd-task \"<task>\""
   verify=$(cd "$wt" && prc_get settings.verify "$b" false) || die "sd config failed"
   extra=$(cd "$wt" && prc_get settings.implementAllow "$b" false) || die "sd config failed"
   # A rule's * is a wildcard, so only plain words become an exact rule.
@@ -946,8 +1019,11 @@ implement_run() {
   fi
   while IFS= read -r rule; do [[ -z $rule ]] || rules+=("$rule"); done <<<"$extra"
   step_session "$b" implement
-  before=$(git rev-parse "refs/heads/$b")
-  prompt="$IMPLEMENT_PROMPT"$'\n\nTask:\n'"$task"
+  if [[ -n $listed ]]; then
+    prompt="$REVIEW_FIX_PROMPT"$'\n\nFindings:\n'"$listed"$'\n\nThe task this branch was made for, for context:\n'"${task:-(none recorded)}"
+  else
+    prompt="$IMPLEMENT_PROMPT"$'\n\nTask:\n'"$task"
+  fi
   [[ -z $verify ]] || prompt+=$'\n\nThe repo\'s checks, which the pipeline runs after you: '"$verify"
   if [[ $STEP_H == claude ]] && (( ${#rules[@]} )); then
     allow+=$(printf ',%s' "${rules[@]}")
@@ -972,10 +1048,17 @@ implement_run() {
   if [[ -n $(git -C "$wt" status --porcelain) ]]; then
     msg=$(prc_line 'values {m: coalesce(commit_message, null)}
       | values case when is(m, <string>) and grep("\\S", m) then m else "" end' "$result")
+    if [[ -z $msg && -n $listed ]]; then msg="Fix the local review findings"; fi
     [[ -n $msg ]] || msg=$(head -1 <<<"$task")
     git -C "$wt" add -A && git -C "$wt" commit -q -m "$msg" || die "commit failed; the edits are left in $wt"
   elif [[ $(git rev-parse "refs/heads/$b") == "$before" ]]; then
-    die "the agent says done but changed nothing (session $STEP_SID)"
+    [[ -n $listed ]] || die "the agent says done but changed nothing (session $STEP_SID)"
+    rec=$(prc_json 'values {...r, declined: true, reason: why}' "{\"r\": $rec, \"why\": $(prc_json_string "$summary")}") \
+      && git update-ref -m "review findings declined" "refs/sheepdog/$b/findings" "$(git hash-object -w --stdin <<<"$rec")" \
+      || die "couldn't record that the agent declined the findings"
+    echo "$b: the agent declined the review findings: $summary"
+    echo "next: chrismo fixes them, or accepts HEAD: sd act review --accept"
+    return 0
   fi
   echo "$b: $summary"
   git -C "$wt" log --format='  %h %s' "$before..refs/heads/$b"

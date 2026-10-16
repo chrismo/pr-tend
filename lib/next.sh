@@ -37,8 +37,10 @@ values {...s, remote}
       parent_closed:=(on(pr.base != sync.default) and on(parent.pr.state == "CLOSED")),
       restack:=(sync.old_base is null ? f"git rebase {remote}/{sync.target}"
                 : f"git rebase --onto {remote}/{sync.target} {sync.old_base[0:12]}"),
-      need_review:=((on(pr.state == "OPEN") or trails(review.local) or trails(review.bot) or trails(review.accepted))
+      need_review:=((on(pr.state == "OPEN") or trails(review.local) or trails(review.bot) or trails(review.accepted)
+                     or on(review.findings.at_head == false))
                     and not (covers(review.local) or covers(review.bot) or covers(review.accepted))),
+      fixing:=(on(review.findings.at_head) and not (covers(review.local) or covers(review.bot) or covers(review.accepted))),
       bot_due:=(coalesce(bot.command, null) is not null and covers(review.local)
                 and not covers(review.bot) and not covers(review.accepted))
 | unnest [
@@ -77,7 +79,15 @@ values {...s, remote}
     pr is null and len(errors) == 0 ? step("open-pr", "run", "ship: push, open a draft PR", "sd act ship") : null,
     has_pr and draft_ready and not need_review and not bot_due
       ? step("draft", "run", "CI green and reviewed: mark the PR ready for review", "gh pr ready") : null,
-    open and need_review ? step("review", "agent", "review the changes since the last review", "sd act review") : null,
+    open and fixing and not on(review.findings.declined) and review.findings.round < review.findings.cap
+      ? step("review-fix", "agent", f"fix {plural(review.findings.n, "review finding")} (round {review.findings.round}/{review.findings.cap})",
+             "sd act implement")
+      : open and fixing
+      ? step("review-decide", "you",
+             f"{on(review.findings.declined) ? f"the agent declined {plural(review.findings.n, "review finding")}"
+                : f"{plural(review.findings.n, "review finding")} after {review.findings.round} rounds"}: fix {review.findings.n == 1 ? "it" : "them"}, or accept HEAD as reviewed (sd state --long lists them)",
+             "sd act review --accept")
+      : open and need_review ? step("review", "agent", "review the changes since the last review", "sd act review") : null,
     has_pr and not to_push and not foreign and bot_due
       ? step("bot-trigger", "run", f"trigger the review bot ({bot.command})", "sd act trigger") : null,
     has_pr and on(ci.verdict == "inconclusive") ? step("ci-rerun", "run", "rerun cancelled CI", "gh pr checks") : null,

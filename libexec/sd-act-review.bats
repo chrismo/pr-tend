@@ -147,3 +147,72 @@ EOF2
   [[ "$stderr" == *"timed out after 1s"* ]]
   [ -z "$(pin local)" ]
 }
+
+findings_rec() { git cat-file blob refs/sheepdog/feat/findings | jq -c "$1"; }
+
+@test "only nits: clean, pins local, still prints them" {
+  echo '[{"file": "file.txt", "line": 3, "severity": "nit", "body": "tiny"}]' > "$FX/findings.json"
+  run --separate-stderr "$SD_ACT" review
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"clean"*"1 nit"* ]]
+  [[ "$output" == *'"body":"tiny"'* || "$output" == *'"body": "tiny"'* ]]
+  [ "$(pin local)" = "$(git rev-parse HEAD)" ]
+}
+
+@test "findings that block: recorded with head, base and round" {
+  echo '[{"file": "file.txt", "line": 3, "severity": "warning", "body": "c?"}, {"file": "file.txt", "line": 1, "severity": "nit", "body": "a"}]' > "$FX/findings.json"
+  "$SD_ACT" review >/dev/null 2>&1
+  [ "$(findings_rec .head)" = "\"$(git rev-parse HEAD)\"" ]
+  [ "$(findings_rec .base)" = "\"$(git rev-parse origin/main)\"" ]
+  [ "$(findings_rec .round)" = 1 ]
+  [ "$(findings_rec '.findings | length')" = 2 ]
+}
+
+@test "each review that still blocks is the next round" {
+  echo '[{"file": "file.txt", "line": 3, "severity": "error", "body": "c?"}]' > "$FX/findings.json"
+  "$SD_ACT" review >/dev/null 2>&1
+  printf 'a\nb\nc\nd\n' > file.txt && git commit -qam more
+  "$SD_ACT" review >/dev/null 2>&1
+  [ "$(findings_rec .round)" = 2 ]
+  [ "$(findings_rec .head)" = "\"$(git rev-parse HEAD)\"" ]
+}
+
+@test "a clean review clears the findings record, so rounds start over" {
+  echo '[{"file": "file.txt", "line": 3, "severity": "error", "body": "c?"}]' > "$FX/findings.json"
+  "$SD_ACT" review >/dev/null 2>&1
+  echo '[]' > "$FX/findings.json"
+  "$SD_ACT" review >/dev/null
+  run git rev-parse -q --verify refs/sheepdog/feat/findings
+  [ "$status" -ne 0 ]
+}
+
+@test "--accept: pins accepted at HEAD with its base, clears findings, runs no reviewer" {
+  echo '[{"file": "file.txt", "line": 3, "severity": "error", "body": "c?"}]' > "$FX/findings.json"
+  "$SD_ACT" review >/dev/null 2>&1
+  rm "$FX/reviewer.env"
+  run "$SD_ACT" review --accept
+  [ "$status" -eq 0 ]
+  [[ "$output" == *accepted* ]]
+  [ "$(pin accepted)" = "$(git rev-parse HEAD)" ]
+  [ "$(pin accepted-base)" = "$(git rev-parse origin/main)" ]
+  [ ! -e "$FX/reviewer.env" ]
+  run git rev-parse -q --verify refs/sheepdog/feat/findings
+  [ "$status" -ne 0 ]
+}
+
+@test "a findings record with no usable round starts the count over" {
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<'{"round": "lots"}')"
+  echo '[{"file": "file.txt", "line": 3, "severity": "error", "body": "c?"}]' > "$FX/findings.json"
+  run --separate-stderr "$SD_ACT" review
+  [ "$status" -eq 0 ]
+  [ "$(findings_rec .round)" = 1 ]
+}
+
+@test "a second review of the same HEAD keeps the round and what the agent declined" {
+  echo '[{"file": "file.txt", "line": 3, "severity": "error", "body": "c?"}]' > "$FX/findings.json"
+  "$SD_ACT" review >/dev/null 2>&1
+  rec=$(git cat-file blob refs/sheepdog/feat/findings | jq -c '. + {declined: true, reason: "c is right"}')
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
+  "$SD_ACT" review >/dev/null 2>&1
+  [ "$(findings_rec '[.round, .declined, .reason]')" = '[1,true,"c is right"]' ]
+}

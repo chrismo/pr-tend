@@ -188,6 +188,16 @@ notified() { cat "$PS_FIXTURES/notified" 2>/dev/null || true; }
   done
 }
 
+@test "glyph: review findings are 🔧 while the agent fixes them, ❌ once chrismo decides" {
+  local f='.review.local.status = "uncovered" | .review.findings = {sha: "x", round: 1, n: 1, at_head: true, declined: false, cap: 3, items: []}'
+  ps_fixture feat "$f"
+  pass
+  [ "$(glyph repo)" = "🔧" ]
+  ps_fixture feat "$f | .review.findings.round = 3"
+  pass
+  [ "$(glyph repo)" = "❌" ]
+}
+
 @test "glyph: work an agent will do later is 🔧" {
   local a
   for a in '.sync.up_to_date = false | .sync.behind = 2 | .sync.target = "base"' \

@@ -18,6 +18,7 @@ bats_require_minimum_version 1.5.0
 # prints $FX/result.json as structured output.
 
 SD_ACT="$BATS_TEST_DIRNAME/sd-act"
+SD_STATE="$BATS_TEST_DIRNAME/sd-state"
 
 setup() {
   TMP="$(cd "$BATS_TEST_TMPDIR" && pwd -P)"
@@ -409,6 +410,129 @@ EOF
   run "$SD_ACT" implement
   [ "$status" -ne 0 ]
   [[ "$output" == *"changed nothing"* ]]
+}
+
+# findings_at <rev> <round>: sd act review's record of one blocking finding on <rev>.
+findings_at() {
+  local rec
+  rec=$(jq -nc --arg h "$(git rev-parse "$1")" --argjson r "$2" '{head: $h, base: $h, round: $r,
+          findings: [{file: "file.txt", line: 2, severity: "error", body: "b should be B"}]}')
+  git update-ref refs/sheepdog/feat-x/findings "$(git hash-object -w --stdin <<<"$rec")"
+}
+
+@test "implement: review findings on HEAD go into the prompt" {
+  started
+  findings_at HEAD 1
+  run "$SD_ACT" implement
+  [ "$status" -eq 0 ]
+  grep -q 'b should be B' "$FX/claude.prompt"
+  grep -q 'file.txt:2' "$FX/claude.prompt"
+  [ "$(git log -1 --format=%s)" = "Add c" ]
+}
+
+@test "implement: a fix round is framed as fixing the findings, with only those that block" {
+  started
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: $h, round: 1, findings: [
+          {file: "file.txt", line: 2, severity: "error", body: "b should be B"},
+          {file: "file.txt", line: 1, severity: "nit", body: "a could be A"}]}')
+  git update-ref refs/sheepdog/feat-x/findings "$(git hash-object -w --stdin <<<"$rec")"
+  "$SD_ACT" implement >/dev/null
+  [[ "$(head -1 "$FX/claude.prompt")" == *"review"* ]]
+  ! grep -q '^Implement the task below' "$FX/claude.prompt" || false
+  grep -q 'b should be B' "$FX/claude.prompt"
+  ! grep -q 'a could be A' "$FX/claude.prompt" || false
+  grep -q 'add a third line' "$FX/claude.prompt"
+}
+
+@test "implement: review findings on HEAD run even with no task recorded" {
+  started
+  git config --unset branch.feat-x.sd-task
+  findings_at HEAD 1
+  run "$SD_ACT" implement
+  [ "$status" -eq 0 ]
+  grep -q 'b should be B' "$FX/claude.prompt"
+  grep -q '(none recorded)' "$FX/claude.prompt"
+}
+
+@test "implement: findings the agent already declined aren't sent again" {
+  started
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: $h, round: 1, declined: true, reason: "no",
+          findings: [{file: "file.txt", line: 2, severity: "error", body: "b should be B"}]}')
+  git update-ref refs/sheepdog/feat-x/findings "$(git hash-object -w --stdin <<<"$rec")"
+  "$SD_ACT" implement >/dev/null
+  ! grep -q 'b should be B' "$FX/claude.prompt" || false
+  grep -q '^Implement the task below' "$FX/claude.prompt"
+  git config --unset branch.feat-x.sd-task
+  run "$SD_ACT" implement
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no task recorded"* ]]
+}
+
+@test "implement: findings on a rebased HEAD count when sd state says they're about it" {
+  started
+  git update-ref -d refs/sheepdog/feat-x/base
+  echo c >> file.txt && git commit -qam "add c"
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" --arg b "$(git rev-parse HEAD~1)" '{head: $h, base: $b, round: 1,
+          findings: [{file: "file.txt", line: 3, severity: "error", body: "c should be C"}]}')
+  git update-ref refs/sheepdog/feat-x/findings "$(git hash-object -w --stdin <<<"$rec")"
+  other_push main "main moves"
+  git fetch -q && git rebase -q origin/main
+  [ "$("$SD_STATE" --json | jq .review.findings.at_head)" = true ]
+  "$SD_ACT" implement >/dev/null
+  grep -q 'c should be C' "$FX/claude.prompt"
+}
+
+@test "implement: with a findings record, sd state failing is a failure, not the task prompt" {
+  started
+  findings_at HEAD 1
+  mkdir -p "$TMP/broken" && printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP/broken/sd-state" && chmod +x "$TMP/broken/sd-state"
+  PATH="$TMP/broken:$PATH" run "$SD_ACT" implement
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"sd state failed"* ]]
+  [ ! -e "$FX/claude.prompt" ]
+}
+
+@test "implement: a fix round with no commit message from the agent says it fixed review findings" {
+  started
+  findings_at HEAD 1
+  echo '{"outcome": "done", "summary": "Fixed b."}' > "$FX/result.json"
+  "$SD_ACT" implement >/dev/null
+  [ "$(git log -1 --format=%s)" = "Fix the local review findings" ]
+}
+
+@test "--accept belongs to sd act review only" {
+  started
+  run "$SD_ACT" implement --accept
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--accept"* ]]
+  [ ! -e "$FX/claude.prompt" ]
+}
+
+@test "implement: a finding missing fields still reads as itself in the prompt" {
+  started
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: $h, round: 1, findings: [{file: "file.txt", body: "b?"}]}')
+  git update-ref refs/sheepdog/feat-x/findings "$(git hash-object -w --stdin <<<"$rec")"
+  "$SD_ACT" implement >/dev/null
+  grep -qF -- '- file.txt:? (?) b?' "$FX/claude.prompt"
+}
+
+@test "implement: findings on an older head stay out of the prompt" {
+  started
+  findings_at HEAD 1
+  git commit -q --allow-empty -m later
+  "$SD_ACT" implement >/dev/null
+  ! grep -q 'b should be B' "$FX/claude.prompt" || false
+}
+
+@test "implement: changing nothing for review findings declines them, for chrismo to decide" {
+  started
+  findings_at HEAD 2
+  rm "$FX/agent"
+  echo '{"outcome": "done", "summary": "b is right as it is."}' > "$FX/result.json"
+  run "$SD_ACT" implement
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"declined"*"b is right as it is."* ]]
+  [ "$(git cat-file blob refs/sheepdog/feat-x/findings | jq -c '[.declined, .round, .reason]')" = '[true,2,"b is right as it is."]' ]
 }
 
 @test "implement: needs-input prints the question, leaves the edits uncommitted, nonzero" {
