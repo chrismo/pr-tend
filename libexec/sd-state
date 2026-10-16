@@ -498,3 +498,6 @@ printf '%s\n' "$next" | prn_lines "$($long && echo all || echo one)"
 
 $long || exit 0
 prc_line "$LONG" "$state"
+# The local review's open findings, if any (sd act review's record).
+prc_line 'where not nul(review.findings) | unnest review.findings.items
+  | values f"  r  {severity}  {file}:{line}  {body}"' "$state"

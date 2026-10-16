@@ -411,6 +411,43 @@ EOF
   [[ "$output" == *"changed nothing"* ]]
 }
 
+# findings_at <rev> <round>: sd act review's record of one blocking finding on <rev>.
+findings_at() {
+  local rec
+  rec=$(jq -nc --arg h "$(git rev-parse "$1")" --argjson r "$2" '{head: $h, base: $h, round: $r,
+          findings: [{file: "file.txt", line: 2, severity: "error", body: "b should be B"}]}')
+  git update-ref refs/sheepdog/feat-x/findings "$(git hash-object -w --stdin <<<"$rec")"
+}
+
+@test "implement: review findings on HEAD go into the prompt" {
+  started
+  findings_at HEAD 1
+  run "$SD_ACT" implement
+  [ "$status" -eq 0 ]
+  grep -q 'b should be B' "$FX/claude.prompt"
+  grep -q 'file.txt:2' "$FX/claude.prompt"
+  [ "$(git log -1 --format=%s)" = "Add c" ]
+}
+
+@test "implement: findings on an older head stay out of the prompt" {
+  started
+  findings_at HEAD 1
+  git commit -q --allow-empty -m later
+  "$SD_ACT" implement >/dev/null
+  ! grep -q 'b should be B' "$FX/claude.prompt" || false
+}
+
+@test "implement: changing nothing for review findings declines them, for chrismo to decide" {
+  started
+  findings_at HEAD 2
+  rm "$FX/agent"
+  echo '{"outcome": "done", "summary": "b is right as it is."}' > "$FX/result.json"
+  run "$SD_ACT" implement
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"declined"*"b is right as it is."* ]]
+  [ "$(git cat-file blob refs/sheepdog/feat-x/findings | jq -c '[.declined, .round]')" = '[true,2]' ]
+}
+
 @test "implement: needs-input prints the question, leaves the edits uncommitted, nonzero" {
   started
   echo '{"outcome": "needs-input", "commit_message": null, "summary": "Which file?"}' > "$FX/result.json"

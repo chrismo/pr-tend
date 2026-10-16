@@ -685,6 +685,8 @@ lost_pin_stack() {
   [ "$(field '.review.findings.items[0].body')" = x ]
   run "$SD_STATE"
   [[ "$output" == *"review: 1 finding (round 2/3)"* ]]
+  run "$SD_STATE" --long
+  [[ "$output" == *"error  a.txt:1  x"* ]]
   commit b.txt b
   state
   [ "$(field .review.findings.at_head)" = false ]

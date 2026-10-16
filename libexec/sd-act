@@ -50,7 +50,9 @@
 #             only read-only git, the verify command when it's plain words (no
 #             globs, pipes or quotes), and settings.implementAllow's rules; pi
 #             runs nothing. "needs-input" prints the agent's question and
-#             leaves the edits uncommitted. Spends tokens
+#             leaves the edits uncommitted. Review findings recorded on HEAD
+#             (sd act review) go into the prompt; changing nothing for them
+#             declines them, which hands them to chrismo. Spends tokens
 #   enroll    mark the branch for sd watch, and register this repo; for a
 #             stacked PR, store its parent and base before a merge erases them
 #   unenroll  clear the mark
@@ -955,7 +957,7 @@ EOF
 
 # implement_run <branch> <worktree>
 implement_run() {
-  local b=$1 wt=$2 task verify before prompt result outcome summary msg extra rule allow=$HARNESS_CLAUDE_ALLOW
+  local b=$1 wt=$2 task verify before prompt result outcome summary msg extra rule rec listed="" allow=$HARNESS_CLAUDE_ALLOW
   local -a rules=()
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
   task=$(git config --get "branch.$b.sd-task" || true)
@@ -972,6 +974,11 @@ implement_run() {
   step_session "$b" implement
   before=$(git rev-parse "refs/heads/$b")
   prompt="$IMPLEMENT_PROMPT"$'\n\nTask:\n'"$task"
+  # sd act review's findings on HEAD, unless the agent already declined them.
+  rec=$(git cat-file blob "refs/sheepdog/$b/findings" 2>/dev/null || true)
+  [[ -z $rec ]] || listed=$(prc_line "where head == \"$before\" and not on(declined)
+    | unnest findings | values f\"- {file}:{line} ({severity}) {body}\"" "$rec" 2>/dev/null || true)
+  [[ -z $listed ]] || prompt+=$'\n\nThe local reviewer, a separate read-only session, found these on HEAD. Fix the ones that are right. Leave any you judge wrong and say why in your summary; if you change nothing, the findings go to chrismo:\n'"$listed"
   [[ -z $verify ]] || prompt+=$'\n\nThe repo\'s checks, which the pipeline runs after you: '"$verify"
   if [[ $STEP_H == claude ]] && (( ${#rules[@]} )); then
     allow+=$(printf ',%s' "${rules[@]}")
@@ -999,7 +1006,13 @@ implement_run() {
     [[ -n $msg ]] || msg=$(head -1 <<<"$task")
     git -C "$wt" add -A && git -C "$wt" commit -q -m "$msg" || die "commit failed; the edits are left in $wt"
   elif [[ $(git rev-parse "refs/heads/$b") == "$before" ]]; then
-    die "the agent says done but changed nothing (session $STEP_SID)"
+    [[ -n $listed ]] || die "the agent says done but changed nothing (session $STEP_SID)"
+    rec=$(prc_json 'values {...this, declined: true}' "$rec") \
+      && git update-ref -m "review findings declined" "refs/sheepdog/$b/findings" "$(git hash-object -w --stdin <<<"$rec")" \
+      || die "couldn't record that the agent declined the findings"
+    echo "$b: the agent declined the review findings: $summary"
+    echo "next: chrismo fixes them, or accepts HEAD: sd act review --accept"
+    return 0
   fi
   echo "$b: $summary"
   git -C "$wt" log --format='  %h %s' "$before..refs/heads/$b"
