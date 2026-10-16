@@ -176,6 +176,7 @@ EOF
   [ "$status" -ne 0 ]
   [ -z "$output" ]
   [[ "$stderr" == *".sheepdog/review-prompt.md"* ]]
+  [ ! -e "$FX/claude.args" ]
 }
 
 @test "settings.reviewPrompt: ./ is the worktree's top, wherever the reviewer runs" {
