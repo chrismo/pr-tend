@@ -2,21 +2,21 @@
 
 bats_require_minimum_version 1.5.0
 
-# Test suite for `pr-act push`: publish a branch. A fast-forward is a plain
+# Test suite for `sd act push`: publish a branch. A fast-forward is a plain
 # push; rewritten history is force-pushed with a lease on the remote head,
 # only when that head is in the branch's reflog (we put it there).
 #
 # Real git: a bare origin, our clone, and $TMP/other for other people's
 # pushes. gh is a stub that fails: push never talks to GitHub.
 
-PR_ACT="$BATS_TEST_DIRNAME/pr-act"
+SD_ACT="$BATS_TEST_DIRNAME/sd-act"
 
 setup() {
   TMP="$(cd "$BATS_TEST_TMPDIR" && pwd -P)"
   export GIT_CONFIG_GLOBAL="$TMP/gitconfig-global"
   export GIT_CONFIG_SYSTEM=/dev/null
   printf '[user]\n\temail = t@example.com\n\tname = Tester\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
-  export PR_TEND_CONFIG="$TMP/global.json"
+  export SHEEPDOG_CONFIG="$TMP/global.json"
   mkdir -p "$TMP/fakebin"
   printf '#!/usr/bin/env bash\necho "gh called: $*" >&2\nexit 1\n' > "$TMP/fakebin/gh"
   chmod +x "$TMP/fakebin/gh"
@@ -44,14 +44,14 @@ upstream() {
 remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
 
 @test "nothing to push: says so" {
-  run "$PR_ACT" push
+  run "$SD_ACT" push
   [ "$status" -eq 0 ]
   [ "$output" = "nothing to push on feat" ]
 }
 
 @test "new commits: a plain push" {
   commit two
-  run "$PR_ACT" push
+  run "$SD_ACT" push
   [ "$status" -eq 0 ]
   [ "$(remote feat)" = "$(git rev-parse feat)" ]
   [ "$output" = "pushed feat to origin (1 commit)" ]
@@ -60,7 +60,7 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
 @test "not on the remote yet: pushed, with the upstream set" {
   git switch -qc fresh
   commit fresh
-  run "$PR_ACT" push
+  run "$SD_ACT" push
   [ "$status" -eq 0 ]
   [ "$(remote fresh)" = "$(git rev-parse fresh)" ]
   [ "$(git config branch.fresh.remote)" = origin ]
@@ -69,7 +69,7 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
 
 @test "rewritten, and the remote head is ours: force-pushed with a lease" {
   git commit -q --amend -m "feat, reworded"
-  run "$PR_ACT" push
+  run "$SD_ACT" push
   [ "$status" -eq 0 ]
   [ "$(remote feat)" = "$(git rev-parse feat)" ]
   [[ "$output" == "force-pushed feat to origin (rewritten; the remote head "*" was ours)" ]]
@@ -79,27 +79,27 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   upstream theirs
   theirs=$(remote feat)
   git commit -q --amend -m "feat, reworded"
-  run "$PR_ACT" push
+  run "$SD_ACT" push
   [ "$status" -eq 1 ]
   [[ "$output" == *"origin/feat has 1 commit this copy has never had; not pushing over it"* ]]
   [[ "$output" == *"git log feat..origin/feat"* ]]
   [[ "$output" == *"then rebase onto or merge origin/feat and push again"* ]]
   [ "$(remote feat)" = "$theirs" ]
-  run "$PR_ACT" push --force
+  run "$SD_ACT" push --force
   [ "$status" -eq 1 ]
   [ "$(remote feat)" = "$theirs" ]
 }
 
 @test "the remote is only ahead: refused, says how to take its commits" {
   upstream theirs
-  run "$PR_ACT" push
+  run "$SD_ACT" push
   [ "$status" -eq 1 ]
   [[ "$output" == *"origin/feat has 1 commit you don't"* ]]
   [[ "$output" == *"git merge --ff-only origin/feat"* ]]
 }
 
 @test "the lease holds when the remote moves after the fetch" {
-  # The hook runs after pr-act has fetched and chosen its lease, before the
+  # The hook runs after sd act has fetched and chosen its lease, before the
   # push lands: someone else's push sneaks in between.
   cat > "$(git rev-parse --git-path hooks)/pre-push" <<EOF
 #!/usr/bin/env bash
@@ -109,7 +109,7 @@ cd "$TMP/other" && git fetch -q origin && git checkout -q -B feat origin/feat \\
 EOF
   chmod +x "$(git rev-parse --git-path hooks)/pre-push"
   git commit -q --amend -m "feat, reworded"
-  run "$PR_ACT" push
+  run "$SD_ACT" push
   [ "$status" -eq 1 ]
   [[ "$output" == *"origin/feat moved while pushing; nothing pushed"* ]]
   [ "$(git -C "$TMP/other" log -1 --format=%s origin/feat)" = sneaky ]
@@ -117,11 +117,11 @@ EOF
 
 @test "taken over: refused unless --force" {
   commit two
-  git config branch.feat.pr-lock chrismo
-  run "$PR_ACT" push
+  git config branch.feat.sd-lock chrismo
+  run "$SD_ACT" push
   [ "$status" -eq 1 ]
   [[ "$output" == *"taken over"* ]]
-  run "$PR_ACT" push --force
+  run "$SD_ACT" push --force
   [ "$status" -eq 0 ]
   [ "$(remote feat)" = "$(git rev-parse feat)" ]
 }
@@ -129,7 +129,7 @@ EOF
 @test "a named branch is pushed from wherever you are" {
   commit two
   git switch -q main
-  run "$PR_ACT" push feat
+  run "$SD_ACT" push feat
   [ "$status" -eq 0 ]
   [ "$(remote feat)" = "$(git rev-parse feat)" ]
 }
@@ -137,8 +137,8 @@ EOF
 @test "the remote comes from settings.remote" {
   git remote rename origin up
   commit two
-  printf '{"settings":{"remote":"up"}}\n' > "$PR_TEND_CONFIG"
-  run "$PR_ACT" push
+  printf '{"settings":{"remote":"up"}}\n' > "$SHEEPDOG_CONFIG"
+  run "$SD_ACT" push
   [ "$status" -eq 0 ]
   [ "$output" = "pushed feat to up (1 commit)" ]
 }

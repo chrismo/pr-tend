@@ -1,5 +1,5 @@
-# Harness and settings for the PR pipeline. Sourced by bin/pr-config, pr-act,
-# pr-watch and pr-state; needs bash 5 and super 0.3.0. See docs/pr-workflow/design.md,
+# Harness and settings for the PR pipeline. Sourced by libexec/sd-config, sd act,
+# sd watch and sd state; needs bash 5 and super 0.3.0. See docs/pr-workflow/design.md,
 # "Config files".
 #
 # Every function returns 1 on an error (message on stderr) and never exits:
@@ -16,7 +16,7 @@ PRC_DEFAULTS='{"harness": "claude",
                "botLogin": [], "botIgnore": [], "botIgnoreBody": [], "implementAllow": []}}'
 PRC_SKELETON='{"harness": "claude", "harnesses": {"claude": {}, "pi": {}}, "steps": {}, "settings": {}}'
 
-# A step is a pr-act verb that runs an agent: add new ones here. The global-only
+# A step is a sd act verb that runs an agent: add new ones here. The global-only
 # settings are the watcher's, which reads no branch file.
 PRC_HARNESSES=(claude pi)
 PRC_STEPS=(address ci-fix describe implement review)
@@ -60,14 +60,14 @@ PRC_MERGE='unnest {i, kv: flatten(v)} | values {i, k: kv.key, v: kv.value} WHERE
 | aggregate kv:=collect({key: e.k, value: e.v})
 | values unflatten(coalesce(kv, []))'
 
-prc_err() { echo "pr-config: $*" >&2; return 1; }
+prc_err() { echo "sd config: $*" >&2; return 1; }
 
-prc_global_file() { echo "${PR_TEND_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/pr-tend/config.json}"; }
+prc_global_file() { echo "${SHEEPDOG_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/sheepdog/config.json}"; }
 
 prc_branch_file() { # <branch>
   local dir name=${1//[%]/%25}
   dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || { prc_err "not a git repository"; return; }
-  echo "$dir/pr-tend/${name//\//%2F}.json"
+  echo "$dir/sheepdog/${name//\//%2F}.json"
 }
 
 prc_branch_arg() { # <branch-or-empty>
@@ -265,7 +265,7 @@ prc_step_warn() {
     | values {f, h: $hexpr}
     | values {h, sb: f.steps[\"$step\"][h], hb: f.harnesses[h]}
     | where coalesce(sb.model, null) is not null and missing(sb.effort) and coalesce(hb.effort, null) is not null
-    | values f\"pr-config: steps.$step.{h} sets model but inherits effort {hb.effort} from harnesses.{h}; effort levels depend on the model, so set steps.$step.{h}.effort (null clears it)\"" -) || return
+    | values f\"sd config: steps.$step.{h} sets model but inherits effort {hb.effort} from harnesses.{h}; effort levels depend on the model, so set steps.$step.{h}.effort (null clears it)\"" -) || return
   [[ -z $warn ]] || echo "$warn" >&2
 }
 

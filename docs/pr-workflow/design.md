@@ -20,9 +20,9 @@ a glance where each one stands:
 
 **Name: `pr-tend`, for now (2026-10-13).** It's the overarching name for the
 pipeline and the namespace for its state: git config `pr-tend.*` and
-`branch.<b>.pr-tend`, `refs/pr-tend/`, `~/.config/pr-tend/`,
-`~/.local/state/pr-tend/`, `<git dir>/pr-tend/`, `lib/pr-tend.sh`. The commands
-stay `pr-state`, `pr-act`, `pr-watch`, `pr-config`. Rename candidates: `sheepdog` (favourite), `tug`, **`pr-op`** (*prop*), and
+`branch.<b>.sheepdog`, `refs/sheepdog/`, `~/.config/sheepdog/`,
+`~/.local/state/sheepdog/`, `<git dir>/sheepdog/`, `lib/sheepdog.sh`. The commands
+stay `sd state`, `sd act`, `sd watch`, `sd config`. Rename candidates: `sheepdog` (favourite), `tug`, **`pr-op`** (*prop*), and
 **`pr-onto`** (*pronto*). The last two keep the `pr-` prefix while reading as
 short familiar words; `pr-op` suggests a PR operation, while `pr-onto` suggests
 getting a PR moving. Renaming means a pass over every name above, plus migrating
@@ -49,10 +49,10 @@ existing state.
 | Topic | Decision |
 |---|---|
 | Scope | One branch at a time. A pass never reaches into another worktree. |
-| Initiator | The pipeline: `pr-act start "<task>"` (chrismo) to begin; tickets later |
+| Initiator | The pipeline: `sd act start "<task>"` (chrismo) to begin; tickets later |
 | Agent invocation | Headless, one step per process, persistent session per branch (`-p` + resume) |
 | Done signal | The agent process exiting (or chrismo exiting a takeover). [req-review #5](req-review.md#5-done--process-exit-cant-tell-finished-from-asking) |
-| Takeover | `pr-act attach` → lock + interactive resume of the same session |
+| Takeover | `sd act attach` → lock + interactive resume of the same session |
 | Rebase policy | `rebase --onto` + `push --force-with-lease=<branch>:<expected-sha>`; plain push when nothing was rewritten |
 | Stacks | First-class. Lineage stored locally; restack is always `rebase --onto`. |
 | Local review | Configurable script run by the pipeline; preferred over the PR bot whenever it suffices, and can replace it (`/marge` not required at work) |
@@ -67,11 +67,11 @@ existing state.
 | Session per step | **Resume for every step in v1.** Record per-step token usage (`--output-format json`); switch late steps (CI fix, bot address) to fresh-session + findings if resumes get expensive. *Theory:* prompt cache will have expired after a CI / bot wait, so a long resumed session is re-read at full price. |
 | Deterministic verify | **Yes.** `settings.verify` (lint / build / test) runs before the local model review, at zero tokens; failure output (trimmed) goes to the agent's fix step and the model reviewer never sees code that doesn't build. The step contract tells the agent the command exists, so J0 can run it before exiting. |
 | Autofix before CI fix | **Yes.** `settings.autofix` (formatters, `lint --fix`) runs first on red CI or failed verify; only what remains goes to J2. |
-| Scope check | **Yes.** The task text is recorded at start (`branch.<name>.pr-task`) and passed to the local reviewer as `PR_TEND_TASK`, so it can flag work outside the task (Spotify's top judge veto). |
+| Scope check | **Yes.** The task text is recorded at start (`branch.<name>.sd-task`) and passed to the local reviewer as `SHEEPDOG_TASK`, so it can flag work outside the task (Spotify's top judge veto). |
 | Per-step turn cap | **No.** Neither CLI shows a turn-cap flag (`--help`, 2026-10-11); `--max-budget-usd` bounds Claude steps. |
 | Verify before reply | **No, for now.** Revisit if we move fix steps to cheaper models (OpenHands-style per-thread "was it incorporated?" check). |
-| Handed-off feedback | Multi-valued `branch.<name>.pr-handled <comment-id>` (git config `--add`). Mostly a guard for review bodies and in-flight steps; threads already dedup via "last speaker is us" (O7). |
-| Step prompts | Lookup chain, nearest wins: `<scope>/.pr-tend/<step>.md` walking up to the repo root → pr-tend defaults. `scope` = `branch.<name>.pr-scope`, set by `pr-act start --scope <app-dir>` (monorepo: per app); default repo root. |
+| Handed-off feedback | Multi-valued `branch.<name>.sd-handled <comment-id>` (git config `--add`). Mostly a guard for review bodies and in-flight steps; threads already dedup via "last speaker is us" (O7). |
+| Step prompts | Lookup chain, nearest wins: `<scope>/.sheepdog/<step>.md` walking up to the repo root → pr-tend defaults. `scope` = `branch.<name>.sd-scope`, set by `sd act start --scope <app-dir>` (monorepo: per app); default repo root. |
 | Build vs adopt | Self-built. AO evaluated (below), not adopted; round 2 (2026-10-11) found nothing to adopt wholesale — see "Prior art, round 2". |
 | Who drives | **Pipeline drives, reaffirmed** after round 2. Symphony / Gas Town (agent drives the PR loop from prompts) are the opposite camp; Sortie / Archon match us. Keeps tokens down; stochastic only where judgment is needed. |
 | GitHub native stacks (`gh stack`) | **Not used by the pipeline.** Too heavy for local automation; read only for git tricks. Guard only: chrismo uses `gh stack` at work, so a branch can be in a native stack anyway — then O1 sees the `stack` field and the pipeline skips A2 / A4 (GitHub restacks server-side and refuses base edits) rather than race it. Not built: [#17]. |
@@ -140,7 +140,7 @@ hit, or an escalation → **needs-chrismo** (N2).
 
 ### Steps 1–4, concretely
 
-1–2. Built 2026-10-14: `pr-act start` and `pr-act implement` (`pr-act
+1–2. Built 2026-10-14: `sd act start` and `sd act implement` (`sd act
    --help`; decisions in [#14](https://github.com/chrismo/pr-tend/issues/14)).
 3. **Pipeline** checks: exit 0, tree clean, commits ahead of base? (Dirty → one
    resume: "uncommitted changes left"; otherwise → needs-chrismo.) Runs
@@ -163,11 +163,11 @@ hit, or an escalation → **needs-chrismo** (N2).
 8. CI green; `bot` pin is behind HEAD → J5 step: small fix inside the flagged
    range, local clean → no re-review → pin **`accepted`** (see O6).
 9. All four checks hold → tab glyph green → **chrismo** merges.
-10. Watcher sees merged → unenroll, delete `refs/pr-tend/<branch>/*`.
+10. Watcher sees merged → unenroll, delete `refs/sheepdog/<branch>/*`.
 
 ### Takeover
 
-`pr-act attach`: take the lock (`branch.<name>.pr-lock`), open the interactive
+`sd act attach`: take the lock (`branch.<name>.sd-lock`), open the interactive
 resume of `$U`. While locked the pipeline runs no agent steps (mechanical
 observation continues). chrismo exits → release lock → pipeline resumes at the
 local-review check. **chrismo exiting is a done signal too**, so pairing on an
@@ -195,27 +195,27 @@ repeat offender means the step-contract prompt needs tightening.
 
 | What | Where |
 |---|---|
-| Parent branch name | `git config branch.<name>.pr-parent` |
-| Enrolled | `git config branch.<name>.pr-tend true` |
-| Harness | `git config branch.<name>.pr-harness claude\|pi` |
-| Session ID | `git config branch.<name>.pr-session <uuid>` |
-| Takeover lock | `git config branch.<name>.pr-lock` |
-| Restack base SHA | `refs/pr-tend/<branch>/base` |
-| SHA last locally reviewed clean | `refs/pr-tend/<branch>/local` |
-| SHA bot was triggered on | `refs/pr-tend/<branch>/bot` |
-| SHA accepted as reviewed enough (J5 "no") | `refs/pr-tend/<branch>/accepted` |
+| Parent branch name | `git config branch.<name>.sd-parent` |
+| Enrolled | `git config branch.<name>.sheepdog true` |
+| Harness | `git config branch.<name>.sd-harness claude\|pi` |
+| Session ID | `git config branch.<name>.sd-session <uuid>` |
+| Takeover lock | `git config branch.<name>.sd-lock` |
+| Restack base SHA | `refs/sheepdog/<branch>/base` |
+| SHA last locally reviewed clean | `refs/sheepdog/<branch>/local` |
+| SHA bot was triggered on | `refs/sheepdog/<branch>/bot` |
+| SHA accepted as reviewed enough (J5 "no") | `refs/sheepdog/<branch>/accepted` |
 | Bot command / login | `settings.botCommand`, `settings.botLogin` (config files) |
-| Local reviewer script | `git config [--global] pr-tend.localReview` |
+| Local reviewer script | `git config [--global] sheepdog.localReview` |
 | Verify / autofix commands | `settings.verify`, `settings.autofix` (config files) (repo-level for a monorepo app: scope lookup below) |
-| Task text | `git config branch.<name>.pr-task` |
-| Comment IDs handed to the agent | `git config --add branch.<name>.pr-handled <id>` |
-| Prompt scope (monorepo app dir) | `git config branch.<name>.pr-scope <path>` |
+| Task text | `git config branch.<name>.sd-task` |
+| Comment IDs handed to the agent | `git config --add branch.<name>.sd-handled <id>` |
+| Prompt scope (monorepo app dir) | `git config branch.<name>.sd-scope <path>` |
 
 - Refs (outside `refs/worktree/`) and repo config are **shared across
   worktrees**, so a child's pass can read its parent's records.
 - A ref **pins the object** against gc after rebases / force-pushes; a SHA in a
   JSON file would not.
-- `refs/pr-tend/*` is not in the default push/fetch refspecs — stays local.
+- `refs/sheepdog/*` is not in the default push/fetch refspecs — stays local.
 - Lineage must be local because GitHub auto-retargets a child PR to `main` when
   the parent merges with its branch deleted (observed 2026-10-14, #25 → #26),
   erasing the parent name from the PR. (GitHub's native stacked PRs, GA
@@ -224,19 +224,19 @@ repeat offender means the step-contract prompt needs tightening.
 
 **Cleanup** (observed, scratch repo, 2026-10-11):
 
-| Event | `branch.<name>.*` config | `refs/pr-tend/<name>/*` |
+| Event | `branch.<name>.*` config | `refs/sheepdog/<name>/*` |
 |---|---|---|
 | `git worktree remove` | kept | kept |
 | `git branch -D` | **removed by git** | kept |
 
 Config cleans itself up when the branch is deleted; refs never do (they're
-repo-wide, not per-worktree). So `pr-act forget` deletes them (NEXT after a
-merge, built 2026-10-14), and every watcher pass sweeps `refs/pr-tend/<b>/*`
+repo-wide, not per-worktree). So `sd act forget` deletes them (NEXT after a
+merge, built 2026-10-14), and every watcher pass sweeps `refs/sheepdog/<b>/*`
 whose branch no longer exists (abandoned branches).
 
-**Bootstrap:** `pr-act start` records everything at creation. For
-a branch made any other way, `pr-act enroll` stores a stacked PR's parent and
-base pin while the PR's base still names the parent; otherwise `pr-state`
+**Bootstrap:** `sd act start` records everything at creation. For
+a branch made any other way, `sd act enroll` stores a stacked PR's parent and
+base pin while the PR's base still names the parent; otherwise `sd state`
 derives what it can (A2 fallback chain) and stays read-only.
 
 ### Harness, model, effort and provider per step
@@ -259,7 +259,7 @@ Resolution, per key:
 The harness command and timeouts can't be overridden per step;
 `settings.stepTimeout` is global.
 
-`pr-config step` warns (stderr, built 2026-10-14) when the step block sets
+`sd config step` warns (stderr, built 2026-10-14) when the step block sets
 `model` but not `effort` and the harness block supplies one, because level
 names depend on the model (Sortie's `agent.effort.inherited`). Writing
 `effort`, even as `null`, silences it.
@@ -272,7 +272,7 @@ flags and the sandbox flags, so it can also override `--allowedTools`,
 `--disallowedTools` (claude) or `--tools` (pi). Whether a repeated flag's last
 value wins is up to each CLI and untested here.
 
-To verify: whether a resumed session (`pr-session`) accepts a different model
+To verify: whether a resumed session (`sd-session`) accepts a different model
 or effort than it started with; Sortie says a change between attempts doesn't
 end its session, which is untested here.
 
@@ -280,9 +280,9 @@ end its session, which is untested here.
 
 The settings live in JSON instead of dotted git-config keys:
 
-- **Global:** `$PR_TEND_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/pr-tend/config.json`,
+- **Global:** `$SHEEPDOG_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/sheepdog/config.json`,
   one per machine (no system layer; single user).
-- **Branch:** `<git common dir>/pr-tend/<branch>.json` (`%` and `/` encoded),
+- **Branch:** `<git common dir>/sheepdog/<branch>.json` (`%` and `/` encoded),
   shared by every worktree of the repo.
 
 Shape:
@@ -295,12 +295,12 @@ Shape:
  "settings": {"verify": "make test", "botLogin": ["marge"]}}
 ```
 
-**One merge, two readers.** `lib/pr-config.sh` deep-merges the branch file over
+**One merge, two readers.** `lib/config.sh` deep-merges the branch file over
 the global file in SuperDB. A leaf in the higher layer replaces every leaf at,
 above or below its path in the lower one, lists are leaves, and `null` is kept
 through the merge. Then:
 
-- `pr-config get <path>` (`prc_get`) reads any dotted path, the same paths
+- `sd config get <path>` (`prc_get`) reads any dotted path, the same paths
   `set` and `unset` take, over the **built-in defaults** (`PRC_DEFAULTS`).
   A `null` in a file removes the key from the files, so the default applies.
   - **Defaults:** `harness: claude`; settings `remote: origin`,
@@ -309,20 +309,20 @@ through the merge. Then:
   - **Output:** a string prints raw, a list one element per line, an object as
     JSON; `--json` prints JSON for all of them.
   - **Exit codes:** 3 means no value and no default; 1 is always an error.
-- `pr-config step <step>` (`prc_step`) is what one step runs with.
+- `sd config step <step>` (`prc_step`) is what one step runs with.
   - **Harness:** `--harness`, else the step's `harness`, else the top-level
     `harness`, else the default.
   - **Settings:** that harness's block, with the step's block for that harness
     laid over it. A step-level `null` clears the harness block's key, so the
     nulls have to survive the merge; that's why the merge keeps them.
 
-Callers can't tell which layer a value came from. `pr-act`, `pr-watch` and
-`pr-state` source the lib and only call `prc_get` and `prc_step`. The lib's
+Callers can't tell which layer a value came from. `sd act`, `sd watch` and
+`sd state` source the lib and only call `prc_get` and `prc_step`. The lib's
 functions never exit and check every step (`|| return`), because callers run
 them as `x=$(prc_...) || die`, where errexit is off. The CLI calls them the same
 way, so its tests cover that path. The watcher has no branch, so it reads with
-`--no-branch`. `pr-act address` stops on a config error. `pr-watch` reports the
-error on the repo's line in `pr-watch status` and refuses to `install`.
+`--no-branch`. `sd act address` stops on a config error. `sd watch` reports the
+error on the repo's line in `sd watch status` and refuses to `install`.
 `verify` must be one command; a list is refused before the agent runs.
 
 **Typed files (built 2026-10-13).** Every file is checked against a SuperDB
@@ -330,9 +330,9 @@ type when it's read, and `set` / `unset` check the result before writing it.
 Each problem is one line naming the file and the dotted path:
 
 ```
-pr-config: ~/.config/pr-tend/config.json: settings.verfy: unknown key
-pr-config: ~/.config/pr-tend/config.json: settings.stepTimeout: cannot cast to uint64: 30m
-pr-config: <git dir>/pr-tend/feat.json: settings.remote: global file only
+sd config: ~/.config/sheepdog/config.json: settings.verfy: unknown key
+sd config: ~/.config/sheepdog/config.json: settings.stepTimeout: cannot cast to uint64: 30m
+sd config: <git dir>/sheepdog/feat.json: settings.remote: global file only
 ```
 
 - **What's allowed:** `harness` is `claude` or `pi`. `harnesses.claude` takes
@@ -342,10 +342,10 @@ pr-config: <git dir>/pr-tend/feat.json: settings.remote: global file only
   `null` is allowed anywhere, to clear an inherited key.
 - **Step names are a closed list** in `PRC_STEPS`: `address` plus the planned
   agent steps `ci-fix`, `describe`, `implement`, `review`. A new verb that runs
-  an agent has to be added there; `pr-config step <unknown>` is refused.
+  an agent has to be added there; `sd config step <unknown>` is refused.
 - **Global-only settings:** `remote`, `interval` and `notify` are the watcher's,
   and the watcher reads no branch file. A branch file setting one is refused,
-  so pr-watch, pr-state and pr-act can't disagree about them.
+  so sd watch, sd state and sd act can't disagree about them.
 - **How:** `cast` fills a typed record but silently drops keys the type lacks,
   so the check also compares the input's leaf paths with the cast's.
 - **Limits:** a string number such as `"1800"` is accepted as 1800, and
@@ -356,29 +356,29 @@ pr-config: <git dir>/pr-tend/feat.json: settings.remote: global file only
 
 **No git config fallback.** `pr-tend.<key>` and `pr-tend.<harness>.args` aren't
 read any more; nobody had any set (checked 2026-10-13). Per-branch *state* stays
-in git config: enrollment, `pr-session`, `pr-harness`, `pr-handled`, and so on,
-plus the `pr-tend.repo` registry.
+in git config: enrollment, `sd-session`, `sd-harness`, `sd-handled`, and so on,
+plus the `sheepdog.repo` registry.
 
 **Writing values:**
-- `pr-config init --global` creates the global file as a skeleton of empty
+- `sd config init --global` creates the global file as a skeleton of empty
   blocks.
-- `pr-config set [--global | --branch <b>] [--json] <path> <value>` writes one
+- `sd config set [--global | --branch <b>] [--json] <path> <value>` writes one
   value at a dotted path, to the current branch's file by default.
   - Values are strings unless `--json` (numbers, lists, `null` to clear an
     inherited key). `--json` takes exactly one JSON value.
   - Each parent on the path must be missing, `null` or an object.
   - Writes go through SuperDB `put`, so the file's empty blocks and other keys
     stay.
-- `pr-config unset <path>` removes a key so it inherits again.
+- `sd config unset <path>` removes a key so it inherits again.
 - `set` on a branch with no file creates one holding only that key.
 
 **A branch file holds only overrides** (2026-10-13; it was a full copy).
-`pr-config init` writes empty blocks to fill in, and `set` creates the file
+`sd config init` writes empty blocks to fill in, and `set` creates the file
 when needed. Per-PR differences are common: some PRs are cheap and easy, others
 thorough and need a frontier model. (No command flags are designed for this
 yet.) A full copy froze the branch: later edits to the global file, such as a
 new `botIgnoreBody`, never reached it. Branch files made by the old `init` are
-still full copies; `pr-config init --force` replaces one with empty blocks.
+still full copies; `sd config init --force` replaces one with empty blocks.
 
 **SuperDB notes (0.3.0, observed 2026-10-13):**
 - **No here-strings or redirects:** `super` reads nothing from `<<<` or from
@@ -397,9 +397,9 @@ still full copies; `pr-config init --force` replaces one with empty blocks.
   call to print raw or JSON.
 
 **SuperDB notes from the jq conversion (0.3.0, observed 2026-10-14, #19):**
-`pr-state`, `pr-act`, `pr-watch` and `pr-review-local` no longer run `jq`;
+`sd state`, `sd act`, `sd watch` and `sd review-local` no longer run `jq`;
 every query goes through `prc_json` / `prc_line` / `prc_val` in
-`lib/pr-config.sh`, with `PRC_FNS` (`on`, `n`, `nul`, `sj`) in scope.
+`lib/config.sh`, with `PRC_FNS` (`on`, `n`, `nul`, `sj`) in scope.
 `ci/super-stress` runs each named query 200 times on `ci/fixtures/` and fails
 on a panic or a differing output (13 filters, 0 failures at conversion time).
 - **A missing field is an error value**, not null: it prints as
@@ -433,7 +433,7 @@ on a panic or a differing output (13 filters, 0 failures at conversion time).
 
 ## Atomic actions
 
-### Observe — deterministic, read-only (`pr-state`)
+### Observe — deterministic, read-only (`sd state`)
 
 | # | Action | Answers |
 |---|---|---|
@@ -446,7 +446,7 @@ on a panic or a differing output (13 filters, 0 failures at conversion time).
 | O7 | Threads owed a reply | unresolved threads / review bodies where last speaker isn't us; split bot vs human; **outdated-but-unresolved** (anchors lost to a force-push) handled explicitly |
 | O8 | Session | harness, session ID, locked (taken over)? step in flight? |
 
-### Act — deterministic, mechanical (`pr-act <verb>`)
+### Act — deterministic, mechanical (`sd act <verb>`)
 
 | # | Action | Notes |
 |---|---|---|
@@ -454,11 +454,11 @@ on a panic or a differing output (13 filters, 0 failures at conversion time).
 | A1 | fetch | |
 | A2 | restack | algorithm below; stops on conflict |
 | A3 | push | plain if fast-forward; else `--force-with-lease=<branch>:<sha>` with the SHA from O4, only when that SHA is ours. Never over others' commits, `--force` or not (chrismo, 2026-10-13) |
-| A4 | retarget / fix base | `gh pr edit --base` to match `pr-parent` (or `main` once the parent merged) |
-| A5 | trigger bot | post `pr-tend.botCommand`; pin `bot`; skip if already pinned at HEAD |
+| A4 | retarget / fix base | `gh pr edit --base` to match `sd-parent` (or `main` once the parent merged) |
+| A5 | trigger bot | post `sheepdog.botCommand`; pin `bot`; skip if already pinned at HEAD |
 | A6 | rerun flaky CI | optional; needs an allowlist |
 | A7 | post reply / resolve thread | posts the agent's J4 text; resolves only after replying |
-| A8 | local review | run `pr-tend.localReview`; findings → next agent step; clean → pin `local`. **The one Act verb that spends tokens** (the default reviewer is a model call) — exception to principle 1's zero-token rule |
+| A8 | local review | run `sheepdog.localReview`; findings → next agent step; clean → pin `local`. **The one Act verb that spends tokens** (the default reviewer is a model call) — exception to principle 1's zero-token rule |
 | A9 | attach | lock + interactive resume (takeover) |
 | A10 | verify | run `settings.verify`; trim output to errors; zero tokens |
 | A11 | autofix | run `settings.autofix`; commit the result if the tree changed |
@@ -500,7 +500,7 @@ git rebase --onto <new-base> <old-base-sha> <branch>
 `<old-base-sha>` resolution, each candidate checked with
 `git merge-base --is-ancestor <sha> HEAD`:
 
-1. `refs/pr-tend/<branch>/base`
+1. `refs/sheepdog/<branch>/base`
 2. merged parent PR's `headRefOid` (GitHub)
 3. `git merge-base --fork-point origin/<parent>`
 4. escalate (J1 / chrismo)
@@ -513,7 +513,7 @@ after  = git diff <new-base>     HEAD       | git patch-id --stable
 ```
 
 Equal → write new `base` pin, done. Not equal → reset to old HEAD, escalate.
-Only for a clean rebase: a conflict resolved by the agent (J1, `pr-act restack
+Only for a clean rebase: a conflict resolved by the agent (J1, `sd act restack
 --resolve`, built 2026-10-14) changes the diff by definition, so a resolved
 rebase skips the check, pins the base, runs verify, and goes to local review.
 Each stop is one agent step in the branch's session with edit tools only; the
@@ -576,21 +576,21 @@ only after `settings.verify` passes (A10), so the model never reviews code that
 doesn't build.
 
 ```
-pr-config set [--global] settings.localReview <command>
+sd config set [--global] settings.localReview <command>
 ```
 
 Any executable. What it does inside (prompt, model, emulating the backend bot
 or not) is out of scope; pr-tend defines only the contract, and ships a
-default `bin/pr-review-local` (built 2026-10-14: `lib/review-prompt.md` plus
-the task, commits and diff, through `harness_run` in `lib/pr-tend.sh` with
+default `libexec/sd-review-local` (built 2026-10-14: `lib/review-prompt.md` plus
+the task, commits and diff, through `harness_run` in `lib/sheepdog.sh` with
 read-only tools and a new session every run; harness, model and effort from
-`pr-config step review`). `pr-act review` runs it after `pr-act verify`
+`sd config step review`). `sd act review` runs it after `sd act verify`
 passes, over `base..HEAD`; an empty list pins `local` (with its base),
 findings are printed as JSON, and a failed reviewer pins nothing.
 
 **Contract:**
 
-- input: env `PR_TEND_BASE`, `PR_TEND_HEAD` (SHAs), `PR_TEND_TASK` (the task
+- input: env `SHEEPDOG_BASE`, `SHEEPDOG_HEAD` (SHAs), `SHEEPDOG_TASK` (the task
   text, so out-of-scope changes can be flagged); cwd = the worktree
 - output: JSON findings on stdout — `[{file, line, severity, body}]`
 - exit 0 = review completed (findings may be empty); non-zero = reviewer failed
@@ -624,7 +624,7 @@ Every push resets CI (O5) and bot freshness (O6). So within any loop:
 
 Every few minutes, for each enrolled branch:
 
-1. `pr-state` (zero tokens)
+1. `sd state` (zero tokens)
 2. compute the next transition of the state machine
 3. mechanical transitions → run them (A1–A7, A10, A11); A8 runs only after an
    agent step exits or a takeover ends, never on an idle pass.
@@ -633,18 +633,18 @@ Every few minutes, for each enrolled branch:
    step is already in flight for this branch
 5. needs-chrismo → N2
 
-**Built so far — observe-only (`bin/pr-watch`, 2026-10-11).** Steps 2–4 are
+**Built so far — observe-only (`libexec/sd-watch`, 2026-10-11).** Steps 2–4 are
 not built; a pass only observes and reports:
 
-- Enrollment: `pr-act enroll [<branch>]` sets `branch.<name>.pr-tend` and adds
-  the main worktree to global `pr-tend.repo` (multi-valued), the watcher's list
-  of repos. `pr-act unregister [<path>]` takes a repo off that list.
-- **Fetch first** (decided): one `git fetch --prune` per repo, then `pr-state`
-  per enrolled branch. `pr-state` stays read-only, with no `--fetch` option.
+- Enrollment: `sd act enroll [<branch>]` sets `branch.<name>.sheepdog` and adds
+  the main worktree to global `sheepdog.repo` (multi-valued), the watcher's list
+  of repos. `sd act unregister [<path>]` takes a repo off that list.
+- **Fetch first** (decided): one `git fetch --prune` per repo, then `sd state`
+  per enrolled branch. `sd state` stays read-only, with no `--fetch` option.
 - Glyph per worktree in `~/.claude/tab-status/<worktree>.pr` as
   `<branch>\t<glyph>`; `tab-status` appends it to the title only while the
   worktree is still on that branch.
-  - **The glyph is read from pr-state's `.next` steps** (`lib/pr-next.sh`), not
+  - **The glyph is read from sd state's `.next` steps** (`lib/next.sh`), not
     from the raw fields, so the tab and `NEXT` can't disagree (2026-10-13).
   - ❌ needs chrismo: any `ci-red`, `conflict`, `human` or `foreign` step.
   - ⚠️ unknown: an `errors` or `stale` step, or no steps at all.
@@ -658,17 +658,17 @@ not built; a pass only observes and reports:
 - Notifications (N2, macOS by default, `settings.notify` overrides) only for a
   step that wasn't there last pass (N3), keyed by step and worded by its `say`:
   the ❌ steps, merged, ready to merge.
-- `pr-watch status` prints the last pass. `pr-watch install` / `uninstall`
+- `sd watch status` prints the last pass. `sd watch install` / `uninstall`
   manage the launchd job, opt-in per machine; interval `settings.interval`,
   default 300 s.
-- O7 in `pr-state` (2026-10-12): besides inline threads, bot **review bodies**
+- O7 in `sd state` (2026-10-12): besides inline threads, bot **review bodies**
   (non-blank) and bot **top-level PR comments** are owed items, typed
   `thread` / `review` / `comment` in `.threads.items`, with per-type counts in
   `.threads.by_type`; all count toward `owed_bot`. A review/comment stays owed
-  until its node id is in multi-valued `branch.<name>.pr-handled` (`pr-act
+  until its node id is in multi-valued `branch.<name>.sd-handled` (`sd act
   address` adds it). Human top-level comments are not tracked.
   `settings.botLogin` is a list and matches with or without `[bot]`.
-- Marks in `pr-state` (2026-10-13). Every owed item is marked `!` (blocks) or
+- Marks in `sd state` (2026-10-13). Every owed item is marked `!` (blocks) or
   `i` (to read), and the one-liner shows `!:<n> i:<n>`.
   - **`!`:** unresolved threads, a bot review in state `CHANGES_REQUESTED`, and
     a person's latest `APPROVED` / `CHANGES_REQUESTED` / `DISMISSED` review
@@ -676,13 +676,13 @@ not built; a pass only observes and reports:
     matching GitHub. Verdicts come from `reviews(last: 50)` only, so on a PR
     with more than 50 reviews an older request for changes can drop out of
     view and stop blocking (limit, not handled).
-  - **`i`:** bot review bodies and PR comments not yet in `pr-handled`.
+  - **`i`:** bot review bodies and PR comments not yet in `sd-handled`.
   - **Why the split:** those have no "resolved" state, so they were counted as
     owed alongside real work. The verdict a review bot writes in prose (Merge
     Simpson always submits as `COMMENT`) isn't parsed.
   - **Output:** `--json` items carry `mark`, `author`, `url`, and an `excerpt`
     (first line with text, tags stripped, 100 characters). A `stored` block
-    has the `pr-handled` ids and `refs/pr-tend/<b>/*`. `--long` adds one line
+    has the `sd-handled` ids and `refs/sheepdog/<b>/*`. `--long` adds one line
     per item.
 
 Rejected alternatives: `/loop` per session (tokens per idle wake, dies with the
@@ -709,20 +709,20 @@ wanted:
 
 | Piece | Kind | Tests |
 |---|---|---|
-| `bin/pr-state` | O1–O8 → JSON + one-line summary | bats, fake `gh` + git fixtures |
-| `bin/pr-act <verb>` | A0–A9 | bats; real git fixtures for A2 (squash case!) and reconciliation (reflog ownership) |
-| `lib/pr-tend.sh` | `harness_run` (adapter: claude / pi) + `with_timeout` | bats, stub `claude` / `pi` |
+| `libexec/sd-state` | O1–O8 → JSON + one-line summary | bats, fake `gh` + git fixtures |
+| `libexec/sd-act <verb>` | A0–A9 | bats; real git fixtures for A2 (squash case!) and reconciliation (reflog ownership) |
+| `lib/sheepdog.sh` | `harness_run` (adapter: claude / pi) + `with_timeout` | bats, stub `claude` / `pi` |
 | step-contract prompts | one per J step, versioned in the repo | — |
-| `bin/pr-review-local` | default reviewer script | bats for the contract, stub `claude` |
-| `pr-act verify` / `autofix` | run configured commands, trim output | bats, stub commands |
-| `bin/pr-watch` + launchd plist | state machine driver | bats |
+| `libexec/sd-review-local` | default reviewer script | bats for the contract, stub `claude` |
+| `sd act verify` / `autofix` | run configured commands, trim output | bats, stub commands |
+| `libexec/sd-watch` + launchd plist | state machine driver | bats |
 | tab-title glyph | N2 | — |
 
 ## Suggested build order
 
-**Manual first (decided 2026-10-12).** Every step is a `pr-act` verb chrismo
+**Manual first (decided 2026-10-12).** Every step is a `sd act` verb chrismo
 runs by hand; the watcher only starts dispatching them once each one behaves.
-Each verb checks its own preconditions with `pr-state` and refuses with the
+Each verb checks its own preconditions with `sd state` and refuses with the
 reasons (`--force` overrides the soft ones), so those checks *are* the state
 machine's transition guards: the loop later calls the verb and the verb
 decides. Verbs are written headless from the start (structured outcome, no
@@ -734,43 +734,43 @@ and reviewed, and leaves for last what he already does by hand: starting work
 and creating PRs. Theory, not yet tested: it is drawn from the verbs' value, not
 from running them.
 
-1. `pr-state` — done
-2. `pr-watch` observe-only + glyph + notifications — done
-3. `pr-act address` (bot feedback) + harness adapter — done, see below
-4. **Bootstrap spike.** Enroll an existing branch with no `pr-act start` and
-   check that `pr-state` derives the missing records (A2 fallback chain). Every
+1. `sd state` — done
+2. `sd watch` observe-only + glyph + notifications — done
+3. `sd act address` (bot feedback) + harness adapter — done, see below
+4. **Bootstrap spike.** Enroll an existing branch with no `sd act start` and
+   check that `sd state` derives the missing records (A2 fallback chain). Every
    later step assumes it works; if it doesn't, fix it first. [#7]
-5. `pr-act restack` + `push` incl. reconciliation — done 2026-10-13, see below
+5. `sd act restack` + `push` incl. reconciliation — done 2026-10-13, see below
 6. **Retarget**, pulled out of the old step 6: after a parent merges, restack
    onto `main` and change the PR's base. It is stack maintenance, so it sits
-   next to restack. Done 2026-10-14: `pr-act retarget` edits the base (GitHub
+   next to restack. Done 2026-10-14: `sd act retarget` edits the base (GitHub
    usually already did, on the parent's branch delete) and both it and a
-   restack that lands on the default branch rewrite `pr-parent` to it. A
+   restack that lands on the default branch rewrite `sd-parent` to it. A
    parent closed without merging is a `parent-closed` step for chrismo, and
    restack and retarget refuse. [#8]
-7. `pr-act verify` — the zero-token half of the old step 5. Gates every later
+7. `sd act verify` — the zero-token half of the old step 5. Gates every later
    step. Done 2026-10-14: `settings.verify` in the branch's worktree under
    `settings.stepTimeout`; fail → nonzero, output trimmed to its last 40 lines;
-   a tree change counts as failure. `pr-act address` runs the same code. [#9]
-8. `pr-act ship` + `describe` — push, `gh pr create`, and the description step.
+   a tree change counts as failure. `sd act address` runs the same code. [#9]
+8. `sd act ship` + `describe` — push, `gh pr create`, and the description step.
    After the other manual verbs because creating a PR by hand is the cheapest
    thing chrismo does. Done 2026-10-14: describe is read-only in the branch's
    session and stores `{title, body}` for HEAD; ship reuses it, rechecks HEAD,
    pushes, opens a **draft** PR on the parent (or fixes up an open PR's title,
    body and base) and enrolls. NEXT marks the draft ready only once CI is green
    and the review covers HEAD. [#10]
-9. Local review (`bin/pr-review-local`) — the model half of the old step 5. With
+9. Local review (`libexec/sd-review-local`) — the model half of the old step 5. With
    no bot, it is the only source of review findings. Done 2026-10-14, with
-   `pr-act review`; handing findings to the branch's agent is the loop's. [#11]
+   `sd act review`; handing findings to the branch's agent is the loop's. [#11]
 10. The loop: watcher dispatches verbs (below, "Process supervision"). After
     4–9 because a verb has to behave by hand first. [#12]
 11. Bot trigger — waits until there is a bot to trigger. Done 2026-10-14:
-    `pr-act trigger` posts `settings.botCommand` on the PR and pins `bot` at
+    `sd act trigger` posts `settings.botCommand` on the PR and pins `bot` at
     HEAD (with its base); NEXT's `bot-trigger` step runs it once HEAD is
     pushed and the local review covers it. The sandbox has a toy bot
     (`.github/workflows/review-bot.yml`) that answers `/review-bot` with a
     review. [#13]
-12. `pr-act start` + implement; `pr-act attach` — last; chrismo starts the work
+12. `sd act start` + implement; `sd act attach` — last; chrismo starts the work
     by hand while dogfooding. Start and implement done 2026-10-14; attach
     remains. [#14]
 
@@ -778,12 +778,12 @@ Two decisions that had to come before steps 5 and 6 are settled: the name is
 `pr-tend`, and the pipeline moved out of agent-rig into its own repo
 (2026-10-13).
 
-## `pr-act address` — built 2026-10-12
+## `sd act address` — built 2026-10-12
 
-`pr-act address [--force] [--no-publish] [--harness claude|pi] [<branch>]`:
+`sd act address [--force] [--no-publish] [--harness claude|pi] [<branch>]`:
 
 1. Find the worktree that has the branch checked out (refuse if none or
-   dirty), fetch, run `pr-state --json`.
+   dirty), fetch, run `sd state --json`.
 2. Gate. Hard (never forced): no PR, PR not open, GitHub unreadable. Soft
    (`--force`): taken over, a restack that would conflict, sync unknown,
    unpushed, remote behind or diverged. Warn: CI still running, behind the
@@ -791,8 +791,8 @@ Two decisions that had to come before steps 5 and 6 are settled: the name is
    blocks; [req-review #10](req-review.md)). Nothing owed → exit 0.
 3. Fetch the owed bot items' text with one `nodes(ids:)` query; normalize to
    `{id, type, path, line, outdated, conversation}`.
-4. Agent step: resume `branch.<b>.pr-session` or mint one (stored with
-   `pr-harness` after a successful run), run under `settings.stepTimeout`
+4. Agent step: resume `branch.<b>.sd-session` or mint one (stored with
+   `sd-harness` after a successful run), run under `settings.stepTimeout`
    (1800 s). Returns `{outcome, commit_message, summary, items: [{id, action,
    reply}]}`, action ∈ fixed / reply / pushback / ask. Claude: `--json-schema`,
    result in `structured_output`, edit tools only (commit, push, `gh` denied).
@@ -803,7 +803,7 @@ Two decisions that had to come before steps 5 and 6 are settled: the name is
 6. Push, then: threads get a reply (prefix `settings.replyPrefix`, default
    "🤖 "); fixed / reply resolve it, pushback stays open. Review bodies and PR
    comments get one combined PR comment and are added to
-   `branch.<b>.pr-handled`. The comment links to each item by URL rather than
+   `branch.<b>.sd-handled`. The comment links to each item by URL rather than
    quoting it: on 2026-10-13 a quoted Merge Simpson status comment carried its
    avatar URL (`…/merge-simpson.png`), whose `/merge-simpson` matched that
    workflow's `contains(body, ...)` trigger and started a new review. `ask` items (and any the agent skipped) are
@@ -819,30 +819,30 @@ code on agent edits, unsandboxed — `--no-publish` lets chrismo look first.
 Not in v1: local review before the push, cycle cap, bot re-trigger, the
 `accepted` pin, lease / lock. `botIgnore` (logins) keeps bots such as
 `github-actions` from ever being owed; `botIgnoreBody` (regexes, matched against
-bot review and PR comment bodies in `pr-state`) drops single posts such as a
+bot review and PR comment bodies in `sd state`) drops single posts such as a
 review bot's "on the job" status without ignoring the account. Both are applied
 before the agent sees anything, so ignoring is deterministic, not an
 instruction. Inline threads are matched by author only (their bodies aren't
-fetched by `pr-state`).
+fetched by `sd state`).
 
 Residual: the agent's reply *text* is posted as written, so a reply could
 itself carry a `/command` or `@mention`. Not handled; a deterministic scrub
 before posting is the fix if it ever happens.
 
-## `pr-act restack` and `pr-act push` — built 2026-10-13
+## `sd act restack` and `sd act push` — built 2026-10-13
 
 Separate verbs: restack never pushes, because every push restarts CI and makes
 bot reviews stale ("Ordering"), so one push should follow all the local work.
-By hand: `pr-act restack && pr-act push`. NEXT's `behind` and `push` steps
+By hand: `sd act restack && sd act push`. NEXT's `behind` and `push` steps
 name them.
 
-`pr-act restack [--force] [<branch>]` (A2):
+`sd act restack [--force] [<branch>]` (A2):
 
 1. Find the branch's worktree (refuse if none or dirty), fetch with `--prune`,
-   run `pr-state --json`.
-2. Gate, from pr-state. Hard: the parent's merged state unknown (GitHub
+   run `sd state --json`.
+2. Gate, from sd state. Hard: the parent's merged state unknown (GitHub
    unreadable, parent not the default branch), no old base or target ref
-   (pr-state's errors are quoted), conflict unknown, a predicted conflict (the
+   (sd state's errors are quoted), conflict unknown, a predicted conflict (the
    message gives the `git rebase --onto` to run by hand: J1 isn't built).
    Soft (`--force`): taken over. Already on the target → exit 0.
 3. `git rebase --onto <remote>/<target> <old-base>` in that worktree. A
@@ -853,13 +853,13 @@ name them.
    must equal new-base..new-HEAD. Not equal (e.g. the target already has part
    of the change, so the rebase dropped a commit) → reset to the old HEAD and
    print the `git range-diff` to look at.
-5. Move `refs/pr-tend/<b>/base` to the new base.
+5. Move `refs/sheepdog/<b>/base` to the new base.
 
-Tested against real git and the real pr-state (gh stubbed): a moved default
+Tested against real git and the real sd state (gh stubbed): a moved default
 branch, a stacked parent that moved, a squash-merged parent (old base from the
 merged PR's `headRefOid`), and each refusal and rollback above.
 
-`pr-act push [--force] [<branch>]` (A3), git only, no GitHub:
+`sd act push [--force] [<branch>]` (A3), git only, no GitHub:
 
 - Fetch `--prune`, then compare with `<remote>/<b>`. Not there → `push -u`.
   Ahead only → plain push. Remote only ahead (a GitHub "Commit suggestion",
@@ -874,12 +874,12 @@ merged PR's `headRefOid`), and each refusal and rollback above.
   negated).
 - `--force` only gets past a takeover lock.
 
-`pr-act address` publishes through the same code, so its push follows the same
+`sd act address` publishes through the same code, so its push follows the same
 rules: before, a plain `git push` failed on any rewritten branch.
 
 Not built yet: J1, conflict resolution by an agent ([#15]); per-pin bases
 ([#16]); the native `gh stack` guard ([#17]); retarget, including rewriting
-`pr-parent` after the parent merges ([#8]). pr-state's `foreign` step counts
+`sd-parent` after the parent merges ([#8]). sd state's `foreign` step counts
 the remote commits push would refuse over (`push.theirs`), not `push.behind`, so
 our own pre-amend commits under someone else's push aren't counted.
 
@@ -891,7 +891,7 @@ dispatches into free slots; exits are events with distinct reasons; state is
 durable (Sortie's correction to Symphony's in-memory state). Our launchd pass is
 short-lived, so it can't own children like their daemons do. Plan:
 
-- The pass never waits on an agent: it launches `pr-act <verb> <branch>`
+- The pass never waits on an agent: it launches `sd act <verb> <branch>`
   detached.
 - The verb is the supervisor of its own step: new process group, wall-clock
   deadline, writes an outcome record on exit.
@@ -925,7 +925,7 @@ short-lived, so it can't own children like their daemons do. Plan:
   failed or bad step can be rerun from the same starting point (principle 5),
   and takeover could fork too. Cost: session lineage to track (one ID per step
   vs one per branch). Spike: does a forked step keep full context, and how does
-  `pr-session` become "latest good fork"?
+  `sd-session` become "latest good fork"?
   **Claude half observed (2.1.296, haiku, 2026-10-11)** — script
   `spikes/fork-claude.sh`:
   - plain `-p --resume U` keeps session ID U (Sortie's ID-replacement concern
@@ -949,12 +949,12 @@ short-lived, so it can't own children like their daemons do. Plan:
 
 ## Known issues
 
-- **FIXED 2026-10-13: NEXT and pr-watch's ✅ said "ready to merge" when GitHub
+- **FIXED 2026-10-13: NEXT and sd watch's ✅ said "ready to merge" when GitHub
   blocked the merge** (found on a work PR: `reviewDecision:
-  REVIEW_REQUIRED`, `mergeStateStatus: BLOCKED`). `pr-state` asked only for
+  REVIEW_REQUIRED`, `mergeStateStatus: BLOCKED`). `sd state` asked only for
   `mergeable` ("no conflicts"), and `ready` was what was left when no other step
   applied.
-  - `pr-state` now reports `.pr.merge_state`, `.pr.review_decision` and
+  - `sd state` now reports `.pr.merge_state`, `.pr.review_decision` and
     `.pr.review_requests` (logins and team slugs).
   - `ready` only when `merge_state` is `CLEAN`, `UNSTABLE` or `HAS_HOOKS`.
     Otherwise the last step is:
@@ -963,7 +963,7 @@ short-lived, so it can't own children like their daemons do. Plan:
     - `UNKNOWN` (or missing) → `wait  GitHub hasn't decided whether it can
       merge yet`
     - `BEHIND` → `run  restack onto main (N behind): GitHub requires branches
-      to be up to date → pr-act restack` (sandbox spike 2026-10-14: `BEHIND`
+      to be up to date → sd act restack` (sandbox spike 2026-10-14: `BEHIND`
       needs "require up to date" plus a required check, and wins over
       `BLOCKED`)
     - anything else (`BLOCKED`, `DIRTY`, …) → `you  GitHub says …: see why →
@@ -976,7 +976,7 @@ short-lived, so it can't own children like their daemons do. Plan:
     targets it, `you  <base> already merged: point this PR at main → gh pr
     edit --base main`. A base with no PR of its own (a release branch) is
     unaffected.
-  - pr-watch: ⏳ when every step is a wait; `blocked` is 🔧. Checked read-only
+  - sd watch: ⏳ when every step is a wait; `blocked` is 🔧. Checked read-only
     on cli/cli#14640 (`REVIEW_REQUIRED` / `BLOCKED`, two users requested).
 
 Open bugs are [issues labeled `bug`](https://github.com/chrismo/pr-tend/issues?q=is%3Aissue+is%3Aopen+label%3Abug);
@@ -986,7 +986,7 @@ all work is on the [pr-tend project board](https://github.com/users/chrismo/proj
 
 - **Scope:** this grew from "keep my PR current" into a small software factory.
   Ship tending first and layer initiation on, or build the full lifecycle?
-- First initiator beyond `pr-act start` — Linear tickets via `claude-slot` /
+- First initiator beyond `sd act start` — Linear tickets via `claude-slot` /
   `ticket-sort`?
 - First-remote-review rule for unlabeled PRs (proposed above; unconfirmed)
 - Home bot command (TBD; config default handles it)
@@ -1000,7 +1000,7 @@ all work is on the [pr-tend project board](https://github.com/users/chrismo/proj
 - **CI as a glyph on the one-liner** (tabled 2026-10-13): `✅` / `🔴` instead of
   `CI green` / `CI red`, for agent status lines.
 - **`ack` as a human stop, once the loop runs on its own** (raised 2026-10-13).
-  `pr-act ack` (built 2026-10-13) marks `i` items read with no reply, and NEXT
+  `sd act ack` (built 2026-10-13) marks `i` items read with no reply, and NEXT
   hands info-only bot items to chrismo (`read … then ack`). On important PRs that
   stop must stay: an approving bot review can still carry a suggestion worth a
   human read. On vibe-friendly tasks it may not be needed: the watcher could

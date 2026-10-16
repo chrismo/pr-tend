@@ -1,10 +1,10 @@
 #!/usr/bin/env bats
 
-# Test suite for lib/pr-tend.sh, the helpers shared by pr-state, pr-act and
-# pr-watch. Needs bash 5 first on PATH (the lib is sourced).
+# Test suite for lib/sheepdog.sh, the helpers shared by sd state, sd act and
+# sd watch. Needs bash 5 first on PATH (the lib is sourced).
 
 setup() {
-  source "$BATS_TEST_DIRNAME/pr-tend.sh"
+  source "$BATS_TEST_DIRNAME/sheepdog.sh"
   TMP="$(cd "$BATS_TEST_TMPDIR" && pwd -P)"
   export GIT_CONFIG_GLOBAL="$TMP/gitconfig-global"
   export GIT_CONFIG_SYSTEM=/dev/null
@@ -16,16 +16,16 @@ setup() {
 
 @test "pin_write records the pin and the base it was taken against" {
   pin_write feat local HEAD main
-  [ "$(git rev-parse refs/pr-tend/feat/local)" = "$(git rev-parse HEAD)" ]
-  [ "$(git rev-parse refs/pr-tend/feat/local-base)" = "$(git rev-parse main)" ]
+  [ "$(git rev-parse refs/sheepdog/feat/local)" = "$(git rev-parse HEAD)" ]
+  [ "$(git rev-parse refs/sheepdog/feat/local-base)" = "$(git rev-parse main)" ]
 }
 
 @test "pin_write overwrites both refs, so a stale base never outlives its pin" {
   pin_write feat bot HEAD main
   git commit -q --allow-empty -m two
   pin_write feat bot HEAD HEAD~1
-  [ "$(git rev-parse refs/pr-tend/feat/bot)" = "$(git rev-parse HEAD)" ]
-  [ "$(git rev-parse refs/pr-tend/feat/bot-base)" = "$(git rev-parse HEAD~1)" ]
+  [ "$(git rev-parse refs/sheepdog/feat/bot)" = "$(git rev-parse HEAD)" ]
+  [ "$(git rev-parse refs/sheepdog/feat/bot-base)" = "$(git rev-parse HEAD~1)" ]
 }
 
 @test "pin_write refuses a pin kind it doesn't know" {

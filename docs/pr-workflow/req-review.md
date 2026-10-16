@@ -94,7 +94,7 @@ branch at ⏳ indefinitely.
 
 ### 12. Takeover while a step is running
 
-`pr-act attach` would open an interactive resume of `$U` while a headless
+`sd act attach` would open an interactive resume of `$U` while a headless
 resume of `$U` is still writing the same session. Attach must wait for or kill
 the step. The lock also needs a pid + liveness check: a closed terminal skips
 the release and stalls the branch silently.
@@ -111,8 +111,8 @@ the release and stalls the branch silently.
 - **Takeover section contradicts the state machine.** It resumes "at the
   local-review check", but `check` runs verify first. And if chrismo answered a
   question and there are still no commits, it should re-run implement, not check.
-- **`pr-tend.verify` per monorepo app doesn't fit git config** — keys can't vary
-  by subdirectory. Needs a file under `.pr-tend/`.
+- **`sheepdog.verify` per monorepo app doesn't fit git config** — keys can't vary
+  by subdirectory. Needs a file under `.sheepdog/`.
 - **No global concurrency cap.** With many enrolled branches, one pass could
   start N `claude -p` at once against one Max subscription.
 - **Merge while a step runs.** Step 10 unenrolls, but the agent keeps working on

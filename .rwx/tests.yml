@@ -40,7 +40,7 @@ tasks:
       rm -rf bats-core
       bats --version
 
-  # pr-config needs exactly 0.3.0, and pr-config.bats skips its super tests
+  # sd config needs exactly 0.3.0, and sd-config.bats skips its super tests
   # unless a real binary is at the asdf install path.
   - key: superdb
     run: |
@@ -63,7 +63,7 @@ tasks:
       git config --global user.name ci
       git config --global user.email ci@example.com
       git config --global init.defaultBranch main
-      captain run pr-tend
+      captain run sheepdog
     filter:
       - "!docs/**"
       - "!README.md"

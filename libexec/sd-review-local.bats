@@ -2,13 +2,13 @@
 
 bats_require_minimum_version 1.5.0
 
-# Test suite for bin/pr-review-local, the default local reviewer (A8): one
-# fresh, read-only model session over the diff PR_TEND_BASE..PR_TEND_HEAD,
+# Test suite for libexec/sd-review-local, the default local reviewer (A8): one
+# fresh, read-only model session over the diff SHEEPDOG_BASE..SHEEPDOG_HEAD,
 # findings as a JSON list on stdout. claude and pi are stubs on PATH that
 # record their arguments and print $FX/result.json.
 
-REVIEW="$BATS_TEST_DIRNAME/pr-review-local"
-PR_CONFIG="$BATS_TEST_DIRNAME/pr-config"
+REVIEW="$BATS_TEST_DIRNAME/sd-review-local"
+SD_CONFIG="$BATS_TEST_DIRNAME/sd-config"
 
 setup() {
   TMP="$(cd "$BATS_TEST_TMPDIR" && pwd -P)"
@@ -16,7 +16,7 @@ setup() {
   export GIT_CONFIG_SYSTEM=/dev/null
   printf '[user]\n\temail = t@example.com\n\tname = Tester\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
   export FX="$TMP/fx"
-  export PR_TEND_CONFIG="$TMP/global.json"
+  export SHEEPDOG_CONFIG="$TMP/global.json"
   mkdir -p "$FX" "$TMP/fakebin"
   cat > "$TMP/fakebin/claude" <<'EOF'
 #!/usr/bin/env bash
@@ -54,7 +54,7 @@ EOF
   BASE=$(git rev-parse HEAD)
   printf 'one\ntwo\nthree added\n' > file.txt && git commit -qam "add three"
   HEAD_SHA=$(git rev-parse HEAD)
-  export PR_TEND_BASE=$BASE PR_TEND_HEAD=$HEAD_SHA PR_TEND_TASK="add a third line"
+  export SHEEPDOG_BASE=$BASE SHEEPDOG_HEAD=$HEAD_SHA SHEEPDOG_TASK="add a third line"
 }
 
 @test "runs under bash 5 via the bash5 shebang" {
@@ -62,11 +62,11 @@ EOF
   [ "$output" = "#!/usr/bin/env bash5" ]
 }
 
-@test "without PR_TEND_BASE and PR_TEND_HEAD: fails and says so" {
-  unset PR_TEND_HEAD
+@test "without SHEEPDOG_BASE and SHEEPDOG_HEAD: fails and says so" {
+  unset SHEEPDOG_HEAD
   run "$REVIEW"
   [ "$status" -ne 0 ]
-  [[ "$output" == *PR_TEND_HEAD* ]]
+  [[ "$output" == *SHEEPDOG_HEAD* ]]
 }
 
 @test "prints the reviewer's findings as a JSON list" {
@@ -114,7 +114,7 @@ EOF
 }
 
 @test "steps.review picks the harness: pi, with read-only tools" {
-  "$PR_CONFIG" set --global steps.review.harness pi
+  "$SD_CONFIG" set --global steps.review.harness pi
   echo '{"findings": [{"file": "file.txt", "line": 3, "severity": "nit", "body": "x"}]}' > "$FX/result.json"
   run "$REVIEW"
   [ "$status" -eq 0 ]

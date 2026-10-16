@@ -1,14 +1,14 @@
 #!/usr/bin/env bats
 
-# Test suite for lib/pr-next.sh: pr-state JSON in, the ordered next steps out.
+# Test suite for lib/next.sh: sd state JSON in, the ordered next steps out.
 # Pure policy, so no git or gh: each test edits a "ready to merge" state.
 #
 # Needs bash 5 first on PATH (the lib is sourced):
-#   PATH="/opt/homebrew/opt/bash/bin:$PATH" bats lib/pr-next.bats
+#   PATH="/opt/homebrew/opt/bash/bin:$PATH" bats lib/next.bats
 
 setup() {
-  source "$BATS_TEST_DIRNAME/pr-config.sh"
-  source "$BATS_TEST_DIRNAME/pr-next.sh"
+  source "$BATS_TEST_DIRNAME/config.sh"
+  source "$BATS_TEST_DIRNAME/next.sh"
   READY='{"branch": "feat", "head": "h1",
     "pr": {"number": 7, "url": "u", "state": "OPEN", "draft": false, "base": "main", "head_sha": "h1", "mergeable": "MERGEABLE",
            "merge_state": "CLEAN", "review_decision": null, "review_requests": []},
@@ -80,7 +80,7 @@ step() { # step <key> <field> <jq-assignment...>
   [ "$(keys "${st[@]}")" = retarget ]
   [ "$(step retarget who "${st[@]}")" = run ]
   [ "$(step retarget say "${st[@]}")" = "p already merged: point this PR at main" ]
-  [ "$(step retarget cmd "${st[@]}")" = "pr-act retarget" ]
+  [ "$(step retarget cmd "${st[@]}")" = "sd act retarget" ]
 }
 
 @test "the parent closed without merging: chrismo decides; no restack, never ready" {
@@ -104,7 +104,7 @@ step() { # step <key> <field> <jq-assignment...>
   [ "$(step behind who '.pr.merge_state = "BEHIND"' '.sync.up_to_date = false' '.sync.behind = 3')" = run ]
   [ "$(step behind say '.pr.merge_state = "BEHIND"' '.sync.up_to_date = false' '.sync.behind = 3')" \
     = "restack onto main (3 behind): GitHub requires branches to be up to date" ]
-  [ "$(step behind cmd '.pr.merge_state = "BEHIND"' '.sync.up_to_date = false' '.sync.behind = 3')" = "pr-act restack" ]
+  [ "$(step behind cmd '.pr.merge_state = "BEHIND"' '.sync.up_to_date = false' '.sync.behind = 3')" = "sd act restack" ]
   # a required review on top still waits behind the restack
   [ "$(keys '.pr.merge_state = "BEHIND"' '.sync.up_to_date = false' '.sync.behind = 3' '.pr.review_decision = "REVIEW_REQUIRED"')" = "behind review-wait" ]
 }
@@ -125,7 +125,7 @@ step() { # step <key> <field> <jq-assignment...>
 
 @test "merged: only the cleanup step, whatever else is true" {
   [ "$(keys '.pr.state = "MERGED"' '.push.ahead = 3' '.ci.verdict = "red"' '.errors = ["x"]')" = merged ]
-  [ "$(step merged cmd '.pr.state = "MERGED"')" = "pr-act forget" ]
+  [ "$(step merged cmd '.pr.state = "MERGED"')" = "sd act forget" ]
   [ "$(step merged say '.pr.state = "MERGED"')" = "merged: drop the branch's pins and enrollment, then remove this worktree" ]
 }
 
@@ -136,7 +136,7 @@ step() { # step <key> <field> <jq-assignment...>
 @test "errors come first and point at --json" {
   [ "$(keys '.errors = ["gh: boom"]' '.push.ahead = 1')" = "errors push" ]
   [ "$(step errors say '.errors = ["a", "b"]')" = "2 errors: the steps below may be wrong" ]
-  [ "$(step errors cmd '.errors = ["a"]')" = "pr-state --json" ]
+  [ "$(step errors cmd '.errors = ["a"]')" = "sd state --json" ]
 }
 
 @test "stale refs: fetch, mechanically" {
@@ -160,24 +160,24 @@ step() { # step <key> <field> <jq-assignment...>
   [ "$(step human who '.threads.owed_human = 2')" = you ]
   [ "$(step human say '.threads.owed_human = 2')" = "reply to 2 human items" ]
   [ "$(step human say '.threads.owed_human = 1')" = "reply to 1 human item" ]
-  [ "$(step human cmd '.threads.owed_human = 1')" = "pr-state --long" ]
+  [ "$(step human cmd '.threads.owed_human = 1')" = "sd state --long" ]
 }
 
 # A stacked branch: its parent is another branch, not the default.
 STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = false' '.sync.behind = 3')
 
-@test "behind a stacked parent: pr-act restack" {
+@test "behind a stacked parent: sd act restack" {
   [ "$(step behind who "${STACKED[@]}")" = run ]
   [ "$(step behind say "${STACKED[@]}")" = "restack onto base (3 behind)" ]
-  [ "$(step behind cmd "${STACKED[@]}")" = "pr-act restack" ]
+  [ "$(step behind cmd "${STACKED[@]}")" = "sd act restack" ]
 }
 
 @test "a conflicting restack hands the agent the resolution" {
-  [ "$(step conflict cmd "${STACKED[@]}" '.sync.conflict = true')" = "pr-act restack --resolve" ]
+  [ "$(step conflict cmd "${STACKED[@]}" '.sync.conflict = true')" = "sd act restack --resolve" ]
   [ "$(step conflict who "${STACKED[@]}" '.sync.conflict = true')" = agent ]
 }
 
-@test "behind with no old base: a plain rebase, which pr-act restack refuses" {
+@test "behind with no old base: a plain rebase, which sd act restack refuses" {
   [ "$(step behind cmd "${STACKED[@]}" '.sync.old_base = null')" = "git rebase origin/base" ]
 }
 
@@ -187,7 +187,7 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
 
 @test "behind the default branch with a conflict: the agent resolves it" {
   [ "$(keys '.sync.up_to_date = false' '.sync.behind = 40' '.sync.conflict = true')" = conflict ]
-  [ "$(step conflict cmd '.sync.up_to_date = false' '.sync.conflict = true')" = "pr-act restack --resolve" ]
+  [ "$(step conflict cmd '.sync.up_to_date = false' '.sync.conflict = true')" = "sd act restack --resolve" ]
 }
 
 @test "parent merged, retargeted to the default branch: restack" {
@@ -204,17 +204,17 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(step ci-red say '.ci.verdict = "red"' '.ci.failing = ["lint", "test"]')" = "fix CI: lint, test" ]
 }
 
-@test "bot items: pr-act address" {
+@test "bot items: sd act address" {
   [ "$(step bot who '.threads.owed_bot = 3')" = agent ]
   [ "$(step bot say '.threads.owed_bot = 3')" = "address 3 bot items" ]
-  [ "$(step bot cmd '.threads.owed_bot = 3')" = "pr-act address" ]
+  [ "$(step bot cmd '.threads.owed_bot = 3')" = "sd act address" ]
 }
 
 @test "bot items that are only info: chrismo reads them, then acks" {
   [ "$(keys '.threads.owed_bot = 2' '.threads.info = 2')" = read ]
   [ "$(step read who '.threads.owed_bot = 2' '.threads.info = 2')" = you ]
-  [ "$(step read say '.threads.owed_bot = 2' '.threads.info = 2')" = "read 2 bot items in pr-state --long, then ack" ]
-  [ "$(step read cmd '.threads.owed_bot = 2' '.threads.info = 2')" = "pr-act ack" ]
+  [ "$(step read say '.threads.owed_bot = 2' '.threads.info = 2')" = "read 2 bot items in sd state --long, then ack" ]
+  [ "$(step read cmd '.threads.owed_bot = 2' '.threads.info = 2')" = "sd act ack" ]
 }
 
 @test "blocking and info bot items together: address takes them all" {
@@ -222,14 +222,14 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(step bot say '.threads.owed_bot = 3' '.threads.info = 1')" = "address 3 bot items" ]
 }
 
-@test "unpushed commits: pr-act push" {
+@test "unpushed commits: sd act push" {
   [ "$(step push say '.push.ahead = 2')" = "push 2 commits" ]
-  [ "$(step push cmd '.push.ahead = 2')" = "pr-act push" ]
+  [ "$(step push cmd '.push.ahead = 2')" = "sd act push" ]
 }
 
-@test "rewritten history of our own: pr-act push, which leases" {
+@test "rewritten history of our own: sd act push, which leases" {
   [ "$(step push say '.push.ahead = 2' '.push.behind = 2' '.push.diverged = true' '.sync.ahead = 2')" = "force-push 2 commits (rewritten)" ]
-  [ "$(step push cmd '.push.ahead = 2' '.push.behind = 2' '.push.diverged = true')" = "pr-act push" ]
+  [ "$(step push cmd '.push.ahead = 2' '.push.behind = 2' '.push.diverged = true')" = "sd act push" ]
 }
 
 @test "rewritten after a restack: count the branch's own commits, not what came in from the target" {
@@ -239,14 +239,14 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(step push say '.push.ahead = 3' '.push.behind = 2' '.push.diverged = true' '.sync.ahead = null')" = "force-push 3 commits (rewritten)" ]
 }
 
-@test "never pushed: pr-act push" {
+@test "never pushed: sd act push" {
   [ "$(step push say '.push.remote_sha = null' '.push.ahead = 1' '.pr = null')" = "push: not on origin yet" ]
-  [ "$(step push cmd '.push.remote_sha = null' '.push.ahead = 1' '.pr = null')" = "pr-act push" ]
+  [ "$(step push cmd '.push.remote_sha = null' '.push.ahead = 1' '.pr = null')" = "sd act push" ]
 }
 
 @test "no PR: push first, then open one" {
   [ "$(keys '.pr = null' '.push.remote_sha = null' '.push.ahead = 1')" = "push open-pr" ]
-  [ "$(step open-pr cmd '.pr = null')" = "pr-act ship" ]
+  [ "$(step open-pr cmd '.pr = null')" = "sd act ship" ]
 }
 
 @test "no PR because gh failed: don't suggest opening one" {
@@ -265,13 +265,13 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
 }
 
 @test "no PR: ship opens one" {
-  [ "$(step open-pr cmd '.pr = null' '.push.remote_sha = null')" = "pr-act ship" ]
+  [ "$(step open-pr cmd '.pr = null' '.push.remote_sha = null')" = "sd act ship" ]
   [ "$(step open-pr who '.pr = null' '.push.remote_sha = null')" = run ]
 }
 
 @test "review behind HEAD: local review by the agent" {
   [ "$(step review who '.review.local = {sha: "x", status: "uncovered", uncovered: 2}')" = agent ]
-  [ "$(step review cmd '.review.local = {sha: "x", status: "uncovered", uncovered: 2}')" = "pr-act review" ]
+  [ "$(step review cmd '.review.local = {sha: "x", status: "uncovered", uncovered: 2}')" = "sd act review" ]
   [ "$(keys '.review.local = {sha: "x", status: "rewritten-changed"}')" = review ]
   [ "$(keys '.review.local = {sha: "x", status: "unknown"}')" = review ]
 }
@@ -280,7 +280,7 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   local st=('.bot = {command: "/review-bot"}' '.review.bot = {sha: null, status: "none"}')
   [ "$(keys "${st[@]}")" = bot-trigger ]
   [ "$(step bot-trigger who "${st[@]}")" = run ]
-  [ "$(step bot-trigger cmd "${st[@]}")" = "pr-act trigger" ]
+  [ "$(step bot-trigger cmd "${st[@]}")" = "sd act trigger" ]
   [ "$(step bot-trigger say "${st[@]}")" = "trigger the review bot (/review-bot)" ]
   # unpushed, or the local review behind: those first, no trigger yet
   [ "$(keys "${st[@]}" '.push.ahead = 1')" = push ]
@@ -326,7 +326,7 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
 }
 
 @test "a state that isn't a record fails" {
-  run bash -c 'source "$1/pr-config.sh"; source "$1/pr-next.sh"; echo "[]" | prn_next origin' _ "$BATS_TEST_DIRNAME"
+  run bash -c 'source "$1/config.sh"; source "$1/next.sh"; echo "[]" | prn_next origin' _ "$BATS_TEST_DIRNAME"
   [ "$status" -ne 0 ]
 }
 
@@ -346,7 +346,7 @@ lines_for() { # lines_for <one|all> <jq-assignment...>
   run lines_for one '.push.ahead = 1' '.threads.owed_bot = 1'
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 1 ]
-  [ "$output" = "NEXT  agent  address 1 bot item  → pr-act address  (+1 more)" ]
+  [ "$output" = "NEXT  agent  address 1 bot item  → sd act address  (+1 more)" ]
 }
 
 @test "lines: a step with no command has no arrow" {
@@ -357,6 +357,6 @@ lines_for() { # lines_for <one|all> <jq-assignment...>
 @test "lines: all lists every step, the rest as then" {
   run lines_for all '.push.ahead = 1' '.threads.owed_bot = 1'
   [ "${#lines[@]}" -eq 2 ]
-  [ "${lines[0]}" = "NEXT  agent  address 1 bot item  → pr-act address" ]
-  [ "${lines[1]}" = "then  run    push 1 commit  → pr-act push" ]
+  [ "${lines[0]}" = "NEXT  agent  address 1 bot item  → sd act address" ]
+  [ "${lines[1]}" = "then  run    push 1 commit  → sd act push" ]
 }

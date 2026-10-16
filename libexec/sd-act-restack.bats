@@ -2,22 +2,22 @@
 
 bats_require_minimum_version 1.5.0
 
-# Test suite for `pr-act restack`: move a branch onto its parent (or the
+# Test suite for `sd act restack`: move a branch onto its parent (or the
 # default branch once the parent merged) with `rebase --onto`, check that its
-# own change came through unchanged, and move refs/pr-tend/<b>/base. Never pushes.
+# own change came through unchanged, and move refs/sheepdog/<b>/base. Never pushes.
 #
 # Real git (a bare origin, our clone, and $TMP/other for other people's
-# pushes) and the real pr-state. Fake gh: answers from $GH/<branch>.json, else
+# pushes) and the real sd state. Fake gh: answers from $GH/<branch>.json, else
 # "no PR"; GH_FAIL_FOR=<branch> makes that branch's lookup fail.
 
-PR_ACT="$BATS_TEST_DIRNAME/pr-act"
+SD_ACT="$BATS_TEST_DIRNAME/sd-act"
 
 setup() {
   TMP="$(cd "$BATS_TEST_TMPDIR" && pwd -P)"
   export GIT_CONFIG_GLOBAL="$TMP/gitconfig-global"
   export GIT_CONFIG_SYSTEM=/dev/null
   printf '[user]\n\temail = t@example.com\n\tname = Tester\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
-  export PR_TEND_CONFIG="$TMP/global.json"
+  export SHEEPDOG_CONFIG="$TMP/global.json"
   export GH="$TMP/gh"
   mkdir -p "$GH" "$TMP/fakebin"
   cat > "$TMP/fakebin/gh" <<'EOF'
@@ -99,7 +99,7 @@ closed_pr() {
                               headRefOid: $h, isCrossRepository: false}]}}}}' > "$GH/$1.json"
 }
 
-# stacked_child: A off main, child off A with pr-parent A; both pushed. Sets $a_head.
+# stacked_child: A off main, child off A with sd-parent A; both pushed. Sets $a_head.
 stacked_child() {
   git switch -q main && git switch -qc A
   edit 's/^c$/C/' a1
@@ -108,22 +108,22 @@ stacked_child() {
   git switch -qc child
   edit 's/^f$/F/' child
   git push -q -u origin child 2>/dev/null
-  git config branch.child.pr-parent A
+  git config branch.child.sd-parent A
 }
 
 remote_feat() { git ls-remote origin refs/heads/feat | cut -f1; }
-base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
+base_pin() { git rev-parse -q --verify refs/sheepdog/feat/base || true; }
 
 @test "help lists restack and push" {
-  run "$PR_ACT" --help
-  [[ "$output" == *"pr-act restack"* ]]
-  [[ "$output" == *"pr-act push"* ]]
+  run "$SD_ACT" --help
+  [[ "$output" == *"sd act restack"* ]]
+  [[ "$output" == *"sd act push"* ]]
 }
 
 @test "onto the moved default branch: rebased, base pinned, not pushed" {
   upstream main 's/^b$/B/'
   before_remote=$(remote_feat)
-  run "$PR_ACT" restack
+  run "$SD_ACT" restack
   [ "$status" -eq 0 ]
   [ "$(git rev-parse feat^)" = "$(git rev-parse origin/main)" ]
   [ "$(git log --format=%s origin/main..feat)" = feat ]
@@ -131,12 +131,12 @@ base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
   [ "$(base_pin)" = "$(git rev-parse origin/main)" ]
   [ "$(remote_feat)" = "$before_remote" ]
   [[ "$output" == *"restacked feat onto origin/main"* ]]
-  [[ "$output" == *"pr-act push"* ]]
+  [[ "$output" == *"sd act push"* ]]
 }
 
 @test "already on the target: nothing to do" {
   before=$(git rev-parse HEAD)
-  run "$PR_ACT" restack
+  run "$SD_ACT" restack
   [ "$status" -eq 0 ]
   [[ "$output" == *"already on origin/main"* ]]
   [ "$(git rev-parse HEAD)" = "$before" ]
@@ -146,7 +146,7 @@ base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
 @test "fetches first: a move it hasn't seen yet still counts" {
   upstream main 's/^b$/B/'
   [ "$(git rev-parse origin/main)" != "$(git -C "$TMP/other" rev-parse main)" ]
-  run "$PR_ACT" restack
+  run "$SD_ACT" restack
   [ "$status" -eq 0 ]
   [ "$(git rev-parse feat^)" = "$(git -C "$TMP/other" rev-parse main)" ]
 }
@@ -160,24 +160,24 @@ base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
   a_head=$(git rev-parse A)
   git switch -qc child
   edit 's/^f$/F/' child
-  git config branch.child.pr-parent A
+  git config branch.child.sd-parent A
   (cd "$TMP/other" && git fetch -q origin && git checkout -q main && git merge -q --squash origin/A \
      && git commit -qm "A (#1)" && git push -q origin main 2>/dev/null)
   merged_pr A "$a_head"
-  run "$PR_ACT" restack
+  run "$SD_ACT" restack
   [ "$status" -eq 0 ]
   [ "$(git rev-parse child^)" = "$(git rev-parse origin/main)" ]
   [ "$(git log --format=%s origin/main..child)" = child ]
   grep -qx C file.txt && grep -qx D file.txt && grep -qx F file.txt
-  [ "$(git rev-parse refs/pr-tend/child/base)" = "$(git rev-parse origin/main)" ]
-  [ "$(git config branch.child.pr-parent)" = main ]
+  [ "$(git rev-parse refs/sheepdog/child/base)" = "$(git rev-parse origin/main)" ]
+  [ "$(git config branch.child.sd-parent)" = main ]
 }
 
 @test "restack onto a parent closed without merging is refused" {
   stacked_child
   closed_pr A "$a_head"
   upstream A 's/^d$/D/' a2
-  run "$PR_ACT" restack
+  run "$SD_ACT" restack
   [ "$status" -ne 0 ]
   [[ "$output" == *"closed without merging"* ]]
   [ "$(git rev-parse child^)" = "$a_head" ]
@@ -185,42 +185,42 @@ base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
 
 # ── retarget ─────────────────────────────────────────────────────────────────
 
-@test "retarget: parent merged, PR still on it: base edited to main, pr-parent rewritten" {
+@test "retarget: parent merged, PR still on it: base edited to main, sd-parent rewritten" {
   stacked_child
   merged_pr A "$a_head"
   open_pr child A 2
-  run "$PR_ACT" retarget
+  run "$SD_ACT" retarget
   [ "$status" -eq 0 ]
   [ "$(cat "$GH/calls")" = "pr edit 2 --base main" ]
-  [ "$(git config branch.child.pr-parent)" = main ]
+  [ "$(git config branch.child.sd-parent)" = main ]
 }
 
-@test "retarget: the PR already targets main (GitHub did it): no edit, pr-parent still rewritten" {
+@test "retarget: the PR already targets main (GitHub did it): no edit, sd-parent still rewritten" {
   stacked_child
   merged_pr A "$a_head"
   open_pr child main 2
-  run "$PR_ACT" retarget
+  run "$SD_ACT" retarget
   [ "$status" -eq 0 ]
   [ ! -e "$GH/calls" ]
-  [ "$(git config branch.child.pr-parent)" = main ]
+  [ "$(git config branch.child.sd-parent)" = main ]
 }
 
 @test "retarget: parent still open: refused" {
   stacked_child
   open_pr A main 1
   open_pr child A 2
-  run "$PR_ACT" retarget
+  run "$SD_ACT" retarget
   [ "$status" -ne 0 ]
   [[ "$output" == *"hasn't merged"* ]]
   [ ! -e "$GH/calls" ]
-  [ "$(git config branch.child.pr-parent)" = A ]
+  [ "$(git config branch.child.sd-parent)" = A ]
 }
 
 @test "retarget: parent closed without merging: refused, says so" {
   stacked_child
   closed_pr A "$a_head"
   open_pr child A 2
-  run "$PR_ACT" retarget
+  run "$SD_ACT" retarget
   [ "$status" -ne 0 ]
   [[ "$output" == *"closed without merging"* ]]
   [ ! -e "$GH/calls" ]
@@ -229,7 +229,7 @@ base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
 @test "retarget: a branch with no PR is refused" {
   stacked_child
   merged_pr A "$a_head"
-  run "$PR_ACT" retarget
+  run "$SD_ACT" retarget
   [ "$status" -ne 0 ]
   [[ "$output" == *"no PR"* ]]
 }
@@ -241,10 +241,10 @@ base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
   git push -q origin A 2>/dev/null
   git switch -qc child
   edit 's/^f$/F/' child
-  git config branch.child.pr-parent A
+  git config branch.child.sd-parent A
   upstream A 's/^d$/D/' a2
   upstream main 's/^b$/B/'
-  run "$PR_ACT" restack
+  run "$SD_ACT" restack
   [ "$status" -eq 0 ]
   [ "$(git rev-parse child^)" = "$(git rev-parse origin/A)" ]
   ! grep -qx B file.txt
@@ -253,23 +253,23 @@ base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
 @test "a restack that would conflict is refused; nothing moves" {
   upstream main 's/^g$/X/'
   before=$(git rev-parse HEAD)
-  run "$PR_ACT" restack
+  run "$SD_ACT" restack
   [ "$status" -eq 1 ]
   [[ "$output" == *"would conflict"* ]]
   [[ "$output" == *"git rebase --onto origin/main"* ]]
-  [[ "$output" == *"pr-act restack --resolve"* ]]
+  [[ "$output" == *"sd act restack --resolve"* ]]
   [ "$(git rev-parse HEAD)" = "$before" ]
   [ -z "$(base_pin)" ]
 }
 
 @test "a conflict partway through is rolled back" {
-  # Net, feat leaves line e alone, so the merge pr-state predicts is clean;
+  # Net, feat leaves line e alone, so the merge sd state predicts is clean;
   # replaying e→E commit by commit still hits main's e→X.
   edit 's/^e$/E/' there
   edit 's/^E$/e/' back
   upstream main 's/^e$/X/'
   before=$(git rev-parse HEAD)
-  run "$PR_ACT" restack
+  run "$SD_ACT" restack
   [ "$status" -eq 1 ]
   [[ "$output" == *"rolled back"* ]]
   [ "$(git rev-parse HEAD)" = "$before" ]
@@ -286,7 +286,7 @@ base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
   edit 's/^b$/B/' second
   upstream main 's/^g$/G/'
   before=$(git rev-parse HEAD)
-  run "$PR_ACT" restack
+  run "$SD_ACT" restack
   [ "$status" -eq 1 ]
   [[ "$output" == *"came out different"* ]]
   [[ "$output" == *"rolled back"* ]]
@@ -298,26 +298,26 @@ base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
 @test "uncommitted changes are refused" {
   upstream main 's/^b$/B/'
   echo dirty >> file.txt
-  run "$PR_ACT" restack
+  run "$SD_ACT" restack
   [ "$status" -eq 1 ]
   [[ "$output" == *"uncommitted changes"* ]]
 }
 
 @test "taken over: refused unless --force" {
   upstream main 's/^b$/B/'
-  git config branch.feat.pr-lock chrismo
-  run "$PR_ACT" restack
+  git config branch.feat.sd-lock chrismo
+  run "$SD_ACT" restack
   [ "$status" -eq 1 ]
   [[ "$output" == *"taken over"* ]]
   [[ "$output" == *"--force"* ]]
-  run "$PR_ACT" restack --force
+  run "$SD_ACT" restack --force
   [ "$status" -eq 0 ]
   [ "$(git rev-parse feat^)" = "$(git rev-parse origin/main)" ]
 }
 
-@test "a parent that isn't on the remote is refused with pr-state's reason" {
-  git config branch.feat.pr-parent nosuch
-  run "$PR_ACT" restack
+@test "a parent that isn't on the remote is refused with sd state's reason" {
+  git config branch.feat.sd-parent nosuch
+  run "$SD_ACT" restack
   [ "$status" -eq 1 ]
   [[ "$output" == *"no origin/nosuch ref"* ]]
 }
@@ -329,16 +329,16 @@ base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
   git push -q origin A 2>/dev/null
   git switch -qc child
   edit 's/^f$/F/' child
-  git config branch.child.pr-parent A
+  git config branch.child.sd-parent A
   upstream A 's/^d$/D/' a2
-  GH_FAIL_FOR=A run "$PR_ACT" restack
+  GH_FAIL_FOR=A run "$SD_ACT" restack
   [ "$status" -eq 1 ]
   [[ "$output" == *"can't tell whether A merged"* ]]
 }
 
 @test "a branch not checked out anywhere is refused" {
   git switch -q main
-  run "$PR_ACT" restack feat
+  run "$SD_ACT" restack feat
   [ "$status" -eq 1 ]
   [[ "$output" == *"isn't checked out in any worktree"* ]]
 }
@@ -347,7 +347,7 @@ base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
   upstream main 's/^b$/B/'
   git switch -q main
   git worktree add -q "$TMP/wt" feat
-  run "$PR_ACT" restack feat
+  run "$SD_ACT" restack feat
   [ "$status" -eq 0 ]
   [ "$(git rev-parse feat^)" = "$(git rev-parse origin/main)" ]
   grep -qx B "$TMP/wt/file.txt"
@@ -364,15 +364,15 @@ base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
   git push -q -u origin child 2>/dev/null
   open_pr A main 1
   open_pr child A 2
-  run "$PR_ACT" enroll child
+  run "$SD_ACT" enroll child
   [ "$status" -eq 0 ]
-  [ "$(git config branch.child.pr-parent)" = A ]
-  [ "$(git rev-parse refs/pr-tend/child/base)" = "$a_head" ]
+  [ "$(git config branch.child.sd-parent)" = A ]
+  [ "$(git rev-parse refs/sheepdog/child/base)" = "$a_head" ]
   (cd "$TMP/other" && git fetch -q origin && git checkout -q main && git merge -q --squash origin/A \
      && git commit -qm "A (#1)" && git push -q origin main 2>/dev/null)
   merged_pr A "$a_head"
   open_pr child main 2
-  run "$PR_ACT" restack
+  run "$SD_ACT" restack
   [ "$status" -eq 0 ]
   [ "$(git rev-parse child^)" = "$(git rev-parse origin/main)" ]
   [ "$(git log --format=%s origin/main..child)" = child ]
@@ -380,9 +380,9 @@ base_pin() { git rev-parse -q --verify refs/pr-tend/feat/base || true; }
 
 @test "enroll records nothing for a branch whose PR targets the default branch" {
   open_pr feat main 1
-  run "$PR_ACT" enroll
+  run "$SD_ACT" enroll
   [ "$status" -eq 0 ]
-  [ -z "$(git config branch.feat.pr-parent || true)" ]
+  [ -z "$(git config branch.feat.sd-parent || true)" ]
   [ -z "$(base_pin)" ]
 }
 
@@ -399,28 +399,28 @@ rebase_in_progress() { [[ -e $(git rev-parse --git-path rebase-merge) || -e $(gi
 @test "--resolve: the agent resolves a predicted conflict; base pinned; its change is unreviewed" {
   upstream main 's/^g$/X/'
   resolver GX
-  run "$PR_ACT" restack --resolve
+  run "$SD_ACT" restack --resolve
   [ "$status" -eq 0 ]
   [ "$(git rev-parse feat^)" = "$(git rev-parse origin/main)" ]
   grep -qx GX file.txt
   ! grep -q '<<<<<<<' file.txt
   [ "$(base_pin)" = "$(git rev-parse origin/main)" ]
   [[ "$output" == *"resolved"* ]]
-  [[ "$output" == *"pr-act review"* ]]
+  [[ "$output" == *"sd act review"* ]]
   ! rebase_in_progress
   [ -z "$(git status --porcelain)" ]
 }
 
 @test "--resolve: the agent sees the conflicting files and hunks, in the branch's session, edit tools only" {
-  git config branch.feat.pr-task "capitalise g"
+  git config branch.feat.sd-task "capitalise g"
   upstream main 's/^g$/X/'
   resolver GX
-  "$PR_ACT" restack --resolve >/dev/null
+  "$SD_ACT" restack --resolve >/dev/null
   grep -q 'file.txt' "$FX/claude.prompt"
   grep -q '<<<<<<<' "$FX/claude.prompt"
   grep -q 'capitalise g' "$FX/claude.prompt"
   [ "$(cat "$FX/claude.calls")" = "$TMP/repo" ]
-  sid=$(git config branch.feat.pr-session)
+  sid=$(git config branch.feat.sd-session)
   [ -n "$sid" ]
   grep -qx -- "$sid" "$FX/claude.args"
   allow=$(grep -A1 -x -- --allowedTools "$FX/claude.args" | tail -1)
@@ -432,7 +432,7 @@ rebase_in_progress() { [[ -e $(git rev-parse --git-path rebase-merge) || -e $(gi
   edit 's/^E$/e/' back
   upstream main 's/^e$/X/'
   resolver X
-  run "$PR_ACT" restack --resolve
+  run "$SD_ACT" restack --resolve
   [ "$status" -eq 0 ]
   # both stops resolved to main's line, so git dropped the two now-empty commits
   [ "$(wc -l < "$FX/claude.calls" | tr -d ' ')" = 2 ]
@@ -445,7 +445,7 @@ rebase_in_progress() { [[ -e $(git rev-parse --git-path rebase-merge) || -e $(gi
   upstream main 's/^g$/X/'
   echo '{"outcome": "gave-up", "summary": "no sensible merge"}' > "$FX/result.json"
   before=$(git rev-parse HEAD)
-  run "$PR_ACT" restack --resolve
+  run "$SD_ACT" restack --resolve
   [ "$status" -eq 1 ]
   [[ "$output" == *"gave up"* ]]
   [[ "$output" == *"no sensible merge"* ]]
@@ -459,7 +459,7 @@ rebase_in_progress() { [[ -e $(git rev-parse --git-path rebase-merge) || -e $(gi
   upstream main 's/^g$/X/'
   printf '#!/usr/bin/env bash\ntrue\n' > "$FX/agent" && chmod +x "$FX/agent"
   before=$(git rev-parse HEAD)
-  run "$PR_ACT" restack --resolve
+  run "$SD_ACT" restack --resolve
   [ "$status" -eq 1 ]
   [[ "$output" == *"conflict markers"* ]]
   [ "$(git rev-parse HEAD)" = "$before" ]
@@ -470,17 +470,17 @@ rebase_in_progress() { [[ -e $(git rev-parse --git-path rebase-merge) || -e $(gi
   upstream main 's/^g$/X/'
   touch "$FX/fail"
   before=$(git rev-parse HEAD)
-  run "$PR_ACT" restack --resolve
+  run "$SD_ACT" restack --resolve
   [ "$status" -eq 1 ]
   [ "$(git rev-parse HEAD)" = "$before" ]
   ! rebase_in_progress
 }
 
 @test "--resolve: verify runs on the result; a failure keeps the rebased branch and says so" {
-  "$BATS_TEST_DIRNAME/pr-config" set --global settings.verify "grep -qx nope file.txt"
+  "$BATS_TEST_DIRNAME/sd-config" set --global settings.verify "grep -qx nope file.txt"
   upstream main 's/^g$/X/'
   resolver GX
-  run "$PR_ACT" restack --resolve
+  run "$SD_ACT" restack --resolve
   [ "$status" -eq 1 ]
   [[ "$output" == *"verify failed"* ]]
   [ "$(git rev-parse feat^)" = "$(git rev-parse origin/main)" ]
@@ -495,7 +495,7 @@ rebase_in_progress() { [[ -e $(git rev-parse --git-path rebase-merge) || -e $(gi
   upstream main 's/^a$/1/; s/^b$/2/; s/^c$/3/; s/^d$/4/'
   resolver R
   before=$(git rev-parse HEAD)
-  run "$PR_ACT" restack --resolve
+  run "$SD_ACT" restack --resolve
   [ "$status" -eq 1 ]
   [[ "$output" == *"stopped 4 times"* ]]
   [ "$(git rev-parse HEAD)" = "$before" ]
@@ -504,7 +504,7 @@ rebase_in_progress() { [[ -e $(git rev-parse --git-path rebase-merge) || -e $(gi
 
 @test "--resolve with nothing to resolve is a plain restack, no agent" {
   upstream main 's/^b$/B/'
-  run "$PR_ACT" restack --resolve
+  run "$SD_ACT" restack --resolve
   [ "$status" -eq 0 ]
   [ ! -e "$FX/claude.calls" ]
   [ "$(git rev-parse feat^)" = "$(git rev-parse origin/main)" ]

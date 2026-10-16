@@ -1,6 +1,6 @@
 # Captain execs these commands without a shell; ci/test does any shell work.
 test-suites:
-  pr-tend:
+  sheepdog:
     command: ci/test
     # Names repeat across files; a collision means ci/test's file= went missing.
     fail-on-duplicate-test-id: true
