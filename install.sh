@@ -1,14 +1,18 @@
 #!/usr/bin/env bash5
-# Link sd into ~/.local/bin ($LOCAL_BIN). Safe to re-run.
+# Link sd into ~/.local/bin ($LOCAL_BIN) and install its launchd watcher.
+# Safe to re-run.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOCAL_BIN="${LOCAL_BIN:-$HOME/.local/bin}"
 mkdir -p "$LOCAL_BIN"
+LOCAL_BIN="$(cd "$LOCAL_BIN" && pwd)"
+export LOCAL_BIN
 
 dest="$LOCAL_BIN/sd"
 if [[ -e $dest && ! -L $dest ]]; then
-  echo "! Skipped sd: $dest exists and is not a symlink"
+  echo "! Cannot install sd: $dest exists and is not a symlink" >&2
+  exit 1
 else
   ln -sfn "$REPO_DIR/bin/sd" "$dest"
   echo "✓ Linked sd -> $LOCAL_BIN/"
@@ -20,3 +24,15 @@ for cmd in pr-state pr-act pr-watch pr-config pr-review-local; do
     echo "✓ Removed $cmd (now sd ${cmd#pr-})"
   fi
 done
+
+if [[ $(uname -s) == Darwin ]]; then
+  "$dest" watch install || {
+    status=$?
+    retry=$(printf '%q watch install' "$dest")
+    [[ $LOCAL_BIN == "$HOME/.local/bin" ]] || retry="LOCAL_BIN=$(printf %q "$LOCAL_BIN") $retry"
+    echo "! sd is linked, but watcher installation failed; retry with: $retry" >&2
+    exit "$status"
+  }
+else
+  echo "! Background watcher requires macOS; sd is linked"
+fi

@@ -187,7 +187,7 @@ for rc in "$HOME"/{.zshrc,.zshenv,.zprofile,.bashrc,.bash_profile,.profile}; do
 done
 
 old_plist=${SHEEPDOG_WATCH_LAUNCH_AGENTS:-$HOME/Library/LaunchAgents}/com.pr-tend.pr-watch.plist
-[[ -e $old_plist ]] && warn "the old watcher job com.pr-tend.pr-watch is installed; sd watch install replaces it"
+[[ -e $old_plist ]] && warn "the old watcher job com.pr-tend.pr-watch is installed; ./install.sh (or sd watch install) replaces it"
 
 for f in "${config_files[@]}"; do
   [[ -f $f ]] && grep -q localReview "$f" \

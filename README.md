@@ -23,9 +23,19 @@ build by are in `AGENTS.md`.
 
 ## Install
 
+Upgrading from pr-tend? [Migrate its state first](#coming-from-pr-tend).
+
 ```bash
-./install.sh        # links bin/sd into ~/.local/bin ($LOCAL_BIN to override)
+./install.sh        # links sd and installs its launchd watcher
 ```
+
+The installer links `bin/sd` into `~/.local/bin` (`$LOCAL_BIN` to change the
+link directory) and, on macOS, starts the watcher, which checks enrolled
+branches every five minutes by default. Re-run it to update both. Use
+`sd watch uninstall` to stop the background job, or `sd watch install` to
+start it again (with the same `$LOCAL_BIN`, if you changed it). On other platforms, only the CLI is linked; the background
+watcher requires macOS (launchd). Anything at `$LOCAL_BIN/sd` that isn't a
+symlink blocks installation before any links or jobs are changed.
 
 Needs on `PATH`: `bash5` (a link to bash 5+; the commands are
 `#!/usr/bin/env bash5`), `git`, `gh`, `jq`, and SuperDB `super` **0.3.0**
@@ -86,13 +96,13 @@ A custom local reviewer (`settings.localReview`) keeps the contract in
 
 sheepdog was pr-tend until 2026-10-15: `pr-act push` is now `sd act push`, and
 its state moved to new names (`refs/sheepdog/`, `~/.config/sheepdog/`, git
-config `sheepdog.*`, `SHEEPDOG_*` env vars). On a machine that ran pr-tend, after
-`./install.sh`:
+config `sheepdog.*`, `SHEEPDOG_*` env vars). On a machine that ran pr-tend,
+migrate its state before installing:
 
 ```bash
-sd migrate --dry-run   # what it would move, and anything it can't
-sd migrate
-sd watch install       # if the watcher ran there; replaces the old job
+./bin/sd migrate --dry-run   # what it would move, and anything it can't
+./bin/sd migrate
+./install.sh
 ```
 
 ## Tests
