@@ -952,9 +952,10 @@ push() {
 # -U0: an upstream edit next to the branch's lines must not read as a change.
 patch_id() { git diff -U0 "$1" "$2" | git patch-id --stable | cut -d' ' -f1; }
 
-# Over {remote, resolve, s: the sd state JSON}.
+# Over {remote, resolve, replay: the SHAs in old_base..HEAD, s: the sd state JSON}.
 read -r -d '' RESTACK_GATE <<'EOF' || true
-values {remote, resolve, s, why: sj(coalesce(s.errors, []), "; "), onto: f"{remote}/{s.sync.target}"}
+values {remote, resolve, s, why: sj(coalesce(s.errors, []), "; "), onto: f"{remote}/{s.sync.target}",
+        from_parent: len(coalesce([unnest {p: coalesce(s.parent.pr.commits, []), r: replay} | where r in p], []))}
 | values [
     on(s.parent.pr.state == "CLOSED") and on(s.parent.name != s.sync.default)
       ? {hard: f"{s.parent.name}'s PR #{s.parent.pr.number} was closed without merging; decide what {s.branch} targets"}
@@ -964,6 +965,8 @@ values {remote, resolve, s, why: sj(coalesce(s.errors, []), "; "), onto: f"{remo
     nul(s.sync.up_to_date) or (on(s.sync.up_to_date == false) and nul(s.sync.old_base))
       ? {hard: f"can't restack {s.branch}: {why}"}
     : on(s.sync.up_to_date) ? {done: f"{s.branch} is already on {onto}"}
+    : on(s.parent.merged) and from_parent > 0
+      ? {hard: f"wrong base: this would replay {from_parent} of #{s.parent.pr.number}'s commits onto {onto}"}
     : nul(s.sync.conflict) ? {hard: f"can't tell whether restacking {s.branch} would conflict: {why}"}
     : on(s.sync.conflict) and not resolve
       ? {hard: f"restacking {s.branch} onto {onto} would conflict; resolve it by hand: git rebase --onto {onto} {s.sync.old_base[0:12]}, or let the agent: sd act restack --resolve"}
@@ -974,15 +977,18 @@ values {remote, resolve, s, why: sj(coalesce(s.errors, []), "; "), onto: f"{remo
 EOF
 
 restack() {
-  local b=$branch wt remote state gate line target new_base old_base old_head new_head before
+  local b=$branch wt remote state gate line target new_base old_base old_head new_head before replay
   wt=$(worktree_for "$b")
   [[ -n $wt ]] || die "$b isn't checked out in any worktree"
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
   remote=$(prc_get settings.remote "$b" false) || die "sd config failed"
   git -C "$wt" fetch --quiet --prune "$remote" || die "fetch from $remote failed"
   state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
+  old_base=$(prc_val "$state" 'coalesce(sync.old_base, "")')
+  replay='[]'
+  [[ -z $old_base ]] || replay=$(git rev-list "$old_base..refs/heads/$b" | prc_strings)
 
-  gate=$(prc_json "$RESTACK_GATE" "{\"remote\": $(prc_json_string "$remote"), \"resolve\": $resolve, \"s\": $state}") \
+  gate=$(prc_json "$RESTACK_GATE" "{\"remote\": $(prc_json_string "$remote"), \"resolve\": $resolve, \"replay\": $replay, \"s\": $state}") \
     || die "can't parse sd state's answer"
   line=$(gate_get "$gate" hard | head -1)
   [[ -z $line ]] || die "$line"
@@ -991,7 +997,6 @@ restack() {
   soft_gate "$gate" "restacking $b"
 
   target=$(prc_val "$state" sync.target)
-  old_base=$(prc_val "$state" sync.old_base)
   new_base=$(git rev-parse "refs/remotes/$remote/$target^{commit}")
   old_head=$(git rev-parse "refs/heads/$b")
   before=$(patch_id "$old_base" "$old_head")

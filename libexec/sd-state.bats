@@ -280,6 +280,18 @@ field() { jq -r "$@" <<<"$output"; }
   [ "$(field .parent.pr.state)" = CLOSED ]
 }
 
+@test "parent PR's commits are listed, [] when GitHub gives none" {
+  git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  pr_fixture parent '.allCommits = {nodes: [{commit: {oid: "aaa"}}, {commit: {oid: "bbb"}}]}'
+  state
+  [ "$(field -c .parent.pr.commits)" = '["aaa","bbb"]' ]
+  pr_fixture parent
+  state
+  [ "$(field -c .parent.pr.commits)" = '[]' ]
+}
+
 @test "bot: the configured trigger command is reported, null when there is none" {
   git switch -qc feat
   state

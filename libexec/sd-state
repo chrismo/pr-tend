@@ -60,6 +60,7 @@ query($owner: String!, $repo: String!, $branch: String!) {
         mergeStateStatus reviewDecision
         reviewRequests(first: 20) { nodes { requestedReviewer {
           ... on User { login } ... on Bot { login } ... on Mannequin { login } ... on Team { slug } } } }
+        allCommits: commits(first: 250) { nodes { commit { oid } } }
         commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes {
           __typename
           ... on CheckRun { name status conclusion }
@@ -363,7 +364,8 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
                               | where this is not null
                             ], [])},
     parent: {name: s.parent, source: s.parent_source, merged: s.parent_merged,
-             pr: nul(s.parent_pr) ? null : {number: s.parent_pr.number, state: s.parent_pr.state, head_sha: s.parent_pr.headRefOid}},
+             pr: nul(s.parent_pr) ? null : {number: s.parent_pr.number, state: s.parent_pr.state, head_sha: s.parent_pr.headRefOid,
+                                       commits: coalesce([unnest coalesce(s.parent_pr.allCommits.nodes, []) | values commit.oid], [])}},
     sync: {target: s.target, default: s.default_branch, ahead: s.sync_ahead, behind: s.behind, up_to_date: s.up_to_date,
            old_base: s.old_base, conflict: s.conflict},
     push: {remote_sha: s.remote_sha, ahead: s.ahead, behind: s.push_behind, diverged: s.diverged, remote_ours: s.remote_ours, theirs: s.theirs},
