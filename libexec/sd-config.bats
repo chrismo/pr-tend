@@ -1075,6 +1075,15 @@ old_super() {
   [ "$("$SD_CONFIG" get settings.reviewPrompt)" = .sheepdog/review-prompt.md ]
 }
 
+@test "settings.reviewRounds: a typed count, 3 by default" {
+  [ "$("$SD_CONFIG" get settings.reviewRounds)" = 3 ]
+  write_branch feat '{"settings":{"reviewRounds":5}}'
+  [ "$("$SD_CONFIG" get settings.reviewRounds)" = 5 ]
+  write_global '{"settings":{"reviewRounds":"many"}}'
+  run "$SD_CONFIG" get settings.remote
+  [ "$status" -eq 1 ]
+}
+
 @test "settings.implementAllow: a typed list setting, empty by default" {
   run "$SD_CONFIG" get settings.implementAllow
   [ "$status" -eq 0 ]
