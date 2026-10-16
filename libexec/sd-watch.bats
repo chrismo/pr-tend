@@ -1224,8 +1224,9 @@ twin() {
   cat > "$TMP/fakebin/sd-state" <<'SH'
 #!/usr/bin/env bash
 b=${@: -1}
-f="$PS_FIXTURES/$(basename "$PWD")-$b.json"
-[[ -f $f ]] || f="$PS_FIXTURES/$b.json"
+echo "$PWD $b" >> "$PS_FIXTURES/calls"
+f="$PS_FIXTURES/$(basename "$PWD")-${b//\//__}.json"
+[[ -f $f ]] || f="$PS_FIXTURES/${b//\//__}.json"
 cat "$f"
 SH
 }
@@ -1241,7 +1242,7 @@ SH
 @test "same name: on different branches the .pr file stays, its branch telling whose it is" {
   twin other
   pass
-  [[ "$(cut -f1 "$STATUS_DIR/wt.pr")" =~ ^(feat|other)$ ]] || false
+  [ "$(cat "$STATUS_DIR/wt.pr")" = $'feat\t✅' ] || [ "$(cat "$STATUS_DIR/wt.pr")" = $'other\t❌' ]
   [ "$("$SD_WATCH" glyph "$TMP/x/wt")" = "✅" ]
   [ "$("$SD_WATCH" glyph "$TMP/y/wt")" = "❌" ]
 }
