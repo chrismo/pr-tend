@@ -2,14 +2,16 @@
 
 bats_require_minimum_version 1.5.0
 
-# Test suite for `sd act start` (A0: a worktree beside this one on a branch of
-# the same name, set up by the repo's hook, with the task, parent and base
-# recorded and the branch enrolled; then implement) and `sd act implement`
+# Test suite for `sd act start` (A0: a worktree beside the main worktree,
+# named after the branch with slashes as dashes, set up by the repo's hook,
+# with the task, parent and base recorded and the branch enrolled; then
+# implement) and `sd act implement`
 # (J0: the agent edits in the branch's session, the pipeline commits and runs
 # verify).
 #
-# The worktree half duplicates agent-rig's wt-new (#14): same placement, same
-# branch resolution, same hook locations, stdout exactly the path.
+# The worktree half duplicates agent-rig's wt-new (#14): same branch
+# resolution, same hook locations, stdout exactly the path. Placement differs
+# since #85: beside the main worktree, never beside a linked one.
 #
 # Real git (a bare origin, our clone at $TMP/repo, $TMP/other for pushes that
 # aren't ours). gh is a stub with no PRs. claude edits through $FX/agent and
@@ -78,14 +80,14 @@ sha() { git rev-parse "$1"; }
   [ ! -e "$TMP/feat-x" ]
 }
 
-@test "start: a worktree beside this one, on a new branch of the same name; stdout is only its path" {
+@test "start: a worktree beside the main one, on a new branch of the same name; stdout is only its path" {
   run --separate-stderr "$SD_ACT" start --no-implement feat-x
   [ "$status" -eq 0 ]
   [ "$output" = "$TMP/feat-x" ]
   [ "$(git -C "$TMP/feat-x" branch --show-current)" = feat-x ]
 }
 
-@test "start: placed beside the current worktree's root, from a subdirectory too" {
+@test "start: placed beside the main worktree, from a subdirectory too" {
   mkdir -p sub/deeper && cd sub/deeper
   run --separate-stderr "$SD_ACT" start --no-implement feat-x
   [ "$status" -eq 0 ]
@@ -246,15 +248,27 @@ sha() { git rev-parse "$1"; }
   [ ! -e "$FX/claude.args" ]
 }
 
-@test "start: from a linked worktree, the new one goes beside it and the hook is still found" {
+@test "start: from a linked worktree, the new one goes beside the main worktree, not beside the linked one (#85)" {
   printf '#!/usr/bin/env bash\necho "$WT_SRC" > "%s/src.out"\n' "$TMP" > .git/worktree-setup
   chmod +x .git/worktree-setup
   mkdir "$TMP/wts" && git worktree add -q -b one "$TMP/wts/one" 2>/dev/null
   cd "$TMP/wts/one"
   run --separate-stderr "$SD_ACT" start --no-implement feat-x
   [ "$status" -eq 0 ]
-  [ "$output" = "$TMP/wts/feat-x" ]
+  [ "$output" = "$TMP/feat-x" ]
   [ "$(cat "$TMP/src.out")" = "$TMP/wts/one" ]
+}
+
+@test "start: a slash in the branch name becomes a dash in the directory name, every generation (#85)" {
+  run --separate-stderr "$SD_ACT" start --no-implement 12/stack-parent
+  [ "$status" -eq 0 ]
+  [ "$output" = "$TMP/12-stack-parent" ]
+  [ "$(git -C "$TMP/12-stack-parent" branch --show-current)" = 12/stack-parent ]
+  cd "$TMP/12-stack-parent"
+  run --separate-stderr "$SD_ACT" start --no-implement --parent 12/stack-parent 12/stack-child
+  [ "$status" -eq 0 ]
+  [ "$output" = "$TMP/12-stack-child" ]
+  [ ! -e "$TMP/12" ]
 }
 
 # ── start, then implement ────────────────────────────────────────────────────

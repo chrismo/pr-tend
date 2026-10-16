@@ -35,9 +35,10 @@
 #   sd act attach                      open the branch's session yourself; agent steps wait
 #
 # Verbs:
-#   start     a worktree beside this one, on the branch <name> (an existing
-#             local branch; else origin/<name>, tracked; else new, off the
-#             fetched default branch or --parent). Runs the repo's setup hook
+#   start     a worktree beside the main one, named after <name> with
+#             slashes as dashes, on the branch <name> (an existing local
+#             branch; else origin/<name>, tracked; else new, off the fetched
+#             default branch or --parent). Runs the repo's setup hook
 #             there, as wt-new does: $GIT_COMMON_DIR/worktree-setup, else git
 #             config wt.setup. Records the task and parent, pins base at a new
 #             branch's start point, enrolls; then implement unless
@@ -702,8 +703,12 @@ attach() {
 
 # ── start: A0 ───────────────────────────────────────────────────────────────
 
-# Duplicates agent-rig's wt-new (#14), hook locations included, so a repo set
-# up for new_wt needs nothing more.
+# Duplicates agent-rig's wt-new (#14), hook locations and branch resolution
+# included, so a repo set up for new_wt needs nothing more. Placement differs
+# (#85): beside the main worktree, not beside the current one.
+
+# main_worktree: the repo's main worktree, where sheepdog's shared files live.
+main_worktree() { git worktree list --porcelain | sed -n '1s/^worktree //p'; }
 
 # start_default <remote>
 start_default() {
@@ -747,7 +752,10 @@ start() {
   git check-ref-format --branch "$b" >/dev/null 2>&1 || die "not a valid branch name: $b"
   $no_implement || [[ -n $task_arg ]] || die "no task: sd act start $b \"<task>\" (or --no-implement)"
   src=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a worktree"
-  dst="$(dirname "$src")/$b"
+  # Beside the main worktree, whichever worktree this runs from, so a stack
+  # built with cd "$(sd act start ...)" stays in one place; a slash in the
+  # branch name would make directories, so it becomes a dash (#85).
+  dst="$(dirname "$(main_worktree)")/${b//\//-}"
   [[ ! -e $dst ]] || die "$dst already exists"
   remote=$(prc_get settings.remote "$b" false) || die "sd config failed"
   git fetch --quiet --prune "$remote" || die "fetch from $remote failed"
@@ -1341,12 +1349,12 @@ record_lineage() {
 
 # enroll_mark <branch>: mark it for sd watch and register this repo.
 enroll_mark() {
-  local b=$1 main_worktree
+  local b=$1 main
   git rev-parse -q --verify "refs/heads/$b" >/dev/null || die "no such branch: $b"
   git config "branch.$b.sheepdog" true
-  main_worktree=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-  if ! grep -qxF "$main_worktree" <<<"$(git config --global --get-all sheepdog.repo || true)"; then
-    git config --global --add sheepdog.repo "$main_worktree"
+  main=$(main_worktree)
+  if ! grep -qxF "$main" <<<"$(git config --global --get-all sheepdog.repo || true)"; then
+    git config --global --add sheepdog.repo "$main"
   fi
   echo "enrolled $b"
 }
@@ -1368,7 +1376,7 @@ case $verb in
     echo "forgot $branch"
     ;;
   unregister)
-    path=${positional:-$(git worktree list --porcelain | sed -n '1s/^worktree //p')}
+    path=${positional:-$(main_worktree)}
     if ! $force && [[ -d $path ]]; then
       mapfile -t enrolled < <(git -C "$path" config --get-regexp '^branch\..*\.sheepdog$' 2>/dev/null \
         | awk '$2 == "true" { sub(/^branch\./, "", $1); sub(/\.sheepdog$/, "", $1); print $1 }')
