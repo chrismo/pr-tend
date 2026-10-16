@@ -335,6 +335,22 @@ SH
   grep -q "other.*✅" "$SHEEPDOG_STATE_DIR/last-pass"
 }
 
+@test "a failed state write leaves no temp file behind" {
+  local real
+  real=$(bash5 -c 'source "$1/../lib/config.sh"; command -v "$(prc_superdb_binary)"' _ "$BATS_TEST_DIRNAME")
+  cat > "$TMP/fakebin/super" <<EOF
+#!/usr/bin/env bash
+for a; do [[ \$a == *"state: s"* ]] && { echo '{"partial":'; exit 1; }; done
+exec "$real" "\$@"
+EOF
+  chmod +x "$TMP/fakebin/super"
+  export ASDF_DATA_DIR="$TMP/no-asdf"
+  ps_fixture feat
+  pass
+  [ -d "$SHEEPDOG_STATE_DIR/branches" ]
+  [ -z "$(find "$SHEEPDOG_STATE_DIR/branches" -name '*.tmp')" ]
+}
+
 @test "a failed fetch keeps git's reason" {
   git remote set-url origin "$TMP/nowhere.git"
   ps_fixture feat
@@ -556,6 +572,20 @@ refresh() { "$SD_WATCH" refresh "$@"; }
   run refresh nope
   [ "$status" -ne 0 ]
   [[ "$output" == *"no such branch: nope"* ]]
+  [ ! -e "$PS_FIXTURES/calls" ]
+}
+
+@test "refresh: -h prints the help; another option or a second branch is refused" {
+  run refresh -h
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage: sd watch"* ]]
+  run refresh --nope
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown option: --nope"* ]]
+  git branch other && enroll other
+  run refresh feat other
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"usage: sd watch refresh [<branch>]"* ]]
   [ ! -e "$PS_FIXTURES/calls" ]
 }
 

@@ -189,7 +189,14 @@ die() { echo "sd watch: $*" >&2; exit 1; }
 
 show() { sed "s/$(printf '\t')/  /g"; }
 
+usage() { sed -n '3,/^$/s/^# \{0,1\}//p' "$0"; }
+
 refresh() {
+  (( $# <= 1 )) || die "usage: sd watch refresh [<branch>]"
+  case ${1:-} in
+    -h|--help) usage; exit 0 ;;
+    -*) die "unknown option: $1" ;;
+  esac
   local b=${1:-} repo name out line rc=0
   git rev-parse --git-dir >/dev/null 2>&1 || die "not in a git repository"
   if [[ -z $b ]]; then
@@ -266,11 +273,11 @@ uninstall_job() {
 
 case ${1:-} in
   "") prc_super_init || exit 1; run_pass ;;
-  refresh) prc_super_init || exit 1; refresh "${2:-}" ;;
+  refresh) shift; prc_super_init || exit 1; refresh "$@" ;;
   status)
     if [[ -f $STATE_DIR/last-pass ]]; then show < "$STATE_DIR/last-pass"; else echo "no pass yet"; fi ;;
   install) prc_super_init || exit 1; install_job ;;
   uninstall) uninstall_job ;;
-  -h|--help) sed -n '3,/^$/s/^# \{0,1\}//p' "$0" ;;
+  -h|--help) usage ;;
   *) echo "sd watch: unknown command: $1" >&2; exit 1 ;;
 esac
