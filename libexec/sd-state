@@ -54,7 +54,10 @@
 # and a non-default parent's), by its stored number; a discovery by branch
 # comes first for a PR not yet known, and is the only call for a branch with
 # none. A stored PR that merged stays the branch's PR, even once a newer one
-# is open from the same branch: the branch is done (#122). A gh failure is
+# is open from the same branch: the branch is done (#122). Only a local
+# branch stores a number, so a parent that isn't one, or a fresh clone, gets
+# discovery's pick (an open PR first); git config --unset branch.<b>.sd-pr
+# makes sd state look again. A gh failure is
 # recorded in .errors and the git facts are still reported.
 #
 # Config: read with lib/config.sh (branch file over global file over

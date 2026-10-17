@@ -62,11 +62,12 @@
 # acts on that clock, and a new reason restarts it. Each timed unenroll
 # notifies, once; one for no local branch is only a pass line.
 #
-# GitHub's rate limit: a pass stops after a branch whose sd state found less
-# than settings.rateLimitFloor GraphQL points left (default 250), or had a
-# call refused for the rate limit, and says so in status with the reset
-# time. The branches it didn't check keep their glyphs and state. refresh
-# checks its one branch either way.
+# GitHub's rate limit: a pass checks no more branches after one whose sd
+# state found less than settings.rateLimitFloor GraphQL points left (default
+# 250), or had a call refused for the rate limit. Status says so with the
+# reset time, and lists each branch not checked; those keep their glyphs and
+# cached state. The housekeeping that asks GitHub's GraphQL nothing still
+# runs. refresh checks its one branch either way.
 #
 # Env:    SHEEPDOG_STATE_DIR (~/.local/state/sheepdog), STATUS_DIR (~/.claude/tab-status)
 #         LOCAL_BIN (~/.local/bin): where install finds the sd link the job runs
@@ -245,7 +246,7 @@ rate_stop() {
   if [[ $reset == - ]]; then
     reset=$(with_timeout "$TIMEOUT" gh api rate_limit --jq '.resources.graphql.reset | todate' 2>/dev/null </dev/null) || reset=
   fi
-  echo "$why: the rest of the pass was skipped${reset:+ (the quota resets at $reset)}"
+  echo "$why: the branches below weren't checked${reset:+ (the quota resets at $reset)}"
 }
 
 state_dir() { echo "$STATE_DIR/branches/$(basename "$1")-$(printf '%s' "$1" | shasum | cut -c1-8)"; }
@@ -376,7 +377,7 @@ run_pass() {
   WRITTEN=$(mktemp) GLYPHS=$(mktemp "$STATE_DIR/glyphs.XXXXXX") RATE_STOP=$(mktemp)
   trap 'rm -f "$WRITTEN" "$GLYPHS" "$RATE_STOP"' EXIT
   local -a repos branches
-  local repo name b lines="" out stopped="" rows
+  local repo name b lines="" out stopped="" stop_line="" skipped=false rows
   mapfile -t repos < <(git config --global --get-all sheepdog.repo || true)
   # A config failure is reported per repo by fetch, which then skips it.
   VACUUM_AFTER=$(prc_get settings.vacuumAfter "" true 2>/dev/null) || VACUUM_AFTER=0
@@ -400,19 +401,24 @@ run_pass() {
     [[ -z $out ]] || lines+=$out$'\n'
     (( ${#branches[@]} )) || continue
 
-    out=$(fetch "$repo" "$name") || { lines+=$out$'\n'; continue; }
-    [[ -z $out ]] || lines+=$out$'\n'
+    if [[ -z $stopped ]]; then
+      out=$(fetch "$repo" "$name") || { lines+=$out$'\n'; continue; }
+      [[ -z $out ]] || lines+=$out$'\n'
+      load_worktrees "$repo"
+    fi
 
-    load_worktrees "$repo"
     for b in "${branches[@]}"; do
+      if [[ -n $stopped ]]; then
+        lines+=$stop_line"$name"$'\t'"$b"$'\t-\tnot checked: rate limit\n' stop_line="" skipped=true
+        continue
+      fi
       lines+=$(check "$repo" "$name" "$b" "${worktree_of[$b]:-}")$'\n' || true
-      if [[ -s $RATE_STOP ]]; then stopped=$(cat "$RATE_STOP"); break; fi
+      if [[ -s $RATE_STOP ]]; then stopped=$(cat "$RATE_STOP") stop_line="$name"$'\t-\t⚠️\t'"$stopped"$'\n'; fi
     done
-    if [[ -n $stopped ]]; then lines+="$name"$'\t-\t⚠️\t'"$stopped"$'\n'; break; fi
   done
 
   local f
-  if [[ -n $stopped ]]; then
+  if $skipped; then
     # The branches not checked keep their glyphs, files and index rows both.
     rows=$(awk -F'\t' 'FILENAME == ARGV[1] { seen[$1]; next } !($1 in seen)' "$GLYPHS" "$STATE_DIR/glyphs" 2>/dev/null) || true
     [[ -z $rows ]] || printf '%s\n' "$rows" >> "$GLYPHS"

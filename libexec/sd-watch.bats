@@ -1310,7 +1310,32 @@ SH
   [ "$(cat "$PS_FIXTURES/calls")" = "$TMP/repo feat" ]
   run "$SD_WATCH" status
   [[ "$output" == *"repo  feat  ✅"* ]]
-  [[ "$output" == *"GitHub rate limit: 100 points left, under settings.rateLimitFloor (250): the rest of the pass was skipped (the quota resets at 2026-10-16T13:00:00Z)"* ]]
+  [[ "$output" == *"GitHub rate limit: 100 points left, under settings.rateLimitFloor (250): the branches below weren't checked (the quota resets at 2026-10-16T13:00:00Z)"* ]]
+  [[ "$output" == *"repo  other  -  not checked: rate limit"* ]]
+}
+
+@test "rate limit: low after the pass's last branch stops nothing" {
+  git branch other && enroll other
+  ps_fixture feat
+  low other
+  pass
+  [ "$(wc -l < "$PS_FIXTURES/calls" | tr -d ' ')" = 2 ]
+  ! grep -q "rate limit" "$SHEEPDOG_STATE_DIR/last-pass"
+}
+
+@test "rate limit: a stopped pass still does the later repos' local housekeeping" {
+  low feat
+  git clone -q "$TMP/origin.git" "$TMP/repo2" 2>/dev/null
+  git -C "$TMP/repo2" config branch.gone.sheepdog true
+  git -C "$TMP/repo2" branch -q z && git -C "$TMP/repo2" config branch.z.sheepdog true
+  git -C "$TMP/repo2" update-ref refs/sheepdog/old/base HEAD
+  register "$TMP/repo2"
+  ps_fixture z
+  pass
+  [ "$(cat "$PS_FIXTURES/calls")" = "$TMP/repo feat" ]
+  [ -z "$(git -C "$TMP/repo2" config branch.gone.sheepdog || true)" ]
+  [ -z "$(git -C "$TMP/repo2" for-each-ref refs/sheepdog/)" ]
+  grep -q "repo2	z	-	not checked: rate limit" "$SHEEPDOG_STATE_DIR/last-pass"
 }
 
 @test "rate limit: plenty left, or none reported, checks every branch" {
@@ -1342,7 +1367,8 @@ $TMP/repo other" ]
   ps_fixture z
   pass
   [ "$(cat "$PS_FIXTURES/calls")" = "$TMP/repo feat" ]
-  grep -q "GitHub refused a call for the rate limit: the rest of the pass was skipped (the quota resets at 2026-10-16T14:00:00Z)" "$SHEEPDOG_STATE_DIR/last-pass"
+  grep -q "GitHub refused a call for the rate limit: the branches below weren't checked (the quota resets at 2026-10-16T14:00:00Z)" "$SHEEPDOG_STATE_DIR/last-pass"
+  grep -q "repo2	z	-	not checked: rate limit" "$SHEEPDOG_STATE_DIR/last-pass"
 }
 
 @test "rate limit: a stopped pass leaves the unchecked branches' glyphs as they were" {
