@@ -541,6 +541,10 @@ ON_OPEN_PARENT=('.pr.base = "p"' '.sync.target = "p"'
     = "waiting on required check test to report" ]
   [ "$(step ci-wait say '.ci.verdict = "pending"' '.ci.missing = ["test", "ext"]')" \
     = "waiting on required checks test, ext to report" ]
+  # A draft's missing check may never come (a workflow that skips drafts, or
+  # filtered to other branches): the wait says how out, by hand.
+  [ "$(step ci-wait say '.pr.draft = true' '.ci.verdict = "pending"' '.ci.missing = ["test"]')" \
+    = "waiting on required check test to report; if it never runs on a draft, undraft by hand (gh pr ready)" ]
   [ "$(step ci-wait say '.ci.verdict = "pending"' '.ci.missing = ["test"]' '.ci.pending = ["lint"]')" = "CI running" ]
 }
 

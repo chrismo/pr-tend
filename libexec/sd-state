@@ -20,6 +20,10 @@
 #             required checks (rulesets and classic protection; matched by
 #             name, not app): one with no context on the head is missing,
 #             and keeps the verdict pending, so undraft waits for it (#123).
+#             One that never runs on a draft (a workflow skipping drafts, or
+#             filtered to other branches, for a stacked draft) waits forever:
+#             no timeout, since nothing here says how long it has been
+#             missing; the wait step says to undraft by hand instead.
 #             A non-draft doesn't need them: GitHub's merge state counts them
 #   review    coverage of HEAD by refs/sheepdog/<branch>/{local,bot,accepted};
 #             a pin's <kind>-base ref is the base it was taken against, so a

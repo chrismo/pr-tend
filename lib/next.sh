@@ -131,7 +131,9 @@ values {...s, remote}
     has_pr and not to_push and not held and (on(ci.verdict == "pending") or on(ci.for_head == false))
       ? step("ci-wait", "wait", on(ci.verdict == "pending")
              ? (len(coalesce(ci.pending, [])) == 0 and len(coalesce(ci.missing, [])) > 0
-                ? f"waiting on required check{len(ci.missing) == 1 ? "" : "s"} {sj(ci.missing, ", ")} to report" : "CI running")
+                ? f"waiting on required check{len(ci.missing) == 1 ? "" : "s"} {sj(ci.missing, ", ")} to report{on(pr.draft)
+                    ? f"; if {len(ci.missing) == 1 ? "it never runs" : "they never run"} on a draft, undraft by hand (gh pr ready)" : ""}"
+                : "CI running")
              : "CI hasn'"'"'t reported on HEAD yet",
              "gh pr checks --watch") : null,
     has_pr and parent_closed

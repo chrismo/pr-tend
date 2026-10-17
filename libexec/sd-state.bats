@@ -1295,7 +1295,7 @@ keys() { field '[.next[].key] | join(" ")'; }
   [ "$(field -c .ci.required)" = '["test"]' ]
   [ "$(field -c .ci.missing)" = '["test"]' ]
   [ "$(keys)" = ci-wait ]
-  [ "$(field '.next[0].say')" = "waiting on required check test to report" ]
+  [ "$(field '.next[0].say')" = "waiting on required check test to report; if it never runs on a draft, undraft by hand (gh pr ready)" ]
 }
 
 @test "ci: a draft's required check missing beside green ones is pending" {
