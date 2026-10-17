@@ -199,7 +199,8 @@
 #                   start, implement)
 #
 # Config (sd config show):
-#   settings  remote, verify, autofix, stepTimeout, stepBudget, replyPrefix, botLogin, implementAllow,
+#   settings  remote, verify, autofix, stepTimeout, stepBudget, forkLimit (a
+#             session with more context starts over), replyPrefix, botLogin, implementAllow,
 #             <step>Prompt for implement, reviewFix, review, describe, address,
 #             resolve, ciFix (a file; else .sheepdog/<step>.md in the base
 #             commit, kebab-cased, else the shipped lib/prompts/<step>.md)
@@ -494,7 +495,9 @@ address() {
     [[ $h == "${stored_h:-claude}" ]] \
       || die "branch.$b.sd-session belongs to ${stored_h:-claude}; unset it to start a $h session"
     mode=resume
-  else
+    if past_fork_limit "$b" "$h" "$sid"; then sid=; fi
+  fi
+  if [[ -z $sid ]]; then
     sid=$(uuidgen | tr 'A-F' 'a-f') mode=new
   fi
   timeout=$(prc_get settings.stepTimeout "$b" false) || die "sd config failed"
@@ -784,11 +787,28 @@ step_session() {
     [[ $STEP_H == "${stored_h:-claude}" ]] \
       || die "branch.$b.sd-session belongs to ${stored_h:-claude}; unset it to start a $STEP_H session"
     STEP_MODE=resume
-  else
+    if past_fork_limit "$b" "$STEP_H" "$STEP_SID"; then STEP_SID=; fi
+  fi
+  if [[ -z $STEP_SID ]]; then
     STEP_SID=$(uuidgen | tr 'A-F' 'a-f') STEP_MODE=new
   fi
   STEP_TIMEOUT=$(prc_get settings.stepTimeout "$b" false) || die "sd config failed"
   [[ $STEP_TIMEOUT =~ ^[1-9][0-9]*$ ]] || die "settings.stepTimeout must be whole seconds: $STEP_TIMEOUT"
+}
+
+# past_fork_limit <branch> <harness> <session-id>: the session's context (its
+# last turn's tokens, harness_tally) is past settings.forkLimit, so a step
+# starts a new session instead of inheriting it (#121). Every step's prompt is
+# self-contained (task, contract, findings or logs), so the history is only an
+# optimization, and past the limit it stops paying for itself. 0 is no limit;
+# no transcript, or none that says, is resumed.
+past_fork_limit() {
+  local limit ctx
+  limit=$(prc_get settings.forkLimit "$1" false) || die "sd config failed"
+  (( limit > 0 )) || return 1
+  ctx=$(prc_val "$(harness_tally "$2" "$3")" 'coalesce(context, "")') || return 1
+  [[ -n $ctx ]] && (( ctx > limit )) || return 1
+  echo "sd act: session $3 is $ctx tokens, past settings.forkLimit ($limit): starting a new one" >&2
 }
 
 # step_store <branch>: after a step ran, remember its session and harness.
@@ -856,12 +876,7 @@ harness_flags() {
 }
 
 # session_exists <harness> <id>: the harness wrote a transcript for the session.
-session_exists() {
-  case $1 in
-    claude) find "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -maxdepth 2 -name "$2.jsonl" 2>/dev/null | grep -q . ;;
-    pi) find "${PI_CODING_AGENT_SESSION_DIR:-$HOME/.pi/agent/sessions}" -maxdepth 2 -name "*_$2.jsonl" 2>/dev/null | grep -q . ;;
-  esac
-}
+session_exists() { [[ -n $(harness_transcript "$1" "$2") ]]; }
 
 attach() {
   local b=$branch wt lock stored_h h sid mode use_key rc=0
@@ -917,9 +932,6 @@ attach() {
 # Duplicates agent-rig's wt-new (#14), hook locations and branch resolution
 # included, so a repo set up for new_wt needs nothing more. Placement differs
 # (#85): beside the main worktree, not beside the current one.
-
-# main_worktree: the repo's main worktree, where sheepdog's shared files live.
-main_worktree() { git worktree list --porcelain | sed -n '1s/^worktree //p'; }
 
 # start_default <remote>
 start_default() {

@@ -1023,16 +1023,29 @@ old_super() {
   [[ "$output" == *"setings: unknown key"* ]]
 }
 
-@test "settings.stepBudget: USD per step, 0 (no cap) by default" {
+@test "settings.stepBudget: USD per step, 5 by default" {
   run "$SD_CONFIG" get settings.stepBudget
   [ "$status" -eq 0 ]
-  [ "$output" = 0 ]
+  [ "$output" = 5 ]
   "$SD_CONFIG" set --global --json settings.stepBudget 2.5
   [ "$("$SD_CONFIG" get settings.stepBudget)" = 2.5 ]
   write_global '{"settings":{"stepBudget":"abc"}}'
   run "$SD_CONFIG" show
   [ "$status" -eq 1 ]
   [[ "$output" == *"settings.stepBudget: cannot cast"* ]]
+}
+
+@test "settings.branchBudget (USD, 25) and forkLimit (tokens, 100000): defaults, per branch, typed (#121)" {
+  [ "$("$SD_CONFIG" get settings.branchBudget)" = 25 ]
+  [ "$("$SD_CONFIG" get settings.forkLimit)" = 100000 ]
+  "$SD_CONFIG" set --json settings.branchBudget 40.5
+  "$SD_CONFIG" set --json settings.forkLimit 50000
+  [ "$("$SD_CONFIG" get settings.branchBudget)" = 40.5 ]
+  [ "$("$SD_CONFIG" get settings.forkLimit)" = 50000 ]
+  write_global '{"settings":{"forkLimit":"lots"}}'
+  run "$SD_CONFIG" show
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"settings.forkLimit: cannot cast"* ]]
 }
 
 @test "settings.botTimeout: seconds to wait for the review bot, 3600 by default" {

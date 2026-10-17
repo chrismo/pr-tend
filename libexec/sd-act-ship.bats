@@ -61,7 +61,7 @@ while (( i < $# )); do
   case ${args[i]} in
     --allowedTools|--disallowedTools)
       i=$((i + 1)); while (( i < $# )) && [[ ${args[i]} != -* ]]; do i=$((i + 1)); done; continue ;;
-    --session-id|--resume|--output-format|--json-schema|--permission-mode|--model|--effort|--max-turns) i=$((i + 2)); continue ;;
+    --session-id|--resume|--output-format|--json-schema|--permission-mode|--model|--effort|--max-turns|--max-budget-usd) i=$((i + 2)); continue ;;
     -*) ;;
     *) prompt=${args[i]} ;;
   esac
@@ -136,6 +136,36 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   "$SD_ACT" describe >/dev/null
   grep -qx -- --resume "$FX/claude.args"
   grep -qx -- "$sid" "$FX/claude.args"
+}
+
+# transcript <session-id> <tokens>: a claude transcript whose last turn's context is <tokens>.
+transcript() {
+  mkdir -p "$CLAUDE_CONFIG_DIR/projects/-repo"
+  printf '{"message":{"role":"assistant","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":%s,"output_tokens":0}},"type":"assistant"}\n' \
+    "$(( $2 - 1 ))" > "$CLAUDE_CONFIG_DIR/projects/-repo/$1.jsonl"
+}
+
+@test "describe: a session past settings.forkLimit tokens (100000) isn't resumed; a new one starts (#121)" {
+  export CLAUDE_CONFIG_DIR="$TMP/claude"
+  "$SD_ACT" describe >/dev/null
+  sid=$(git config branch.feat.sd-session)
+  transcript "$sid" 100000
+  "$SD_ACT" describe >/dev/null
+  grep -qx -- --resume "$FX/claude.args"
+  transcript "$sid" 100001
+  run --separate-stderr "$SD_ACT" describe
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"session $sid is 100001 tokens, past settings.forkLimit (100000): starting a new one"* ]]
+  grep -qx -- --session-id "$FX/claude.args"
+  new=$(git config branch.feat.sd-session)
+  [ "$new" != "$sid" ]
+  grep -qx -- "$new" "$FX/claude.args"
+  # 0 is no limit
+  transcript "$new" 900000
+  "$SD_CONFIG" set --global --json settings.forkLimit 0
+  "$SD_ACT" describe >/dev/null
+  grep -qx -- --resume "$FX/claude.args"
+  grep -qx -- "$new" "$FX/claude.args"
 }
 
 # ── ship ─────────────────────────────────────────────────────────────────────

@@ -19,6 +19,7 @@ setup() {
   export GIT_CONFIG_GLOBAL="$TMP/gitconfig-global"
   export GIT_CONFIG_SYSTEM=/dev/null
   export SHEEPDOG_CONFIG="$TMP/global.json"
+  export SHEEPDOG_STATE_DIR="$TMP/state"   # usage.sup, for the branch's spend
   SD_CONFIG="$BATS_TEST_DIRNAME/sd-config"
   printf '[user]\n\temail = t@example.com\n\tname = Tester\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
 
@@ -2203,6 +2204,44 @@ review() {
   state
   [ "$(field .session.enrolled)" = false ]
   [ "$(field .session.locked)" = false ]
+}
+
+# ── spend: what the branch has cost, against settings.branchBudget (#121) ────
+
+usage_row() { # usage_row <branch> <cost_usd> [repo]
+  mkdir -p "$SHEEPDOG_STATE_DIR"
+  printf '{time:2026-10-16T20:33:06Z,repo:"%s",branch:"%s",step:"review",harness:"claude",session:"s",mode:"new",status:0,cost_usd:%s}\n' \
+    "${3:-$TMP/work}" "$1" "$2" >> "$SHEEPDOG_STATE_DIR/usage.sup"
+}
+
+@test "spend: this repo's steps on the branch, summed from usage.sup, and settings.branchBudget (25 USD)" {
+  git switch -qc feat
+  state
+  [ "$(field -c .spend)" = '{"usd":0,"budget":25}' ]
+  usage_row feat 1.5; usage_row feat 2.25; usage_row other 9.; usage_row feat 9. /elsewhere; usage_row feat 3.
+  "$SD_CONFIG" set --json settings.branchBudget 10
+  state
+  [ "$(field -c .spend)" = '{"usd":6.75,"budget":10}' ]
+}
+
+@test "spend: past settings.branchBudget, NEXT is chrismo's instead of the agent's" {
+  git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
+  git update-ref refs/sheepdog/feat/local HEAD
+  pr_fixture feat ".reviewThreads.nodes = [$(thread Bot copilot Bot copilot)]"
+  "$SD_CONFIG" set --json settings.branchBudget 2
+  usage_row feat 2.5
+  run "$SD_STATE"
+  [ "$status" -eq 0 ]
+  [ "${lines[1]}" = 'NEXT  you    spent $2.50 on this branch, past settings.branchBudget ($2.00): raise it, or take over  → sd act attach' ]
+}
+
+@test "spend: an unreadable usage.sup is an error, not a stop" {
+  git switch -qc feat
+  mkdir -p "$SHEEPDOG_STATE_DIR"
+  echo 'not sup {' > "$SHEEPDOG_STATE_DIR/usage.sup"
+  state
+  [ "$(field .spend.usd)" = null ]
+  [[ "$(field '.errors[]')" == *"usage.sup"* ]]
 }
 
 # ── summary line ─────────────────────────────────────────────────────────────

@@ -15,8 +15,15 @@
 # Only bot items are ever marked i, so owed_bot - info is the blocking bot count.
 # on() and n() come from lib/config.sh's PRC_FNS: a null or missing
 # field compares to nothing in SuperDB, and they make it false and 0.
+#
+# Past settings.branchBudget (spend.budget; 0 is none), nothing spends tokens
+# on the branch: the first agent step becomes chrismo's, the rest go, and the
+# run steps stay (#121). agent() makes that swap; the dedupe at the end keeps
+# the first.
 PRN_QUERY='fn plural(k, w): f"{k} {w}{k == 1 ? "" : "s"}"
 fn step(key, who, say, cmd): {key: key, who: who, say: say, cmd: cmd}
+fn usd(x): f"${round(x * 100)::int64 / 100}.{round(x * 100)::int64 % 100 < 10 ? "0" : ""}{round(x * 100)::int64 % 100}"
+fn agent(budget, key, say, cmd): budget is null ? step(key, "agent", say, cmd) : budget
 fn covers(p): on(p.status in ["covered", "rewritten-same"])
 fn trails(p): on(p.status in ["uncovered", "rewritten-changed", "unknown"])
 fn why_blocked(m): m == "BLOCKED" ? "the merge is blocked"
@@ -54,7 +61,10 @@ values {...s, remote}
       fixing:=(on(review.findings.at_head) and not (covers(review.local) or covers(review.bot) or covers(review.accepted))),
       bot_due:=(coalesce(bot.command, null) is not null and covers(review.local)
                 and not covers(review.bot) and not covers(review.accepted)),
-      bot_waiting:=(covers(review.bot) and on(review.bot.replied == false) and not covers(review.accepted))
+      bot_waiting:=(covers(review.bot) and on(review.bot.replied == false) and not covers(review.accepted)),
+      budget:=(n(spend.budget) > 0 and n(spend.usd) > n(spend.budget)
+               ? step("budget", "you", f"spent {usd(spend.usd)} on this branch, past settings.branchBudget ({usd(spend.budget)}): raise it, or take over",
+                      "sd act attach") : null)
 | unnest [
     on(pr.state == "MERGED") ? step("merged", "run", "merged: drop the branch'"'"'s pins and enrollment, then remove this worktree", "sd act forget") : null,
     on(pr.state == "CLOSED") ? step("closed", "you", "PR closed without merging", null) : null,
@@ -79,7 +89,7 @@ values {...s, remote}
     open and not undone and not parent_closed and on(sync.up_to_date == false) and on(sync.conflict)
       ? (on(sync.by_tree)
          ? step("conflict", "you", f"restack onto {sync.target} by tree conflicts, which --resolve can'"'"'t do: resolve it by hand (sd act restack says how)", "sd act restack")
-         : step("conflict", "agent", f"restack onto {sync.target} conflicts: resolve it", "sd act restack --resolve")) : null,
+         : agent(budget, "conflict", f"restack onto {sync.target} conflicts: resolve it", "sd act restack --resolve")) : null,
     open and not undone and not parent_closed and on(sync.up_to_date == false) and not on(sync.conflict) and chase
       ? (sync.old_base is null
          ? step("behind", "you", f"restack onto {sync.target} ({sync.behind} behind): no base to restack from; see sd state'"'"'s errors", "sd state --json")
@@ -90,12 +100,12 @@ values {...s, remote}
       ? step("behind", "run", f"restack onto {sync.default} ({n(sync.behind)} behind): GitHub requires branches to be up to date",
              "sd act restack") : null,
     has_pr and on(ci.verdict == "red") and on(ci.for_head) and not to_push
-      ? step("ci-red", "agent", f"fix CI: {join(ci.failing, ", ")}", "sd act ci-fix") : null,
+      ? agent(budget, "ci-red", f"fix CI: {join(ci.failing, ", ")}", "sd act ci-fix") : null,
     has_pr and on(ci.verdict == "blocked") and on(ci.for_head) and not to_push
       ? step("ci-blocked", "you", f"CI blocked: {sj(coalesce(ci.blocked, []), ", ")} didn'"'"'t start or want approval; an agent can'"'"'t fix that",
              "gh pr checks") : null,
     open and bot_blocking > 0
-      ? step("bot", "agent", f"address {plural(threads.owed_bot, "bot item")}", "sd act address") : null,
+      ? agent(budget, "bot", f"address {plural(threads.owed_bot, "bot item")}", "sd act address") : null,
     open and bot_blocking == 0 and n(threads.info) > 0
       ? step("read", "you", f"read {plural(threads.info, "bot item")} in sd state --long, then ack", "sd act ack") : null,
     open and taken
@@ -112,14 +122,14 @@ values {...s, remote}
       ? step("draft", "run", f"{on(ci.verdict == "none") ? "reviewed, no CI checks" : "CI green and reviewed"}: mark the PR ready for review",
              "gh pr ready") : null,
     open and fixing and not on(review.findings.declined) and review.findings.round < review.findings.cap
-      ? step("review-fix", "agent", f"fix {plural(review.findings.n, "review finding")} (round {review.findings.round}/{review.findings.cap})",
+      ? agent(budget, "review-fix", f"fix {plural(review.findings.n, "review finding")} (round {review.findings.round}/{review.findings.cap})",
              "sd act implement")
       : open and fixing
       ? step("review-decide", "you",
              f"{on(review.findings.declined) ? f"the agent declined {plural(review.findings.n, "review finding")}"
                 : f"{plural(review.findings.n, "review finding")} after {review.findings.round} rounds"}: fix {review.findings.n == 1 ? "it" : "them"}, or accept HEAD as reviewed (sd state --long lists them)",
              "sd act review --accept")
-      : open and need_review ? step("review", "agent", "review the changes since the last review", "sd act review") : null,
+      : open and need_review ? agent(budget, "review", "review the changes since the last review", "sd act review") : null,
     has_pr and not to_push and not held and not foreign and bot_due
       ? step("bot-trigger", "run", f"trigger the review bot ({bot.command})", "sd act trigger") : null,
     has_pr and on(ci.verdict == "inconclusive") ? step("ci-rerun", "run", "rerun cancelled CI", "gh pr checks") : null,
@@ -153,6 +163,8 @@ values {...s, remote}
 | where this is not null
 | aggregate steps:=collect(this)
 | values coalesce(steps, [])
+| values {first: coalesce(coalesce([unnest this | count {s: this, j} | where s.key == "budget" | values j], [])[0], 0), all: this}
+| values coalesce([unnest {first, s: all} | count {r: this, j} | where r.s.key != "budget" or j == r.first | values r.s], [])
 | values (len(this) > 1 and this[len(this)-1].key in ["ready", "merge-wait", "blocked"]) ? this[0:len(this)-1] : this'
 
 # prn_next <remote>: sd state JSON on stdin; prints the steps as a JSON array, first is next.

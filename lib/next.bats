@@ -266,6 +266,26 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(step read cmd '.threads.owed_bot = 2' '.threads.info = 2')" = "sd act ack" ]
 }
 
+@test "past settings.branchBudget: one you step in place of the agent steps; run steps still run (#121)" {
+  local over='.spend = {"usd": 25.456, "budget": 25}'
+  [ "$(keys "$over" '.ci.verdict = "red"' '.ci.failing = ["test"]' '.threads.owed_bot = 2')" = budget ]
+  [ "$(step budget who "$over" '.threads.owed_bot = 2')" = you ]
+  [ "$(step budget say "$over" '.threads.owed_bot = 2')" \
+    = 'spent $25.46 on this branch, past settings.branchBudget ($25.00): raise it, or take over' ]
+  [ "$(step budget cmd "$over" '.threads.owed_bot = 2')" = "sd act attach" ]
+  # a restack ahead of the agent's steps, and a push after them, stay
+  [ "$(keys "$over" '.pr.merge_state = "BEHIND"' '.sync.up_to_date = false' '.sync.behind = 3' '.threads.owed_bot = 2')" = "behind budget" ]
+  [ "$(keys "$over" '.threads.owed_bot = 1' '.push.ahead = 1' '.review.local.status = "uncovered"')" = "budget push" ]
+  # nothing that spends: no budget step
+  [ "$(keys "$over")" = ready ]
+}
+
+@test "within settings.branchBudget, or with none (0): the agent steps as usual" {
+  [ "$(keys '.spend = {"usd": 24.9, "budget": 25}' '.threads.owed_bot = 2')" = bot ]
+  [ "$(keys '.spend = {"usd": 99, "budget": 0}' '.threads.owed_bot = 2')" = bot ]
+  [ "$(keys '.spend = null' '.threads.owed_bot = 2')" = bot ]
+}
+
 @test "blocking and info bot items together: address takes them all" {
   [ "$(keys '.threads.owed_bot = 3' '.threads.info = 1')" = bot ]
   [ "$(step bot say '.threads.owed_bot = 3' '.threads.info = 1')" = "address 3 bot items" ]

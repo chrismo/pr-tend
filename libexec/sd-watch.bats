@@ -617,7 +617,7 @@ one_step() {
 
 @test "policy: every lib/next.sh step is in --help, notified or not, exactly once" {
   local steps listed
-  steps=$(grep -o 'step("[a-z-]*"' "$BATS_TEST_DIRNAME/../lib/next.sh" | sed 's/step("//; s/"//' | sort -u)
+  steps=$(grep -oE '(step\(|agent\(budget, )"[a-z-]+"' "$BATS_TEST_DIRNAME/../lib/next.sh" | sed -E 's/.*"([a-z-]+)"$/\1/' | sort -u)
   listed=$( { policy n; policy q; } | sort)
   [ -n "$(policy n)" ]
   diff <(echo "$steps") <(echo "$listed")

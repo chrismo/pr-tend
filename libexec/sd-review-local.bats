@@ -29,7 +29,7 @@ while (( i < $# )); do
       i=$((i + 1))
       while (( i < $# )) && [[ ${args[i]} != -* ]]; do i=$((i + 1)); done
       continue ;;
-    --session-id|--resume|--output-format|--json-schema|--permission-mode|--model|--effort|--max-turns)
+    --session-id|--resume|--output-format|--json-schema|--permission-mode|--model|--effort|--max-turns|--max-budget-usd)
       i=$((i + 2)); continue ;;
     -*) ;;
     *) prompt=${args[i]} ;;

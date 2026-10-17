@@ -50,7 +50,7 @@ while (( i < $# )); do
   case ${args[i]} in
     --allowedTools|--disallowedTools)
       i=$((i + 1)); while (( i < $# )) && [[ ${args[i]} != -* ]]; do i=$((i + 1)); done; continue ;;
-    --session-id|--resume|--output-format|--json-schema|--permission-mode|--model|--effort|--max-turns) i=$((i + 2)); continue ;;
+    --session-id|--resume|--output-format|--json-schema|--permission-mode|--model|--effort|--max-turns|--max-budget-usd) i=$((i + 2)); continue ;;
     -*) ;;
     *) prompt=${args[i]} ;;
   esac
