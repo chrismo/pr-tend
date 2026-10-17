@@ -1101,7 +1101,7 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   run "$SD_WATCH" vacuum --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" == *"repo  feat  merged for 2m: vacuum unenrolls it; a pass doesn't (vacuumAfter 0)"* ]] || false
-  [[ "$output" == *"repo  other  unsure at the last check: vacuum skips it if sd state still is"* ]] || false
+  [[ "$output" == *"repo  other  unsure at the last saved check: vacuum skips it if sd state still is"* ]] || false
   [[ "$output" == *"repo  gone  no local branch: vacuum unenrolls it, as does the next pass"* ]] || false
   enrolled feat && enrolled other && enrolled gone
 }
@@ -1232,6 +1232,7 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
 }
 
 @test "vacuum: an unenroll that fails is said" {
+  [ "$(id -u)" -ne 0 ] || skip "root writes through a read-only .git"
   git switch -q main
   ps_fixture feat '.pr.state = "MERGED"'
   chmod a-w .git
