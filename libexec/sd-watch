@@ -24,9 +24,9 @@
 #              clock (or vacuumAfter 0): prints each one unenrolled and its
 #              reason, and each one sd state is unsure of, skipped, and why.
 #              It doesn't notify its own unenrolls.
-#              --dry-run: from the last check, nothing fetched or changed:
-#              each stale enrollment's reason, how long it has been stale and
-#              when a pass unenrolls it
+#              --dry-run: what vacuum would do, judged from the last check
+#              (nothing fetched or changed), and when a pass would unenroll
+#              each stale branch
 #   status     print the last pass
 #   install    launchd job: a pass every settings.interval seconds (default 300)
 #   uninstall  remove the job
@@ -66,7 +66,8 @@
 # pass whose sd state reported errors or stale data neither starts, resets nor
 # acts on that clock, and a new reason restarts it. Each timed unenroll
 # notifies, once; one for no local branch is only a pass line. sd watch vacuum
-# runs the clock out at once, with the same reasons and the same limits.
+# doesn't wait for the clock, vacuumAfter 0 included, but counts only these
+# reasons and skips a branch sd state is unsure of, as a pass does.
 #
 # GitHub's rate limit: a pass checks no more branches after one whose sd
 # state found less than settings.rateLimitFloor GraphQL points left (default
@@ -216,8 +217,11 @@ check() {
   if [[ -n $since ]]; then
     stale="{\"reason\": \"$reason\", \"since\": $since}"
     if [[ $carry != true ]] && { [[ -n ${VACUUM_LOG:-} ]] || (( ${VACUUM_AFTER:-0} > 0 && now - since >= VACUUM_AFTER )); }; then
-      git -C "$repo" config --unset "branch.$b.sheepdog" \
-        && unenrolled="unenrolled: $reason for $(dur $(( now - since ))) (sd act enroll $b to watch it again)" stale=null
+      if git -C "$repo" config --unset "branch.$b.sheepdog"; then
+        unenrolled="unenrolled: $reason for $(dur $(( now - since ))) (sd act enroll $b to watch it again)" stale=null
+      else
+        vacuum_log "$name" "$b" "couldn't unenroll: $reason for $(dur $(( now - since )))"
+      fi
     fi
   fi
   if [[ $carry == true && -n ${VACUUM_LOG:-} ]]; then
@@ -509,10 +513,11 @@ vacuum() {
   if [[ -s $VACUUM_LOG ]]; then show < "$VACUUM_LOG"; else echo "nothing stale"; fi
 }
 
-# vacuum_preview: each enrolled branch on the stale clock, from cached state.
+# vacuum_preview: what vacuum would do to each enrolled branch, from cached
+# state, and when a pass would.
 vacuum_preview() {
   local -a repos branches
-  local repo name b after since reason now out=""
+  local repo name b after f carry since reason now out=""
   now=$(date +%s)
   after=$(prc_get settings.vacuumAfter "" true) || die "sd config failed"
   mapfile -t repos < <(git config --global --get-all sheepdog.repo || true)
@@ -522,17 +527,26 @@ vacuum_preview() {
     mapfile -t branches < <(enrolled_branches "$repo")
     for b in "${branches[@]}"; do
       if ! git -C "$repo" rev-parse -q --verify "refs/heads/$b" >/dev/null; then
-        out+="$name"$'\t'"$b"$'\tno local branch: unenrolled next pass\n'
+        out+="$name"$'\t'"$b"$'\tno local branch: vacuum unenrolls it, as does the next pass\n'
         continue
       fi
-      since= reason=
-      read -r since reason < <(prc_line 'values coalesce(f"{stale.since} {stale.reason}", "")' \
-        "$(cat "$(state_dir "$repo")/$b.json" 2>/dev/null)" 2>/dev/null) || true
+      f="$(state_dir "$repo")/$b.json"
+      if [[ ! -f $f ]]; then
+        out+="$name"$'\t'"$b"$'\tnot checked yet: vacuum checks it first\n'
+        continue
+      fi
+      carry= since= reason=
+      read -r carry since reason < <(prc_line 'values f"{coalesce(carry, false)} {coalesce(stale.since, "")} {coalesce(stale.reason, "")}"' \
+        "$(cat "$f")" 2>/dev/null) || true
+      if [[ $carry == true ]]; then
+        out+="$name"$'\t'"$b"$'\tunsure at the last check: vacuum skips it if sd state still is\n'
+        continue
+      fi
       [[ -n $since ]] || continue
-      out+="$name"$'\t'"$b"$'\t'"$reason for $(dur $(( now - since ))): "
-      if (( after == 0 )); then out+=$'kept (vacuumAfter 0)\n'
-      elif (( now - since >= after )); then out+=$'unenrolled next pass\n'
-      else out+="unenrolled after $(dur "$after")"$'\n'; fi
+      out+="$name"$'\t'"$b"$'\t'"$reason for $(dur $(( now - since ))): vacuum unenrolls it"
+      if (( after == 0 )); then out+=$'; a pass doesn\'t (vacuumAfter 0)\n'
+      elif (( now - since >= after )); then out+=$', as does the next pass\n'
+      else out+="; a pass, after $(dur "$after")"$'\n'; fi
     done
   done
   if [[ -n $out ]]; then printf '%s' "$out" | show; else echo "nothing stale"; fi
