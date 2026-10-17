@@ -706,6 +706,17 @@ squash_parent_away() {
   [[ "$(field '.errors | join(" ")')" == *"no base for feat on parent"* ]]
 }
 
+@test "sync: on an open parent's tip, no pin, reflog gone: up to date on the parent's tip, no error (#97)" {
+  git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  git reflog expire --expire=now --expire-unreachable=now refs/remotes/origin/parent
+  state
+  [ "$(field .sync.up_to_date)" = true ]
+  [ "$(field .sync.old_base)" = "$(git rev-parse origin/parent)" ]
+  [ "$(field '.errors | length')" = 0 ]
+}
+
 @test "sync: stacked on an open parent, no pin, fork-point in the parent's reflog: the fork-point" {
   git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
   local p1; p1=$(git rev-parse parent)
