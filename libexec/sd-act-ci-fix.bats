@@ -381,6 +381,19 @@ held() { git config --get branch.feat.sd-held; }
   [ "$status" -eq 1 ]
 }
 
+@test "a CI config change the agent committed itself is held, whatever it answers (#124)" {
+  printf '#!/usr/bin/env bash\nmkdir -p .github/workflows && echo x > .github/workflows/x.yml && git add -A && git commit -qm "agent made it"\n' > "$FX/agent"
+  chmod +x "$FX/agent"
+  for r in '{outcome: "fixed", commit_message: null, summary: "s"}' '{outcome: "flaky", commit_message: null, summary: "s"}' \
+           '{outcome: "needs-input", commit_message: null, summary: "s"}'; do
+    git reset -q --hard origin/feat && git config --unset branch.feat.sd-held || true
+    git config --unset branch.feat.sd-ci-fix || true
+    agent_result "$r"
+    run "$SD_ACT" ci-fix
+    [ "$(held)" = "$(git rev-parse HEAD)"$'\n'".github/workflows/x.yml" ] || { echo "for: $r"; return 1; }
+  done
+}
+
 @test "--no-publish with a CI config change: held all the same (#124)" {
   agent_touches_ci
   run "$SD_ACT" ci-fix --no-publish

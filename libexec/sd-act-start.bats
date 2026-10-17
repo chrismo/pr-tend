@@ -410,6 +410,16 @@ EOF
   run "$SD_ACT" implement
   [ "$status" -eq 0 ]
   [[ "$output" == *"held: the agent changed CI config (.github/workflows/ci.yml): review, then sd act push"* ]]
+  # Keyed on the commit that changed it, the agent's; the pipeline's commit of the rest follows.
+  [ "$(git config --get branch.feat-x.sd-held)" = "$(git rev-parse HEAD~1)"$'\n'".github/workflows/ci.yml" ]
+}
+
+@test "implement: a CI config change the agent committed itself before needing input is held (#124)" {
+  started
+  printf '#!/usr/bin/env bash\nmkdir -p .github/workflows && echo x > .github/workflows/ci.yml && git add -A && git commit -qm "agent made it"\n' > "$FX/agent"
+  echo '{"outcome": "needs-input", "commit_message": null, "summary": "which runner?"}' > "$FX/result.json"
+  run "$SD_ACT" implement
+  [ "$status" -ne 0 ]
   [ "$(git config --get branch.feat-x.sd-held)" = "$(git rev-parse HEAD)"$'\n'".github/workflows/ci.yml" ]
 }
 

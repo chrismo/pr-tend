@@ -528,6 +528,9 @@ address() {
     || die "the $h step failed or returned no usable result (session $sid)"
   git config "branch.$b.sd-session" "$sid"
   git config "branch.$b.sd-harness" "$h"
+  hold_since "$b" "$gbase" "$before"
+  local agent_head
+  agent_head=$(git rev-parse "refs/heads/$b")
 
   # pi has no schema enforcement, so check the shape here too.
   outcome=$(prc_val "$result" 'coalesce(outcome, "")')
@@ -548,10 +551,7 @@ address() {
       | values case when is(m, <string>) and grep("\\S", m) then m else "Address review feedback" end' "$result")
     git -C "$wt" add -A && git -C "$wt" commit -q -m "$msg" || die "commit failed; the edits are left in $wt"
   fi
-  # Commits the agent made itself count too: the deny on git commit is no guarantee.
-  if [[ $(git rev-parse "refs/heads/$b") != "$before" ]]; then
-    hold_after "$b" "$gbase" "$(git -C "$wt" diff --name-only --no-renames "$before" "refs/heads/$b")"
-  fi
+  hold_since "$b" "$gbase" "$agent_head"
   verify_autofix "$wt" "$b" || die "verify failed ($verify); the commit is kept in $wt, nothing pushed or posted"
 
   report "$plan" "$(prc_val "$result" 'coalesce(summary, "")')"
@@ -1151,7 +1151,7 @@ EOF
 
 # implement_run <branch> <worktree>
 implement_run() {
-  local b=$1 wt=$2 task verify before prompt result outcome summary msg extra rule rec state gbase guidance listed="" allow=$HARNESS_CLAUDE_ALLOW
+  local b=$1 wt=$2 task verify before agent_head prompt result outcome summary msg extra rule rec state gbase guidance listed="" allow=$HARNESS_CLAUDE_ALLOW
   local numbered answered asks changed=false schema=$IMPLEMENT_SCHEMA
   local -a rules=()
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
@@ -1202,6 +1202,8 @@ implement_run() {
              && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" "$prompt" "$schema" "$STEP_CFG") \
     || die "the $STEP_H implement step failed or returned no usable result (session $STEP_SID)"
   step_store "$b"
+  hold_since "$b" "$gbase" "$before"
+  agent_head=$(git rev-parse "refs/heads/$b")
 
   outcome=$(prc_val "$result" 'coalesce(outcome, "")')
   summary=$(prc_val "$result" 'coalesce(summary, "")')
@@ -1250,7 +1252,7 @@ implement_run() {
   echo "$b: $summary"
   [[ -z $listed ]] || prc_line "$ANSWERS_REPORT" "$answered"
   git -C "$wt" log --format='  %h %s' "$before..refs/heads/$b"
-  hold_after "$b" "$gbase" "$(git -C "$wt" diff --name-only --no-renames "$before" "refs/heads/$b")"
+  hold_since "$b" "$gbase" "$agent_head"
   verify_autofix "$wt" "$b" || die "verify failed ($VERIFY_CMD); the commit is kept in $wt"
   echo "next: sd act review"
 }
@@ -1341,7 +1343,7 @@ agent_rules() {
 }
 
 ci_fix() {
-  local b=$branch wt remote state s sha failing last base task verify vout vrc logs prompt result outcome summary msg before allow=$HARNESS_CLAUDE_ALLOW
+  local b=$branch wt remote state s sha failing last base task verify vout vrc logs prompt result outcome summary msg before agent_head allow=$HARNESS_CLAUDE_ALLOW
   local -a rules
   wt=$(worktree_for "$b")
   [[ -n $wt ]] || die "$b isn't checked out in any worktree"
@@ -1419,6 +1421,8 @@ ci_fix() {
              && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" "$prompt" "$CI_FIX_SCHEMA" "$STEP_CFG") \
     || die "the $STEP_H ci-fix step failed or returned no usable result (session $STEP_SID)"
   step_store "$b"
+  hold_since "$b" "$base" "$before"
+  agent_head=$(git rev-parse "refs/heads/$b")
 
   outcome=$(prc_val "$result" 'coalesce(outcome, "")')
   summary=$(prc_val "$result" 'coalesce(summary, "")')
@@ -1428,7 +1432,8 @@ ci_fix() {
       [[ -z $(git -C "$wt" status --porcelain) ]] || die "the agent says flaky but edited files; they are left uncommitted in $wt"
       git config "branch.$b.sd-ci-fix" "$sha flaky"
       echo "$b: the agent calls ${sha:0:7}'s red flaky, not the change's: $summary"
-      if [[ -n $AUTOFIX_COMMIT ]]; then echo "autofix's commit $AUTOFIX_COMMIT is kept, unpushed: sd act push"
+      if [[ $agent_head != "$before" ]]; then echo "the agent committed anyway; kept, unpushed: look (git log $before..$b), then sd act push"
+      elif [[ -n $AUTOFIX_COMMIT ]]; then echo "autofix's commit $AUTOFIX_COMMIT is kept, unpushed: sd act push"
       else echo "nothing committed; rerun CI (gh run rerun, or rwx retry), or look: gh pr checks"; fi
       return ;;
     needs-input) die "the agent needs input on $b: $summary"$'\n'"Edits (if any) are left uncommitted in $wt: answer in the session (sd act attach), then commit or discard them, then sd act ci-fix" ;;
@@ -1442,7 +1447,7 @@ ci_fix() {
   git -C "$wt" add -A && git -C "$wt" commit -q -m "$msg" || die "commit failed; the edits are left in $wt"
   echo "$b: $summary"
   git -C "$wt" log --format='  %h %s' "$before..refs/heads/$b"
-  hold_after "$b" "$base" "$(git -C "$wt" diff --name-only --no-renames "$before" "refs/heads/$b")"
+  hold_since "$b" "$base" "$agent_head"
   verify_autofix "$wt" "$b" || die "verify failed ($VERIFY_CMD); the commit is kept in $wt, nothing pushed"
   git config "branch.$b.sd-ci-fix" "$sha fixed"
   if $no_publish; then echo "not pushed (--no-publish): sd act push when ready"; return; fi
@@ -1685,6 +1690,15 @@ hold_after() {
   hits=$(printf '%s\n' "$prev" "$hits" | sed '/^$/d' | sort -u)
   git config "branch.$b.sd-held" "$(git rev-parse "refs/heads/$b")"$'\n'"$hits"
   echo "held: $(hold_say "$hits")"
+}
+
+# hold_since <branch> <base> <since>: hold_after over <since>..the branch, if
+# it moved. Each agent step runs it right after the harness returns, before
+# any outcome can die (the agent may commit itself: the deny is no
+# guarantee), and again from there over the pipeline's own commit.
+hold_since() {
+  [[ $(git rev-parse "refs/heads/$1") != "$3" ]] || return 0
+  hold_after "$1" "$2" "$(git diff --name-only --no-renames "$3" "refs/heads/$1")"
 }
 
 # hold_gate <branch> <doing>: refuse <doing> while a hold is active.

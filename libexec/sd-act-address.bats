@@ -299,6 +299,14 @@ remote_feat() { git -C "$TMP/origin.git" rev-parse feat; }
   [ "$(git config --get branch.feat.sd-held)" = "$(git rev-parse HEAD)"$'\n'".rwx/tests.yml" ]
 }
 
+@test "a CI config change the agent committed itself before giving up is held (#124)" {
+  printf '#!/usr/bin/env bash\nmkdir -p .rwx && echo "tasks: []" > .rwx/tests.yml\ngit add -A && git commit -qm "agent made it"\n' > "$FX/agent"
+  agent_result '{outcome: "gave-up", commit_message: null, summary: "lost", items: []}'
+  run "$SD_ACT" address
+  [ "$status" -ne 0 ]
+  [ "$(git config --get branch.feat.sd-held)" = "$(git rev-parse HEAD)"$'\n'".rwx/tests.yml" ]
+}
+
 @test "a rewritten branch of our own is pushed with a lease, like sd act push" {
   git commit -q --amend -m "feat, reworded"
   run "$SD_ACT" address
