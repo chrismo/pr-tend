@@ -26,7 +26,11 @@
 #             (sd config files prints the paths)
 #   global    ~/.config/sheepdog/config.json ($SHEEPDOG_CONFIG, $XDG_CONFIG_HOME)
 #   defaults  harness claude; settings.remote origin, stepTimeout 1800,
-#             stepBudget 0 (USD per claude step; 0 is no cap), reviewRounds 3,
+#             stepBudget 5 (USD per claude step; 0 is no cap), branchBudget
+#             25 (USD a branch's steps may spend before sd state hands them
+#             to chrismo; 0 is none), forkLimit 100000 (tokens of context a
+#             step may inherit before it starts a new session; 0 is none),
+#             reviewRounds 3,
 #             botTimeout 3600 (seconds to wait on the review bot), interval
 #             300, vacuumAfter 604800, rateLimitFloor 250 (GraphQL points
 #             under which sd watch stops a pass), replyPrefix "🤖 "; the

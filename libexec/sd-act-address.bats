@@ -61,7 +61,7 @@ while (( i < $# )); do
       i=$((i + 1))
       while (( i < $# )) && [[ ${args[i]} != -* ]]; do i=$((i + 1)); done
       continue ;;
-    --session-id|--resume|--output-format|--json-schema|--permission-mode|--model|--effort|--max-turns)
+    --session-id|--resume|--output-format|--json-schema|--permission-mode|--model|--effort|--max-turns|--max-budget-usd)
       i=$((i + 2)); continue ;;
     -*) ;;
     *) prompt=${args[i]} ;;
@@ -321,6 +321,22 @@ remote_feat() { git -C "$TMP/origin.git" rev-parse feat; }
   run "$SD_ACT" address
   [ "$status" -eq 0 ]
   grep -qx -- --resume "$FX/claude.args" || false
+  grep -qx -- "$sid" "$FX/claude.args"
+}
+
+@test "claude: a session past settings.forkLimit tokens isn't resumed; a new one starts (#121)" {
+  export CLAUDE_CONFIG_DIR="$TMP/claude"
+  git config branch.feat.sd-session 11111111-2222-4333-8444-555555555555
+  mkdir -p "$CLAUDE_CONFIG_DIR/projects/-repo"
+  echo '{"message":{"role":"assistant","usage":{"input_tokens":3,"cache_read_input_tokens":2000,"output_tokens":10}},"type":"assistant"}' \
+    > "$CLAUDE_CONFIG_DIR/projects/-repo/11111111-2222-4333-8444-555555555555.jsonl"
+  "$SD_CONFIG" set --global --json settings.forkLimit 2000
+  run --separate-stderr "$SD_ACT" address
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"past settings.forkLimit (2000): starting a new one"* ]]
+  grep -qx -- --session-id "$FX/claude.args" || false
+  sid=$(git config branch.feat.sd-session)
+  [ "$sid" != 11111111-2222-4333-8444-555555555555 ]
   grep -qx -- "$sid" "$FX/claude.args"
 }
 

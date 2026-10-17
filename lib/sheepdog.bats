@@ -13,6 +13,10 @@ setup() {
   export GIT_CONFIG_SYSTEM=/dev/null
   printf '[user]\n\temail = t@example.com\n\tname = Tester\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
   export SHEEPDOG_CONFIG="$TMP/global.json" SHEEPDOG_STATE_DIR="$TMP/state"
+  # Where the harnesses keep their transcripts (harness_tally).
+  export CLAUDE_CONFIG_DIR="$TMP/claude" PI_CODING_AGENT_SESSION_DIR="$TMP/pi"
+  # Set when sheepdog runs these tests from its own step.
+  unset HARNESS_STEP HARNESS_BRANCH
   git init -q "$TMP/repo" && cd "$TMP/repo"
   git commit -q --allow-empty -m init
   git switch -qc feat && git commit -q --allow-empty -m one
@@ -337,15 +341,31 @@ EOF
   [ "$(cat "$FX/key")" = sk-paid ]
 }
 
-@test "harness_run: settings.stepBudget caps a claude step's spend; 0 is no cap" {
+@test "harness_run: settings.stepBudget caps a claude step's spend, 5 USD by default; 0 is no cap" {
   harness_stubs
   run harness_run claude sid1 new 30 "do it" '{}'
   [ "$status" -eq 0 ]
-  ! grep -q -- --max-budget-usd "$FX/args" || false
+  [ "$(grep -A1 -x -- --max-budget-usd "$FX/args" | tail -1)" = 5 ]
   echo '{"settings": {"stepBudget": 2.5}}' > "$SHEEPDOG_CONFIG"
   run harness_run claude sid1 new 30 "do it" '{}'
   [ "$status" -eq 0 ]
   [ "$(grep -A1 -x -- --max-budget-usd "$FX/args" | tail -1)" = 2.5 ]
+  echo '{"settings": {"stepBudget": 0}}' > "$SHEEPDOG_CONFIG"
+  run harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -eq 0 ]
+  ! grep -q -- --max-budget-usd "$FX/args" || false
+}
+
+@test "harness_run: a --max-budget-usd in harnesses.claude.args replaces stepBudget's" {
+  harness_stubs
+  run harness_run claude sid1 new 30 "do it" '{}' '{"harness": "claude", "args": "--verbose --max-budget-usd 10"}'
+  [ "$status" -eq 0 ]
+  [ "$(grep -cx -- --max-budget-usd "$FX/args")" -eq 1 ]
+  [ "$(grep -A1 -x -- --max-budget-usd "$FX/args" | tail -1)" = 10 ]
+  run harness_run claude sid1 new 30 "do it" '{}' '{"harness": "claude", "args": "--max-budget-usd=10"}'
+  [ "$status" -eq 0 ]
+  ! grep -qx -- --max-budget-usd "$FX/args" || false
+  grep -qx -- --max-budget-usd=10 "$FX/args"
 }
 
 @test "harness_run: pi has no budget flag" {
@@ -386,19 +406,23 @@ EOF
   [ ! -e "$FX/args" ]
 }
 
-@test "harness_run: every claude step appends its usage to usage.tsv" {
+# usage_last <expr>: <expr> over usage.sup's last record, printed raw.
+usage_last() { prc_super -i sup -f line -c "$PRC_FNS"$'\n'"tail 1 | values $1" "$SHEEPDOG_STATE_DIR/usage.sup"; }
+usage_count() { prc_super -i sup -f line -c 'count()' "$SHEEPDOG_STATE_DIR/usage.sup"; }
+
+@test "harness_run: every claude step appends a typed record to usage.sup, one line each" {
   harness_stubs
   echo '{"type": "result", "is_error": false, "structured_output": {"ok": true}, "total_cost_usd": 0.25, "duration_ms": 4321, "num_turns": 3,
          "usage": {"input_tokens": 10, "cache_creation_input_tokens": 200, "cache_read_input_tokens": 3000, "output_tokens": 40}}' > "$FX/out"
   HARNESS_STEP=implement run harness_run claude sid1 resume 30 "do it" '{}'
   [ "$status" -eq 0 ]
-  [ "$(head -1 "$SHEEPDOG_STATE_DIR/usage.tsv")" = $'time\trepo\tbranch\tstep\tharness\tsession\tmode\tstatus\tcost_usd\tinput\tcache_create\tcache_read\toutput\tduration_ms\tturns' ]
-  line=$(sed -n 2p "$SHEEPDOG_STATE_DIR/usage.tsv")
-  [[ $line =~ ^20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:]+Z$'\t'"$TMP/repo"$'\tfeat\timplement\tclaude\tsid1\tresume\t0\t0.25\t10\t200\t3000\t40\t4321\t3'$ ]]
+  [ "$(wc -l < "$SHEEPDOG_STATE_DIR/usage.sup")" -eq 1 ]
+  [ "$(usage_last 'typeof(time) == <time> and typeof(cost_usd) == <float64> and typeof(input) == <int64> and estimated == false')" = true ]
+  [ "$(usage_last 'f"{repo}|{branch}|{step}|{harness}|{session}|{mode}|{status}|{cost_usd}|{input}|{cache_create}|{cache_read}|{output}|{duration_ms}|{turns}"')" \
+    = "$TMP/repo|feat|implement|claude|sid1|resume|0|0.25|10|200|3000|40|4321|3" ]
   run harness_run claude sid1 resume 30 "again" '{}'
-  [ "$(wc -l < "$SHEEPDOG_STATE_DIR/usage.tsv")" -eq 3 ]
-  [[ "$(sed -n 3p "$SHEEPDOG_STATE_DIR/usage.tsv")" == *$'\tclaude\tsid1\tresume\t0\t0.25\t'* ]]
-  [[ "$(sed -n 3p "$SHEEPDOG_STATE_DIR/usage.tsv")" == *$'\tfeat\t\tclaude\t'* ]]
+  [ "$(wc -l < "$SHEEPDOG_STATE_DIR/usage.sup")" -eq 2 ]
+  [ "$(usage_last 'f"{branch}|{nul(step)}|{session}"')" = "feat|true|sid1" ]
 }
 
 @test "harness_run: HARNESS_BRANCH names the branch when the worktree is detached (restack --resolve)" {
@@ -406,22 +430,180 @@ EOF
   git switch -q --detach
   HARNESS_BRANCH=feat run harness_run claude sid1 resume 30 "do it" '{}'
   [ "$status" -eq 0 ]
-  [[ "$(sed -n 2p "$SHEEPDOG_STATE_DIR/usage.tsv")" == *$'\tfeat\t\tclaude\tsid1\t'* ]]
+  [ "$(usage_last branch)" = feat ]
   run harness_run claude sid1 resume 30 "do it" '{}'
-  [[ "$(sed -n 3p "$SHEEPDOG_STATE_DIR/usage.tsv")" == *$'\t\t\tclaude\tsid1\t'* ]]
+  [ "$(usage_count)" = 2 ]
+  [ "$(usage_last 'nul(branch)')" = true ]
 }
 
-@test "harness_run: a failed step is logged with its status, and pi's row has no cost" {
+@test "harness_run: a failed step is logged with its status, and pi's record has no cost without a transcript" {
   harness_stubs
   echo 1 > "$FX/status"
   run harness_run claude sid1 new 30 "do it" '{}'
   [ "$status" -ne 0 ]
-  [[ "$(sed -n 2p "$SHEEPDOG_STATE_DIR/usage.tsv")" == *$'\tclaude\tsid1\tnew\t1\t'* ]]
+  [ "$(usage_last 'f"{harness}|{session}|{mode}|{status}"')" = "claude|sid1|new|1" ]
   rm "$FX/status"
   printf 'Done.\n\n```json\n{"ok": true}\n```\n' > "$FX/out"
   run harness_run pi sid2 new 30 "do it" '{}'
   [ "$status" -eq 0 ]
-  [[ "$(sed -n 3p "$SHEEPDOG_STATE_DIR/usage.tsv")" == *$'\tpi\tsid2\tnew\t0\t\t\t\t\t\t\t' ]]
+  [ "$(usage_last 'f"{harness}|{session}|{status}|{nul(cost_usd)}|{nul(input)}|{nul(context)}"')" = "pi|sid2|0|true|true|true" ]
+}
+
+@test "harness_tally: claude's context is its session's last turn, read from the transcript" {
+  run harness_tally claude sid1
+  [ "$output" = '{}' ]
+  mkdir -p "$CLAUDE_CONFIG_DIR/projects/-repo"
+  cat > "$CLAUDE_CONFIG_DIR/projects/-repo/sid1.jsonl" <<'EOF'
+{"type":"user","message":{"role":"user","content":"do it"}}
+{"parentUuid":"a","isSidechain":false,"message":{"role":"assistant","usage":{"input_tokens":5,"cache_creation_input_tokens":1000,"cache_read_input_tokens":0,"output_tokens":50}},"type":"assistant"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"{\"type\":\"assistant\"}"}]}}
+{"parentUuid":"b","isSidechain":false,"message":{"role":"assistant","usage":{"input_tokens":2,"cache_creation_input_tokens":300,"cache_read_input_tokens":120000,"output_tokens":700}},"type":"assistant"}
+{"type":"progress","data":{"message":{"type":"assistant","message":{"usage":{"input_tokens":999999}}}}}
+EOF
+  run harness_tally claude sid1
+  [ "$status" -eq 0 ]
+  [ "$(prc_val "$output" context)" = 121002 ]
+}
+
+@test "harness_tally: claude's synthetic entries (an API error, e.g. prompt too long) are neither the context nor a turn" {
+  mkdir -p "$CLAUDE_CONFIG_DIR/projects/-repo"
+  cat > "$CLAUDE_CONFIG_DIR/projects/-repo/sid1.jsonl" <<'EOF'
+{"message":{"role":"assistant","model":"claude-opus","usage":{"input_tokens":2,"cache_read_input_tokens":190000,"output_tokens":8}},"type":"assistant"}
+{"message":{"role":"assistant","model":"<synthetic>","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}},"type":"assistant"}
+EOF
+  run harness_tally claude sid1
+  [ "$status" -eq 0 ]
+  [ "$(prc_val "$output" 'f"{context}|{entries}"')" = "190010|1" ]
+}
+
+@test "harness_run: a claude step that got only an API error isn't charged its cap" {
+  harness_stubs
+  claude_stub_appends sid1 '{"message":{"role":"assistant","model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0}},"type":"assistant"}'
+  run harness_run claude sid1 resume 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [ "$(usage_last 'f"{nul(cost_usd)}|{estimated}"')" = "true|false" ]
+}
+
+@test "harness_tally: pi's cost and tokens summed over its transcript, its context the last turn's" {
+  mkdir -p "$PI_CODING_AGENT_SESSION_DIR/--repo--"
+  cat > "$PI_CODING_AGENT_SESSION_DIR/--repo--/2026-10-17T00-00-00-000Z_sid2.jsonl" <<'EOF'
+{"type":"session","id":"sid2"}
+{"type":"message","message":{"role":"user","content":"do it"}}
+{"type":"message","message":{"role":"assistant","usage":{"input":12937,"output":21,"cacheRead":0,"cacheWrite":0,"totalTokens":12958,"cost":{"total":0.002}}}}
+{"type":"message","message":{"role":"assistant","usage":{"input":1473,"output":44,"cacheRead":11520,"cacheWrite":10,"totalTokens":13047,"cost":{"total":0.0005}}}}
+EOF
+  run harness_tally pi sid2
+  [ "$status" -eq 0 ]
+  [ "$(prc_val "$output" 'f"{cost}|{input}|{cache_create}|{cache_read}|{output}|{turns}|{context}"')" = "0.0025|14410|10|11520|65|2|13047" ]
+}
+
+@test "harness_run: a pi step's usage is what its transcript gained during the step" {
+  harness_stubs
+  local t="$PI_CODING_AGENT_SESSION_DIR/--repo--/2026-10-17T00-00-00-000Z_sid2.jsonl"
+  mkdir -p "${t%/*}"
+  echo '{"type":"message","message":{"role":"assistant","usage":{"input":100,"output":10,"cacheRead":0,"cacheWrite":0,"totalTokens":110,"cost":{"total":0.5}}}}' > "$t"
+  # The stub's step adds a turn to the transcript.
+  echo '{"type":"message","message":{"role":"assistant","usage":{"input":20,"output":5,"cacheRead":100,"cacheWrite":0,"totalTokens":125,"cost":{"total":0.25}}}}' > "$FX/append"
+  cat > "$TMP/fakebin/pi" <<EOF
+#!/usr/bin/env bash
+cat "\$FX/append" >> '$t'
+cat "\$FX/out"
+EOF
+  printf 'Done.\n\n```json\n{"ok": true}\n```\n' > "$FX/out"
+  run harness_run pi sid2 resume 30 "do it" '{}'
+  [ "$status" -eq 0 ]
+  [ "$(usage_last 'f"{cost_usd}|{input}|{cache_read}|{output}|{turns}|{context}|{duration_ms >= 0}"')" = "0.25|20|100|5|1|125|true" ]
+}
+
+@test "harness_run: a claude record carries its session's context, from the transcript" {
+  harness_stubs
+  mkdir -p "$CLAUDE_CONFIG_DIR/projects/-repo"
+  echo '{"message":{"role":"assistant","usage":{"input_tokens":1,"cache_creation_input_tokens":2,"cache_read_input_tokens":3,"output_tokens":4}},"type":"assistant"}' \
+    > "$CLAUDE_CONFIG_DIR/projects/-repo/sid1.jsonl"
+  run harness_run claude sid1 new 30 "do it" '{}'
+  [ "$status" -eq 0 ]
+  [ "$(usage_last context)" = 10 ]
+}
+
+@test "branch_spend: this repo's branch's cost_usd summed over usage.sup; 0 with none" {
+  run branch_spend feat
+  [ "$status" -eq 0 ]
+  [ "$output" = 0 ]
+  mkdir -p "$SHEEPDOG_STATE_DIR"
+  cat > "$SHEEPDOG_STATE_DIR/usage.sup" <<EOF
+{time:2026-10-16T20:33:06Z,repo:"$TMP/repo",branch:"feat",step:"review",harness:"claude",session:"a",mode:"new",status:0,cost_usd:1.25,input:1}
+{time:2026-10-16T20:34:06Z,repo:"$TMP/repo",branch:"other",step:"review",harness:"claude",session:"b",mode:"new",status:0,cost_usd:4.,input:1}
+{time:2026-10-16T20:35:06Z,repo:"/elsewhere",branch:"feat",step:"review",harness:"claude",session:"c",mode:"new",status:0,cost_usd:8.,input:1}
+{time:2026-10-16T20:36:06Z,repo:"$TMP/repo",branch:"feat",step:"implement",harness:"pi",session:"d",mode:"new",status:0,cost_usd:null,input:null}
+{time:2026-10-16T20:37:06Z,repo:"$TMP/repo",branch:"feat",step:"implement",harness:"claude",session:"a",mode:"resume",status:1,cost_usd:0.5,input:1}
+EOF
+  run branch_spend feat
+  [ "$status" -eq 0 ]
+  [ "$output" = 1.75 ]
+}
+
+@test "branch_spend: a line that isn't a whole record (a cut-off append, a stray edit) is skipped, with a warning" {
+  mkdir -p "$SHEEPDOG_STATE_DIR"
+  cat > "$SHEEPDOG_STATE_DIR/usage.sup" <<EOF
+{time:2026-10-16T20:33:06Z,repo:"$TMP/repo",branch:"feat",step:"review",harness:"claude",session:"a",mode:"new",status:0,cost_usd:1.25}
+not sup {
+{time:2026-10-16T20:34:06Z,repo:"$TMP/repo",branch:"fe
+{time:2026-10-16T20:35:06Z,repo:"$TMP/repo",branch:"feat",step:"review",harness:"claude",session:"a",mode:"new",status:0,cost_usd:0.5}
+EOF
+  run --separate-stderr branch_spend feat
+  [ "$status" -eq 0 ]
+  [ "$output" = 1.75 ]
+  [[ "$stderr" == *"2 line(s) of $SHEEPDOG_STATE_DIR/usage.sup aren't usage records; their cost isn't counted"* ]]
+  # Shaped like a record but not one: the file can't be read.
+  echo '{time:soon}' >> "$SHEEPDOG_STATE_DIR/usage.sup"
+  run branch_spend feat
+  [ "$status" -ne 0 ]
+}
+
+# claude_stub_appends <session-id> <transcript-line|"">: a claude stub that
+# adds the line to the session's transcript, then fails without a result, as a
+# step killed by stepTimeout does.
+claude_stub_appends() {
+  local t="$CLAUDE_CONFIG_DIR/projects/-repo/$1.jsonl"
+  mkdir -p "${t%/*}"
+  echo '{"message":{"role":"assistant","usage":{"input_tokens":1,"output_tokens":1}},"type":"assistant"}' > "$t"
+  printf '%s\n' "$2" > "$FX/append"
+  cat > "$TMP/fakebin/claude" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" > "\$FX/args"
+grep . "\$FX/append" >> '$t'
+echo "timed out after 30s" >&2
+exit 124
+EOF
+}
+
+@test "harness_run: a claude step that ran turns but printed no result (timed out) is charged its cap, marked estimated" {
+  harness_stubs
+  claude_stub_appends sid1 '{"message":{"role":"assistant","usage":{"input_tokens":9,"output_tokens":9}},"type":"assistant"}'
+  run harness_run claude sid1 resume 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [ "$(usage_last 'f"{typeof(cost_usd)}|{cost_usd == 5.}|{estimated}|{nul(input)}"')" = "<float64>|true|true|true" ]
+  # With no cap there's nothing to charge: unknown, but still marked.
+  echo '{"settings": {"stepBudget": 0}}' > "$SHEEPDOG_CONFIG"
+  run harness_run claude sid1 resume 30 "do it" '{}'
+  [ "$(usage_last 'f"{nul(cost_usd)}|{estimated}"')" = "true|true" ]
+}
+
+@test "harness_run: a timed-out claude step whose cap came from harnesses.claude.args is charged that cap" {
+  harness_stubs
+  claude_stub_appends sid1 '{"message":{"role":"assistant","usage":{"input_tokens":9,"output_tokens":9}},"type":"assistant"}'
+  run harness_run claude sid1 resume 30 "do it" '{}' '{"harness": "claude", "args": "--verbose --max-budget-usd 7.5"}'
+  [ "$(usage_last 'f"{cost_usd == 7.5}|{estimated}"')" = "true|true" ]
+  run harness_run claude sid1 resume 30 "do it" '{}' '{"harness": "claude", "args": "--max-budget-usd=2"}'
+  [ "$(usage_last 'f"{cost_usd == 2.}|{estimated}"')" = "true|true" ]
+}
+
+@test "harness_run: a claude step that failed before any turn costs nothing, and isn't an estimate" {
+  harness_stubs
+  claude_stub_appends sid1 ""
+  run harness_run claude sid1 resume 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [ "$(usage_last 'f"{nul(cost_usd)}|{estimated}"')" = "true|false" ]
 }
 
 @test "harness_run: a successful run keeps the harness's stderr off the terminal" {

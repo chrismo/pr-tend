@@ -11,8 +11,8 @@
 # the output of the first.
 #
 # With no arguments, the built-in list: every `read -r -d '' NAME <<'EOF'`
-# query in libexec/sd-state, libexec/sd-act and libexec/sd-watch, lib/next.sh's
-# PRN_QUERY and lib/sheepdog.sh's FLAG_LINES, each over its ci/fixtures/*.json input; the field picks
+# query in libexec/sd-state, libexec/sd-act, libexec/sd-watch and
+# lib/sheepdog.sh, and lib/next.sh's PRN_QUERY, each over its ci/fixtures/*.json input; the field picks
 # (prc_val) and one-line queries use nothing these don't. Mode json (default)
 # runs the query through prc_json, line through prc_line. One line per
 # filter, then "super-stress: <filters> filters, <runs> runs each, <failures>
@@ -78,6 +78,7 @@ builtin_list() {
   add sd-act:NUMBERED_Q "$(heredoc "$act" NUMBERED_Q)" "$FIX/numbered.json"
   add sd-act:ANSWERS_Q "$(heredoc "$act" ANSWERS_Q)" "$FIX/answers.json"
   add sd-act:ANSWERS_REPORT "$(heredoc "$act" ANSWERS_REPORT)" "$FIX/answered.json" line
+  add sheepdog:USAGE_Q "$(heredoc "$ROOT/lib/sheepdog.sh" USAGE_Q)" "$FIX/usage.json"
   printf '%s\n' "$PRN_QUERY" > "$WORK/next.PRN_QUERY.spq"
   add next:PRN_QUERY "$WORK/next.PRN_QUERY.spq" "$FIX/next.json"
 }

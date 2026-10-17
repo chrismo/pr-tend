@@ -266,6 +266,45 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(step read cmd '.threads.owed_bot = 2' '.threads.info = 2')" = "sd act ack" ]
 }
 
+@test "past settings.branchBudget: one you step in place of the agent steps; run steps still run (#121)" {
+  local over='.spend = {"usd": 25.456, "budget": 25}'
+  [ "$(keys "$over" '.ci.verdict = "red"' '.ci.failing = ["test"]' '.threads.owed_bot = 2')" = budget ]
+  [ "$(step budget who "$over" '.threads.owed_bot = 2')" = you ]
+  [ "$(step budget say "$over" '.threads.owed_bot = 2')" \
+    = 'spent $25.46 on this branch, past settings.branchBudget ($25.00): raise it, or take over' ]
+  [ "$(step budget cmd "$over" '.threads.owed_bot = 2')" = "sd act attach" ]
+  # a restack ahead of the agent's steps, and a push after them, stay
+  [ "$(keys "$over" '.pr.merge_state = "BEHIND"' '.sync.up_to_date = false' '.sync.behind = 3' '.threads.owed_bot = 2')" = "behind budget" ]
+  [ "$(keys "$over" '.threads.owed_bot = 1' '.push.ahead = 1' '.review.local.status = "uncovered"')" = "budget push" ]
+  # nothing that spends: no budget step
+  [ "$(keys "$over")" = ready ]
+}
+
+@test "past settings.branchBudget: open-pr is chrismo's too, since ship may describe (#121)" {
+  local nopr=('.pr = null' '.push = {"remote_sha": null, "ahead": 2, "behind": 0, "diverged": false, "remote_ours": null}')
+  [ "$(keys "${nopr[@]}")" = "push open-pr" ]
+  [ "$(keys '.spend = {"usd": 30, "budget": 25}' "${nopr[@]}")" = "push budget" ]
+  # the parent's ship spends on the parent, against its own budget
+  [ "$(keys '.spend = {"usd": 30, "budget": 25}' "${nopr[@]}" \
+            '.parent = {"name": "p", "source": "config", "merged": false, "local": true, "on_remote": false, "unpushed": true, "pr": null}' \
+            '.sync = {"target": "p", "default": "main", "behind": null, "up_to_date": null, "conflict": null, "old_base": null}')" = ship-parent ]
+}
+
+@test "spend unknown (usage.sup unreadable) with a budget: held as if over it (#121)" {
+  local unknown='.spend = {"usd": null, "budget": 25}'
+  [ "$(keys "$unknown" '.threads.owed_bot = 2')" = budget ]
+  [ "$(step budget say "$unknown" '.threads.owed_bot = 2')" \
+    = "can't tell what this branch has spent (sd state's errors say why), so nothing spends: fix the usage record, or take over" ]
+  # no budget, nothing to hold
+  [ "$(keys '.spend = {"usd": null, "budget": 0}' '.threads.owed_bot = 2')" = bot ]
+}
+
+@test "within settings.branchBudget, or with none (0): the agent steps as usual" {
+  [ "$(keys '.spend = {"usd": 24.9, "budget": 25}' '.threads.owed_bot = 2')" = bot ]
+  [ "$(keys '.spend = {"usd": 99, "budget": 0}' '.threads.owed_bot = 2')" = bot ]
+  [ "$(keys '.spend = null' '.threads.owed_bot = 2')" = bot ]
+}
+
 @test "blocking and info bot items together: address takes them all" {
   [ "$(keys '.threads.owed_bot = 3' '.threads.info = 1')" = bot ]
   [ "$(step bot say '.threads.owed_bot = 3' '.threads.info = 1')" = "address 3 bot items" ]

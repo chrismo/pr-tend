@@ -11,7 +11,7 @@
 # is always piped.
 
 PRC_DEFAULTS='{"harness": "claude",
-  "settings": {"remote": "origin", "stepTimeout": 1800, "stepBudget": 0, "reviewRounds": 3, "botTimeout": 3600, "interval": 300, "vacuumAfter": 604800, "rateLimitFloor": 250, "replyPrefix": "🤖 ",
+  "settings": {"remote": "origin", "stepTimeout": 1800, "stepBudget": 5, "branchBudget": 25, "forkLimit": 100000, "reviewRounds": 3, "botTimeout": 3600, "interval": 300, "vacuumAfter": 604800, "rateLimitFloor": 250, "replyPrefix": "🤖 ",
                "verify": "", "autofix": "", "localReview": "", "botCommand": "", "notify": "",
                "reviewPrompt": "", "implementPrompt": "", "reviewFixPrompt": "", "describePrompt": "",
                "addressPrompt": "", "resolvePrompt": "", "ciFixPrompt": "",
@@ -28,7 +28,7 @@ PRC_SKELETON='{"harness": "claude", "harnesses": {"claude": {}, "pi": {}}, "step
 PRC_HARNESSES=(claude pi)
 PRC_STEPS=(address ci-fix describe implement review)
 PRC_GLOBAL_ONLY=(remote interval notify vacuumAfter rateLimitFloor)
-PRC_SETTINGS='stepTimeout?:uint64,stepBudget?:float64,reviewRounds?:uint64,replyPrefix?:string,verify?:string,autofix?:string,localReview?:string,botCommand?:string,botTimeout?:uint64,
+PRC_SETTINGS='stepTimeout?:uint64,stepBudget?:float64,branchBudget?:float64,forkLimit?:uint64,reviewRounds?:uint64,replyPrefix?:string,verify?:string,autofix?:string,localReview?:string,botCommand?:string,botTimeout?:uint64,
               reviewPrompt?:string,implementPrompt?:string,reviewFixPrompt?:string,describePrompt?:string,
               addressPrompt?:string,resolvePrompt?:string,ciFixPrompt?:string,
               botLogin?:[string],botIgnore?:[string],botIgnoreBody?:[string],implementAllow?:[string],
