@@ -143,7 +143,7 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
 
 @test "ship: a stacked branch opens its PR on the parent" {
   git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
-  git switch -q feat && git config branch.feat.sd-parent A
+  git switch -q feat && git rebase -q A && git config branch.feat.sd-parent A
   run "$SD_ACT" ship
   [ "$status" -eq 0 ]
   [[ "$(calls)" == "pr create --draft --base A --head feat "* ]]
@@ -235,7 +235,7 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   echo d >> file.txt && git commit -qam "add d"
   open_pr feat main 7
   git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
-  git switch -q feat && git config branch.feat.sd-parent A
+  git switch -q feat && git rebase -q A && git config branch.feat.sd-parent A
   run "$SD_ACT" ship
   [ "$status" -eq 0 ]
   [ "$(remote feat)" = "$(git rev-parse HEAD)" ]
@@ -428,7 +428,7 @@ tracks() { git rev-parse --abbrev-ref "$1@{upstream}" 2>/dev/null; }
 
 @test "ship: twice on a published branch tracking origin/main: tracks origin/feat, nothing else changes" {
   git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
-  git switch -q feat && git config branch.feat.sd-parent A
+  git switch -q feat && git rebase -q A && git config branch.feat.sd-parent A
   git push -q origin feat 2>/dev/null
   git branch -q --set-upstream-to=origin/main feat
   open_pr feat A 7
