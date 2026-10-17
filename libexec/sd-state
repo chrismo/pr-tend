@@ -306,8 +306,10 @@ else
   # head (not the pin: the head is what HEAD was just shown to hold).
   elif [[ -n $base_pin && $parent_merged == true ]] && parent_in_head; then
     old_base=$merged_head by_tree=true
-  # Not with the default branch once a stacked parent merged: that replays the parent's commits.
-  elif [[ $target == "$parent" ]]; then
+  # Not with the default branch once a stacked parent merged: that replays the
+  # parent's commits. Nor with an open stacked parent: once it's rewritten, the
+  # merge-base lies below its old commits, which a restack would replay (#97).
+  elif [[ $target == "$parent" && $parent == "$default_branch" ]]; then
     old_base=$(git merge-base "$target_ref" "$head" || true)
   fi
 
@@ -326,7 +328,14 @@ else
     fi
   elif [[ -z $old_base ]]; then
     up_to_date=false
-    if [[ $target == "$parent" ]]; then
+    if [[ $parent != "$default_branch" && $target == "$parent" ]]; then
+      # A parent closed without merging needs a new target, not a pin.
+      if [[ $(prc_val "$parent_pr" 'on(state == "CLOSED")') == true ]]; then
+        errors+=("no base for $branch on $parent: $parent's PR #$(prc_val "$parent_pr" number) was closed without merging; decide what $branch targets")
+      elif [[ -z $base_pin ]]; then
+        errors+=("no base for $branch on $parent: no base pin, and no fork-point in $remote/$parent's reflog; if $parent wasn't rewritten, pin where $branch left it: git update-ref refs/sheepdog/$branch/base \$(git merge-base $remote/$parent $branch)")
+      fi
+    elif [[ $target == "$parent" ]]; then
       errors+=("no merge base with $remote/$target")
     elif [[ -z $base_pin ]]; then
       errors+=("no base for $branch on $parent: no base pin, and neither the merged parent's head nor its fork-point is in $branch's history")

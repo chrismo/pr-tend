@@ -680,15 +680,95 @@ squash_parent_away() {
   [[ "$(field '.errors | join(" ")')" == *"is no longer in feat's history"* ]]
 }
 
-@test "sync: stacked on an open parent, no pin or fork-point: falls back to the merge-base with the parent" {
-  local fork; fork=$(git rev-parse main)
+# Without a pin or a fork-point, the merge-base with an open parent can lie
+# below commits the branch holds from the parent's old head (#97).
+@test "sync: stacked on an open parent, no pin or fork-point: no fallback to the merge-base, and says why (#97)" {
   git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
   git switch -qc feat main && commit c.txt c
   git config branch.feat.sd-parent parent
   state
   [ "$(field .sync.target)" = parent ]
-  [ "$(field .sync.old_base)" = "$fork" ]
+  [ "$(field .sync.up_to_date)" = false ]
+  [ "$(field .sync.old_base)" = null ]
+  [[ "$(field '.errors | join(" ")')" == *"no base for feat on parent: no base pin, and no fork-point"* ]]
+}
+
+@test "sync: open parent, stale pin, no fork-point: only the stale-pin error (#97)" {
+  git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
+  git switch -qc feat main && commit c.txt c
+  git config branch.feat.sd-parent parent
+  local pin; pin=$(git rev-parse feat)
+  git update-ref refs/sheepdog/feat/base "$pin"
+  git commit -q --amend -m "rewritten"
+  state
+  [ "$(field .sync.old_base)" = null ]
+  [ "$(field '.errors | length')" = 1 ]
+  [[ "$(field '.errors[0]')" == *"base pin ${pin:0:7} is no longer in feat's history"* ]]
+}
+
+@test "sync: open parent amended and force-pushed, no pin, reflog gone: no old base below the parent's commits (#97)" {
+  git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  (cd "$TMP/other" && git fetch -q origin && git switch -qc parent origin/parent \
+     && git commit -q --amend -m "p1, amended" && git push -qf origin parent 2>/dev/null && git switch -q main)
+  git fetch -q
+  git reflog expire --expire=now --expire-unreachable=now refs/remotes/origin/parent
+  state
+  [ "$(field .sync.old_base)" = null ]
+  [[ "$(field '.errors | join(" ")')" == *"no base for feat on parent"* ]]
+}
+
+@test "sync: on an open parent's tip, no pin, reflog gone: up to date on the parent's tip, no error (#97)" {
+  git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  git reflog expire --expire=now --expire-unreachable=now refs/remotes/origin/parent
+  state
+  [ "$(field .sync.up_to_date)" = true ]
+  [ "$(field .sync.old_base)" = "$(git rev-parse origin/parent)" ]
   [ "$(field '.errors | length')" = 0 ]
+}
+
+@test "sync: stacked on an open parent, no pin, fork-point in the parent's reflog: the fork-point" {
+  git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
+  local p1; p1=$(git rev-parse parent)
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  (cd "$TMP/other" && git fetch -q origin && git switch -qc parent origin/parent \
+     && git commit -q --amend -m "p1, amended" && git push -qf origin parent 2>/dev/null && git switch -q main)
+  git fetch -q
+  state
+  [ "$(field .sync.old_base)" = "$p1" ]
+  [ "$(field '.errors | length')" = 0 ]
+}
+
+@test "sync: a parent closed without merging, no pin or fork-point: the error says the parent closed, NEXT says parent-closed (#97)" {
+  git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
+  git switch -qc feat && commit c.txt c
+  (cd "$TMP/other" && git fetch -q origin && git switch -qc parent origin/parent \
+     && git commit -q --allow-empty -m p2 && git push -q origin parent 2>/dev/null && git switch -q main)
+  git fetch -q
+  git reflog expire --expire=now --expire-unreachable=now refs/remotes/origin/parent
+  pr_fixture parent '.number = 3' '.state = "CLOSED"'
+  pr_fixture feat '.baseRefName = "parent"'
+  state
+  [ "$(field .sync.old_base)" = null ]
+  [ "$(field '.errors | join(" ")')" = "no base for feat on parent: parent's PR #3 was closed without merging; decide what feat targets" ]
+  [[ " $(field '[.next[].key] | join(" ")') " == *" parent-closed "* ]]
+}
+
+@test "sync: a parent closed without merging, no PR yet, no pin or fork-point: the error says the parent closed (#97)" {
+  git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  (cd "$TMP/other" && git fetch -q origin && git switch -qc parent origin/parent \
+     && git commit -q --allow-empty -m p2 && git push -q origin parent 2>/dev/null && git switch -q main)
+  git fetch -q
+  git reflog expire --expire=now --expire-unreachable=now refs/remotes/origin/parent
+  pr_fixture parent '.number = 3' '.state = "CLOSED"'
+  state
+  [[ "$(field '.errors | join(" ")')" == *"parent's PR #3 was closed without merging"* ]]
 }
 
 @test "sync: not stacked, pin lost: falls back to the merge-base, and reports the pin" {

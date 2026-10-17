@@ -207,8 +207,11 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(step conflict who "${STACKED[@]}" '.sync.conflict = true')" = agent ]
 }
 
-@test "behind with no old base: a plain rebase, which sd act restack refuses" {
-  [ "$(step behind cmd "${STACKED[@]}" '.sync.old_base = null')" = "git rebase origin/base" ]
+# A plain rebase there would replay a rewritten parent's old commits (#97).
+@test "behind with no old base: chrismo's, pointing at sd state's errors, no rebase" {
+  [ "$(step behind who "${STACKED[@]}" '.sync.old_base = null')" = you ]
+  [ "$(step behind say "${STACKED[@]}" '.sync.old_base = null')" = "restack onto base (3 behind): no base to restack from; see sd state's errors" ]
+  [ "$(step behind cmd "${STACKED[@]}" '.sync.old_base = null')" = "sd state --json" ]
 }
 
 @test "only behind the default branch: no step; main moves too often to chase" {
@@ -272,6 +275,17 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(step restack-undone cmd '.sync.undone = 1' '.sync.old_base = "0123456789abcdef0123"')" = "git rebase --onto origin/main 0123456789ab && sd act push" ]
   [ "$(keys '.sync.undone = 0')" = ready ]
   [ "$(keys '.sync.undone = 1' '.pr.merge_state = "BEHIND"')" = restack-undone ]
+}
+
+# On a stacked parent a plain rebase would replay a rewritten parent's old commits (#97).
+@test "a restack undone on a stacked branch with no old base: no rebase offered, pin by hand (#97)" {
+  local s=('.sync.undone = 1' '.sync.target = "base"' '.parent.name = "base"' '.sync.old_base = null')
+  [ "$(step restack-undone who "${s[@]}")" = you ]
+  [[ "$(step restack-undone say "${s[@]}")" == *"no base to redo it from on base: pin one by hand (git update-ref refs/sheepdog/feat/base <the commit feat left base at>), then sd act restack" ]] || false
+  [ "$(step restack-undone cmd "${s[@]}")" = null ]
+  local m=('.sync.undone = 1' '.parent.name = "base"' '.parent.merged = true' '.sync.old_base = null')
+  [ "$(step restack-undone cmd "${m[@]}")" = null ]
+  [[ "$(step restack-undone say "${m[@]}")" == *"no base to redo it from on main: pin one by hand (git update-ref refs/sheepdog/feat/base <the commit feat left base at>), then sd act restack" ]] || false
 }
 
 @test "the remote has commits this copy reset away (ours): force-push, which leases (#86)" {
