@@ -38,7 +38,9 @@ values {...s, remote}
       draft_ready:=(on(pr.draft) and not (push.remote_sha is null or n(push.ahead) > 0
                                            or (on(push.remote_ours) and n(push.behind) > 0 and n(push.ahead) == 0))
                     and not (on(push.remote_ours == false) and n(push.theirs) > 0)
-                    and (on(ci.verdict == "green") or on(ci.verdict == "none"))),
+                    and (on(ci.verdict == "green") or on(ci.verdict == "none"))
+                    -- sd state reads the required checks of every draft: null is a failed read
+                    and not on(ci.required is null)),
       review_required:=on(pr.review_decision == "REVIEW_REQUIRED"),
       stacked:=(on(pr.base != sync.default) and (on(parent.pr.state == "OPEN") or on(parent.merged))),
       parent_closed:=(on(pr.base != sync.default) and on(parent.pr.state == "CLOSED")),
@@ -89,6 +91,9 @@ values {...s, remote}
              "sd act restack") : null,
     has_pr and on(ci.verdict == "red") and on(ci.for_head) and not to_push
       ? step("ci-red", "agent", f"fix CI: {join(ci.failing, ", ")}", "sd act ci-fix") : null,
+    has_pr and on(ci.verdict == "blocked") and on(ci.for_head) and not to_push
+      ? step("ci-blocked", "you", f"CI blocked: {sj(coalesce(ci.blocked, []), ", ")} didn'"'"'t start or want approval; an agent can'"'"'t fix that",
+             "gh pr checks") : null,
     open and bot_blocking > 0
       ? step("bot", "agent", f"address {plural(threads.owed_bot, "bot item")}", "sd act address") : null,
     open and bot_blocking == 0 and n(threads.info) > 0
@@ -104,7 +109,8 @@ values {...s, remote}
              : f"push {plural(push.ahead, "commit")}", "sd act push") : null,
     pr is null and len(errors) == 0 and not parent_unpushed ? step("open-pr", "run", "ship: push, open a draft PR", "sd act ship") : null,
     has_pr and draft_ready and not need_review and not bot_due and not bot_waiting
-      ? step("draft", "run", "CI green and reviewed: mark the PR ready for review", "gh pr ready") : null,
+      ? step("draft", "run", f"{on(ci.verdict == "none") ? "reviewed, no CI checks" : "CI green and reviewed"}: mark the PR ready for review",
+             "gh pr ready") : null,
     open and fixing and not on(review.findings.declined) and review.findings.round < review.findings.cap
       ? step("review-fix", "agent", f"fix {plural(review.findings.n, "review finding")} (round {review.findings.round}/{review.findings.cap})",
              "sd act implement")
@@ -123,7 +129,12 @@ values {...s, remote}
       ? step("bot-silent", "you", f"the review bot hasn'"'"'t answered in {n(review.bot.waited) / 60} min: check it, trigger it again, or accept HEAD as reviewed (sd act review --accept)",
              "sd act trigger --force") : null,
     has_pr and not to_push and not held and (on(ci.verdict == "pending") or on(ci.for_head == false))
-      ? step("ci-wait", "wait", on(ci.verdict == "pending") ? "CI running" : "CI hasn'"'"'t reported on HEAD yet",
+      ? step("ci-wait", "wait", on(ci.verdict == "pending")
+             ? (len(coalesce(ci.pending, [])) == 0 and len(coalesce(ci.missing, [])) > 0
+                ? f"waiting on required check{len(ci.missing) == 1 ? "" : "s"} {sj(ci.missing, ", ")} to report{on(pr.draft)
+                    ? f"; if {len(ci.missing) == 1 ? "it never runs" : "they never run"} on a draft, undraft by hand (gh pr ready)" : ""}"
+                : "CI running")
+             : "CI hasn'"'"'t reported on HEAD yet",
              "gh pr checks --watch") : null,
     has_pr and parent_closed
       ? step("parent-closed", "you", f"{parent.name} (#{parent.pr.number}) was closed without merging: decide what this PR targets", null) : null,

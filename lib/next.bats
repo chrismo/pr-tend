@@ -243,6 +243,16 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(keys '.ci.verdict = "red"' '.ci.failing = ["test"]' '.ci.for_head = false')" = ci-wait ]
 }
 
+@test "blocked CI: chrismo's, since no agent fixes a check that didn't start or wants approval" {
+  local b=('.ci.verdict = "blocked"' '.ci.blocked = ["wf", "deploy"]')
+  [ "$(step ci-blocked who "${b[@]}")" = you ]
+  [ "$(step ci-blocked say "${b[@]}")" \
+    = "CI blocked: wf, deploy didn't start or want approval; an agent can't fix that" ]
+  [ "$(step ci-blocked cmd "${b[@]}")" = "gh pr checks" ]
+  [ "$(keys "${b[@]}" '.pr.draft = true' '.pr.merge_state = "DRAFT"')" = ci-blocked ]
+  [ "$(keys "${b[@]}" '.push.ahead = 1')" = push ]
+}
+
 @test "bot items: sd act address" {
   [ "$(step bot who '.threads.owed_bot = 3')" = agent ]
   [ "$(step bot say '.threads.owed_bot = 3')" = "address 3 bot items" ]
@@ -352,6 +362,9 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(step draft cmd '.pr.draft = true')" = "gh pr ready" ]
   [ "$(step draft say '.pr.draft = true')" = "CI green and reviewed: mark the PR ready for review" ]
   [ "$(keys '.pr.draft = true' '.ci.verdict = "none"')" = draft ]
+  [ "$(keys '.pr.draft = true' '.ci.verdict = "none"' '.ci.required = null')" = "" ]
+  [ "$(keys '.pr.draft = true' '.ci.verdict = "none"' '.ci.required = []')" = draft ]
+  [ "$(step draft say '.pr.draft = true' '.ci.verdict = "none"')" = "reviewed, no CI checks: mark the PR ready for review" ]
   [ "$(keys '.pr.draft = true' '.pr.merge_state = "DRAFT"' '.ci.verdict = "pending"')" = ci-wait ]
   [ "$(keys '.pr.draft = true' '.pr.merge_state = "DRAFT"' '.review.local = {sha: "x", status: "uncovered", uncovered: 1}')" = review ]
   [ "$(keys '.pr.draft = true' '.pr.merge_state = "DRAFT"' '.push.ahead = 1')" = push ]
@@ -521,6 +534,18 @@ ON_OPEN_PARENT=('.pr.base = "p"' '.sync.target = "p"'
   [ "$(step ci-wait who '.ci.verdict = "pending"')" = wait ]
   [ "$(keys '.ci.verdict = "pending"')" = ci-wait ]
   [ "$(keys '.ci.for_head = false')" = ci-wait ]
+}
+
+@test "CI waiting only on required checks to report: says which" {
+  [ "$(step ci-wait say '.ci.verdict = "pending"' '.ci.missing = ["test"]')" \
+    = "waiting on required check test to report" ]
+  [ "$(step ci-wait say '.ci.verdict = "pending"' '.ci.missing = ["test", "ext"]')" \
+    = "waiting on required checks test, ext to report" ]
+  # A draft's missing check may never come (a workflow that skips drafts, or
+  # filtered to other branches): the wait says how out, by hand.
+  [ "$(step ci-wait say '.pr.draft = true' '.ci.verdict = "pending"' '.ci.missing = ["test"]')" \
+    = "waiting on required check test to report; if it never runs on a draft, undraft by hand (gh pr ready)" ]
+  [ "$(step ci-wait say '.ci.verdict = "pending"' '.ci.missing = ["test"]' '.ci.pending = ["lint"]')" = "CI running" ]
 }
 
 @test "unpushed commits: push, not wait for CI that can't run yet" {

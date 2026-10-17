@@ -178,9 +178,9 @@ notified() { cat "$PS_FIXTURES/notified" 2>/dev/null || true; }
   [ -n "$(git for-each-ref refs/sheepdog/parked/)" ]
 }
 
-@test "glyph: CI red, conflict, human items, foreign push are ❌" {
+@test "glyph: CI red or blocked, conflict, human items, foreign push are ❌" {
   local a
-  for a in '.ci.verdict = "red"' '.sync.up_to_date = false | .sync.conflict = true' \
+  for a in '.ci.verdict = "red"' '.ci.verdict = "blocked" | .ci.blocked = ["wf"]' '.sync.up_to_date = false | .sync.conflict = true' \
            '.threads.owed_human = 1' '.push.behind = 1 | .push.theirs = 1 | .push.remote_ours = false'; do
     ps_fixture feat "$a"
     pass

@@ -36,8 +36,8 @@
 #         ✅ ready to merge  🏁 merged          🚫 closed
 #
 # Notified, once per lib/next.sh step entered (again only after it clears):
-#   ci-red conflict human foreign parent-closed restack-undone: ❌ the PR is
-#     stuck or wrong
+#   ci-red ci-blocked conflict human foreign parent-closed restack-undone: ❌ the
+#     PR is stuck or wrong
 #     until chrismo, or an agent chrismo starts, deals with it
 #   bot-silent: ❌ the review bot hasn't answered within settings.botTimeout
 #   merged ready: chrismo acts (clean up, merge)
@@ -103,7 +103,7 @@ VACUUM_LOG=
 read -r -d '' CLASSIFY <<'EOF' || true
 values {next: kind(next) == "array" ? next : []}
 | values {next, k: coalesce([unnest next | values key], []),
-          red: coalesce([unnest next | where key in ["ci-red", "conflict", "human", "foreign", "parent-closed", "review-decide", "restack-undone", "bot-silent"] | values {key, msg: say}], []),
+          red: coalesce([unnest next | where key in ["ci-red", "ci-blocked", "conflict", "human", "foreign", "parent-closed", "review-decide", "restack-undone", "bot-silent"] | values {key, msg: say}], []),
           waiting: len(coalesce([unnest next | where who != "wait"], [])) == 0}
 | values {carry: len(next) == 0 or "errors" in k or "stale" in k,
           keep: k == ["merge-wait"] or k == ["attached"] ? ["ready"] : [], ...(case
