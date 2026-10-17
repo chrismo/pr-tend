@@ -1132,7 +1132,7 @@ old_super() {
   write_branch feat '{"settings":{"flags":{"skips":"skip"}}}'
   run "$SD_CONFIG" get settings.flags.skips
   [ "$status" -eq 1 ]
-  [[ "$output" == *"settings.flags.skips"* ]]
+  [[ "$output" == *"settings.flags.skips"* ]] || false
   write_branch feat '{"settings":{"flags":{"skip":[]}}}'
   run "$SD_CONFIG" get settings.flags.skips
   [ "$status" -eq 1 ]

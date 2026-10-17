@@ -661,15 +661,20 @@ git_diff_lines() {
 # test-edit every commit in base..head that touched the file. 1 with a message
 # on an invalid pattern or a failed step.
 flags_json() {
-  local base=$1 hd=$2 cfg=$3 tests="" st a b p lines hits kind line n file new text sha cj out=""
+  local base=$1 hd=$2 cfg=$3 tests="" st a b p g changed lines hits kind line n file new text sha cj out=""
   local -a globs paths
   local -A touched
   [[ $(prc_val "$cfg" 'len(coalesce([unnest [...suppressions, ...skips] | where is_error(regexp(this, ""))], [])) == 0' 2>/dev/null) == true ]] \
     || { echo "settings.flags has an invalid regex: $cfg"; return 1; }
-  mapfile -t globs < <(prc_line 'unnest testFiles' "$cfg") || return 1
+  # Captured first: a failure inside < <( ) would go unseen.
+  g=$(prc_line 'unnest testFiles' "$cfg") || { echo "couldn't read settings.flags.testFiles"; return 1; }
+  [[ -z $g ]] || mapfile -t globs <<<"$g"
+  changed=$(git -c core.quotePath=false diff -M --name-status "$base" "$hd") \
+    || { echo "couldn't list the files ${base:0:7}..${hd:0:7} changes"; return 1; }
   while IFS=$'\t' read -r st a b; do
+    [[ -n $a ]] || continue
     for p in "$a" ${b:+"$b"}; do is_test "$p" "${globs[@]}" && tests+=$p$'\n'; done
-  done < <(git -c core.quotePath=false diff -M --name-status "$base" "$hd")
+  done <<<"$changed"
   lines=$(git_diff_lines "$base" "$hd" "$tests" | prc_strings) || { echo "couldn't read the diff"; return 1; }
   hits=$(prc_line "$FLAGS" "{\"flags\": $cfg, \"l\": $lines}") || { echo "couldn't match the diff"; return 1; }
   while IFS=$'\t' read -r kind line n file new text; do
@@ -678,7 +683,8 @@ flags_json() {
       if [[ -z ${touched[$file]+x} ]]; then
         paths=("$file")
         [[ $new == /dev/null || $new == "$file" ]] || paths+=("$new")
-        touched[$file]=$(git log --format=%H "$base..$hd" -- "${paths[@]}" | prc_strings) || return 1
+        touched[$file]=$(git log --format=%H "$base..$hd" -- "${paths[@]}" | prc_strings) \
+          || { echo "couldn't list the commits that touched $file"; return 1; }
       fi
       cj=${touched[$file]}
     else
@@ -699,7 +705,7 @@ flags_json() {
 flags=null flags_error=""
 if [[ -n ${old_base:-} ]]; then
   flag_cfg=$(prc_get settings.flags "$branch" false json) || die "sd config failed"
-  flags=$(flags_json "$old_base" "$head" "$flag_cfg") || { flags_error=$flags flags=null; }
+  flags=$(flags_json "$old_base" "$head" "$flag_cfg") || { flags_error=${flags:-the check failed} flags=null; }
 fi
 
 # ── assemble ─────────────────────────────────────────────────────────────────
