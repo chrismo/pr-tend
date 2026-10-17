@@ -465,6 +465,25 @@ EOF
   [ "$(prc_val "$output" context)" = 121002 ]
 }
 
+@test "harness_tally: claude's synthetic entries (an API error, e.g. prompt too long) are neither the context nor a turn" {
+  mkdir -p "$CLAUDE_CONFIG_DIR/projects/-repo"
+  cat > "$CLAUDE_CONFIG_DIR/projects/-repo/sid1.jsonl" <<'EOF'
+{"message":{"role":"assistant","model":"claude-opus","usage":{"input_tokens":2,"cache_read_input_tokens":190000,"output_tokens":8}},"type":"assistant"}
+{"message":{"role":"assistant","model":"<synthetic>","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}},"type":"assistant"}
+EOF
+  run harness_tally claude sid1
+  [ "$status" -eq 0 ]
+  [ "$(prc_val "$output" 'f"{context}|{entries}"')" = "190010|1" ]
+}
+
+@test "harness_run: a claude step that got only an API error isn't charged its cap" {
+  harness_stubs
+  claude_stub_appends sid1 '{"message":{"role":"assistant","model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0}},"type":"assistant"}'
+  run harness_run claude sid1 resume 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [ "$(usage_last 'f"{nul(cost_usd)}|{estimated}"')" = "true|false" ]
+}
+
 @test "harness_tally: pi's cost and tokens summed over its transcript, its context the last turn's" {
   mkdir -p "$PI_CODING_AGENT_SESSION_DIR/--repo--"
   cat > "$PI_CODING_AGENT_SESSION_DIR/--repo--/2026-10-17T00-00-00-000Z_sid2.jsonl" <<'EOF'

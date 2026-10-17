@@ -147,7 +147,8 @@ harness_transcript() {
 # cache_create, cache_read, output and turns, summed over the session. A grep
 # for the role first: a transcript runs to megabytes. claude's top-level type
 # is the record's; a nested one is a subagent's progress, and a quoted one a
-# tool result's text. Two passes each: an aggregate's collect has no order to
+# tool result's text. A "<synthetic>" model's entry is claude's note of an
+# API error (prompt too long), all zeros: no turn, and no context. Two passes each: an aggregate's collect has no order to
 # take the last from.
 harness_tally() {
   local f r ctx sel
@@ -155,7 +156,8 @@ harness_tally() {
   if [[ -n $f ]]; then
     case $1 in
       claude)
-        sel='where type == "assistant" and not on(isSidechain) and not nul(message.usage)'
+        sel='where type == "assistant" and not on(isSidechain) and not nul(message.usage)
+               and coalesce(message.model, "") != "<synthetic>"'
         ctx=$(grep -F '"type":"assistant"' "$f" | prc_line "$sel | tail 1
           | values n(message.usage.input_tokens) + n(message.usage.cache_creation_input_tokens)
                    + n(message.usage.cache_read_input_tokens) + n(message.usage.output_tokens)" 2>/dev/null) || ctx=

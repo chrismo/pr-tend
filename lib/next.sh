@@ -19,9 +19,11 @@
 # Past settings.branchBudget (spend.budget; 0 is none), nothing spends tokens
 # on the branch: the first agent step becomes chrismo's, the rest go, and the
 # run steps stay (#121). So does open-pr: sd act ship describes the branch
-# when its description is stale, which spends; ship-parent's describe spends
-# on the parent, against its budget. spends() makes that swap, agent() for
-# agent steps; the dedupe at the end keeps the first.
+# when its description is stale, which spends. Spend that can't be read, with
+# a budget set, holds the same way: a cost guard fails closed. spends() makes
+# that swap, agent() for agent steps; the dedupe at the end keeps the first.
+# Not guarded: ship-parent, whose describe spends on the parent; this state
+# has only this branch's spend, so the parent's budget isn't checked here.
 PRN_QUERY='fn plural(k, w): f"{k} {w}{k == 1 ? "" : "s"}"
 fn step(key, who, say, cmd): {key: key, who: who, say: say, cmd: cmd}
 fn usd(x): f"${round(x * 100)::int64 / 100}.{round(x * 100)::int64 % 100 < 10 ? "0" : ""}{round(x * 100)::int64 % 100}"
@@ -65,7 +67,11 @@ values {...s, remote}
       bot_due:=(coalesce(bot.command, null) is not null and covers(review.local)
                 and not covers(review.bot) and not covers(review.accepted)),
       bot_waiting:=(covers(review.bot) and on(review.bot.replied == false) and not covers(review.accepted)),
-      budget:=(n(spend.budget) > 0 and n(spend.usd) > n(spend.budget)
+      budget:=(nul(spend) or n(spend.budget) <= 0 ? null
+               : nul(spend.usd)
+               ? step("budget", "you", "can'"'"'t tell what this branch has spent (sd state'"'"'s errors say why), so nothing spends: fix the usage record, or take over",
+                      "sd act attach")
+               : spend.usd > spend.budget
                ? step("budget", "you", f"spent {usd(spend.usd)} on this branch, past settings.branchBudget ({usd(spend.budget)}): raise it, or take over",
                       "sd act attach") : null)
 | unnest [

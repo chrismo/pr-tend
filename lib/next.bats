@@ -290,6 +290,15 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
             '.sync = {"target": "p", "default": "main", "behind": null, "up_to_date": null, "conflict": null, "old_base": null}')" = ship-parent ]
 }
 
+@test "spend unknown (usage.sup unreadable) with a budget: held as if over it (#121)" {
+  local unknown='.spend = {"usd": null, "budget": 25}'
+  [ "$(keys "$unknown" '.threads.owed_bot = 2')" = budget ]
+  [ "$(step budget say "$unknown" '.threads.owed_bot = 2')" \
+    = "can't tell what this branch has spent (sd state's errors say why), so nothing spends: fix the usage record, or take over" ]
+  # no budget, nothing to hold
+  [ "$(keys '.spend = {"usd": null, "budget": 0}' '.threads.owed_bot = 2')" = bot ]
+}
+
 @test "within settings.branchBudget, or with none (0): the agent steps as usual" {
   [ "$(keys '.spend = {"usd": 24.9, "budget": 25}' '.threads.owed_bot = 2')" = bot ]
   [ "$(keys '.spend = {"usd": 99, "budget": 0}' '.threads.owed_bot = 2')" = bot ]
