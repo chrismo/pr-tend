@@ -724,3 +724,42 @@ guidance_repo() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"no base commit"* ]]
 }
+
+# ── protected paths: CI config an agent's commit may not publish (#124) ─────
+
+@test "protected_paths: the default list, with no setting and no .sheepdog/protected-paths" {
+  guidance_repo
+  run protected_paths feat HEAD
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' .github/workflows/ .github/actions/ .rwx/ .captain/ .circleci/ .gitlab-ci.yml .buildkite/)" ]
+}
+
+@test "protected_paths: .sheepdog/protected-paths in the base commit, comments and blanks dropped; the branch's own copy ignored" {
+  guidance_repo
+  mkdir -p .sheepdog && printf '# ours\n.github/\n\n  deploy/pipeline.yml  # the deploy\n' > .sheepdog/protected-paths
+  git add .sheepdog && git commit -qm paths
+  base=$(git rev-parse HEAD)
+  printf 'nothing\n' > .sheepdog/protected-paths && git commit -qam weaken
+  [ "$(protected_paths feat "$base")" = "$(printf '%s\n' .github/ deploy/pipeline.yml)" ]
+  [ "$(protected_paths feat "")" = "$(protected_paths feat HEAD~2)" ]
+}
+
+@test "protected_paths: settings.protectedPaths wins, and an empty list protects nothing" {
+  guidance_repo
+  mkdir -p .sheepdog && printf '.github/\n' > .sheepdog/protected-paths
+  git add .sheepdog && git commit -qm paths
+  printf '{"settings": {"protectedPaths": ["ci/", "Makefile"]}}\n' > "$SHEEPDOG_CONFIG"
+  [ "$(protected_paths feat HEAD)" = "$(printf '%s\n' ci/ Makefile)" ]
+  printf '{"settings": {"protectedPaths": []}}\n' > "$SHEEPDOG_CONFIG"
+  run protected_paths feat HEAD
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "protected_hits: a path ending in / covers what's under it; any other names one file" {
+  local list=$'.github/workflows/\n.gitlab-ci.yml'
+  run protected_hits "$list" $'.github/workflows/test.yml\n.github/dependabot.yml\n.gitlab-ci.yml\n.gitlab-ci.yml.bak\nsrc/.github/workflows/x.yml'
+  [ "$output" = "$(printf '%s\n' .github/workflows/test.yml .gitlab-ci.yml)" ]
+  run protected_hits "" ".github/workflows/test.yml"
+  [ -z "$output" ]
+}

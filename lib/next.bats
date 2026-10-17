@@ -315,6 +315,18 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(step push cmd '.push.ahead = 2')" = "sd act push" ]
 }
 
+@test "an agent's commit changed CI config: chrismo reviews, then pushes; no push step, no ci-fix (#124)" {
+  local held='.push.held = {"sha": "h2", "paths": [".github/workflows/test.yml", ".rwx/tests.yml"]}'
+  [ "$(keys '.push.ahead = 1' "$held")" = ci-config ]
+  [ "$(step ci-config who '.push.ahead = 1' "$held")" = you ]
+  [ "$(step ci-config say '.push.ahead = 1' "$held")" \
+    = "the agent changed CI config (.github/workflows/test.yml, .rwx/tests.yml): review, then sd act push" ]
+  [ "$(step ci-config cmd '.push.ahead = 1' "$held")" = "sd act push" ]
+  [ "$(keys '.push.ahead = 1' '.ci.verdict = "red"' '.ci.failing = ["test"]' "$held")" = ci-config ]
+  [ "$(keys '.pr = null' '.push = {"remote_sha": null, "ahead": 1, "behind": 0}' "$held")" = "ci-config open-pr" ]
+  [ "$(keys '.push.ahead = 1' '.push.held = null')" = push ]
+}
+
 @test "a restack undone from outside sheepdog: redo it by hand, then sd act push (#47)" {
   [ "$(keys '.sync.undone = 1' '.sync.up_to_date = false' '.push.ahead = 1' '.push.behind = 0')" = restack-undone ]
   [ "$(step restack-undone who '.sync.undone = 1')" = you ]

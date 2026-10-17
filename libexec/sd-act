@@ -98,7 +98,8 @@
 #             A reset-away drop is refused when a dropped commit wasn't
 #             authored and committed here (take it back with merge
 #             --ff-only), or when the worktree has uncommitted or untracked
-#             changes (a soft or mixed reset: commit or remove them first)
+#             changes (a soft or mixed reset: commit or remove them first).
+#             Releases a CI config hold: chrismo pushing is the approval
 #   verify    run settings.verify in the branch's worktree, zero tokens. Pass:
 #             one line. Fail: nonzero, the output trimmed to its last 40 lines
 #             for the fix step. A command that changes the tree fails too.
@@ -175,6 +176,16 @@
 #             sd state's mechanics go on. A lock whose process is gone from
 #             this host is stale, and every sd act verb clears it first
 #
+# CI config hold (#124): when the commit of an agent step that edits
+# (implement and its review-fix rounds, address, ci-fix, restack --resolve)
+# touches a protected path, the branch is held: address, ci-fix and ship
+# don't push it, --force or not, and sd state's NEXT is chrismo's: review,
+# then sd act push, which releases it. A later agent commit there holds it
+# again. Protected paths: settings.protectedPaths; else
+# .sheepdog/protected-paths in the base commit (one per line, # comments);
+# else .github/workflows/ .github/actions/ .rwx/ .captain/ .circleci/
+# .gitlab-ci.yml .buildkite/. One ending in / covers what's under it.
+#
 # --force:
 #   address         run even if the branch is unpushed, diverged or taken over
 #   restack, push, ship   run even if taken over
@@ -201,6 +212,7 @@
 # Config (sd config show):
 #   settings  remote, verify, autofix, stepTimeout, stepBudget, forkLimit (a
 #             session with more context starts over), replyPrefix, botLogin, implementAllow,
+#             protectedPaths,
 #             <step>Prompt for implement, reviewFix, review, describe, address,
 #             resolve, ciFix (a file; else .sheepdog/<step>.md in the base
 #             commit, kebab-cased, else the shipped lib/prompts/<step>.md)
@@ -209,7 +221,8 @@
 # State (git config): branch.<b>.sheepdog, .sd-task, .sd-parent, .sd-session,
 # .sd-harness, .sd-handled, .sd-lock ("<pid>@<host> <time>" while attached),
 # .sd-ci-fix ("<sha> fixed|flaky|autofix", the last red ci-fix handled),
-# .sd-bot-triggered (when trigger's comment was posted, by GitHub's clock);
+# .sd-bot-triggered (when trigger's comment was posted, by GitHub's clock),
+# .sd-held (the CI config hold: the commit, then the paths, one per line);
 # sheepdog.repo (global) lists the enrolled repos.
 #
 # <branch> defaults to the current one.
@@ -527,11 +540,13 @@ address() {
     || die "couldn't read the agent's answer; edits (if any) are left uncommitted in $wt"
   plan=$(prc_json "$SCRUB_Q" "$plan") || die "couldn't scrub the replies; edits (if any) are left uncommitted in $wt"
 
-  local msg
+  local msg before
   if $changed; then
     msg=$(prc_line 'values {m: coalesce(commit_message, null)}
       | values case when is(m, <string>) and grep("\\S", m) then m else "Address review feedback" end' "$result")
+    before=$(git rev-parse "refs/heads/$b")
     git -C "$wt" add -A && git -C "$wt" commit -q -m "$msg" || die "commit failed; the edits are left in $wt"
+    hold_after "$b" "$gbase" "$(git -C "$wt" diff --name-only --no-renames "$before" "refs/heads/$b")"
   fi
   verify_autofix "$wt" "$b" || die "verify failed ($verify); the commit is kept in $wt, nothing pushed or posted"
 
@@ -541,6 +556,7 @@ address() {
     return
   fi
 
+  hold_gate "$b" "pushing $b, so nothing posted"
   push_branch "$b" "$remote" || die "not pushed, so nothing posted"
   local prefix id action at reply line failed=0 pr_id body=""
   prefix=$(prc_get settings.replyPrefix "$b" false) || die "sd config failed"
@@ -1230,6 +1246,7 @@ implement_run() {
   echo "$b: $summary"
   [[ -z $listed ]] || prc_line "$ANSWERS_REPORT" "$answered"
   git -C "$wt" log --format='  %h %s' "$before..refs/heads/$b"
+  hold_after "$b" "$gbase" "$(git -C "$wt" diff --name-only --no-renames "$before" "refs/heads/$b")"
   verify_autofix "$wt" "$b" || die "verify failed ($VERIFY_CMD); the commit is kept in $wt"
   echo "next: sd act review"
 }
@@ -1361,6 +1378,7 @@ ci_fix() {
     rm -f "$vout"
     git config "branch.$b.sd-ci-fix" "$sha autofix"
     if $no_publish; then echo "autofix fixed what verify saw; not pushed (--no-publish): sd act push"; return; fi
+    hold_gate "$b" "pushing $b"
     push_branch "$b" "$remote" || die "autofix's commit is kept in $wt, not pushed"
     echo "autofix fixed what verify saw; CI reruns on the push"
     return
@@ -1420,9 +1438,11 @@ ci_fix() {
   git -C "$wt" add -A && git -C "$wt" commit -q -m "$msg" || die "commit failed; the edits are left in $wt"
   echo "$b: $summary"
   git -C "$wt" log --format='  %h %s' "$before..refs/heads/$b"
+  hold_after "$b" "$base" "$(git -C "$wt" diff --name-only --no-renames "$before" "refs/heads/$b")"
   verify_autofix "$wt" "$b" || die "verify failed ($VERIFY_CMD); the commit is kept in $wt, nothing pushed"
   git config "branch.$b.sd-ci-fix" "$sha fixed"
   if $no_publish; then echo "not pushed (--no-publish): sd act push when ready"; return; fi
+  hold_gate "$b" "pushing $b"
   push_branch "$b" "$remote" || die "the fix is committed in $wt, not pushed"
   echo "CI reruns on the push"
 }
@@ -1514,6 +1534,7 @@ ship() {
   fi
   remote=$(prc_get settings.remote "$b" false) || die "sd config failed"
   git -C "$wt" fetch --quiet --prune "$remote" || die "fetch from $remote failed"
+  hold_gate "$b" "shipping $b"
   state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
   pr_state=$(prc_val "$state" 'coalesce(pr.state, "none")')
   case $pr_state in
@@ -1626,6 +1647,49 @@ trigger() {
   echo "triggered the review bot on PR #$number with \"$command\"; bot pinned at ${head:0:7}, waiting for its reply"
 }
 
+# ── CI config hold (#124) ────────────────────────────────────────────────────
+
+hold_say() { echo "the agent changed CI config (${1//$'\n'/, }): review, then sd act push"; }
+
+# hold_paths <branch>: the paths an active hold names, one per line; status 1
+# when there is none. A hold whose commit is on the remote was published some
+# other way, so it is cleared (reconcile, not enforce).
+hold_paths() {
+  local b=$1 v remote rsha
+  v=$(git config --get "branch.$b.sd-held") || return 1
+  remote=$(prc_get settings.remote "$b" false) || die "sd config failed"
+  rsha=$(git rev-parse -q --verify "refs/remotes/$remote/$b^{commit}" || true)
+  if [[ -n $rsha ]] && git merge-base --is-ancestor "${v%%$'\n'*}" "$rsha" 2>/dev/null; then
+    git config --unset "branch.$b.sd-held"
+    return 1
+  fi
+  printf '%s\n' "${v#*$'\n'}"
+}
+
+# hold_after <branch> <base> <files>: after an agent step's edits are
+# committed, the files they changed (one per line) against protected_paths
+# (read from <base>). On a match, hold the branch: branch.<b>.sd-held is HEAD,
+# then the paths, an active hold's included, one per line. The automated
+# pushes (address, ci-fix, ship) refuse while it holds; chrismo running sd act
+# push is the approval, and clears it.
+hold_after() {
+  local b=$1 paths hits prev
+  paths=$(protected_paths "$b" "$2") || die "sd config failed"
+  hits=$(protected_hits "$paths" "$3")
+  [[ -n $hits ]] || return 0
+  prev=$(hold_paths "$b") || prev=""
+  hits=$(printf '%s\n' "$prev" "$hits" | sed '/^$/d' | sort -u)
+  git config "branch.$b.sd-held" "$(git rev-parse "refs/heads/$b")"$'\n'"$hits"
+  echo "held: $(hold_say "$hits")"
+}
+
+# hold_gate <branch> <doing>: refuse <doing> while a hold is active.
+hold_gate() {
+  local paths
+  paths=$(hold_paths "$1") || return 0
+  die "not $2: $(hold_say "$paths")"
+}
+
 # ── push ─────────────────────────────────────────────────────────────────────
 
 plural() { if (( $1 == 1 )); then echo "1 $2"; else echo "$1 $2s"; fi; }
@@ -1727,6 +1791,11 @@ push() {
   fi
   remote=$(prc_get settings.remote "$branch" false) || die "sd config failed"
   push_branch "$branch" "$remote" || exit 1
+  # chrismo pushing is the approval of what an agent changed in CI config.
+  if git config --get "branch.$branch.sd-held" >/dev/null; then
+    git config --unset "branch.$branch.sd-held"
+    echo "released the CI config hold on $branch"
+  fi
 }
 
 # ── restack ──────────────────────────────────────────────────────────────────
@@ -1836,6 +1905,7 @@ restack() {
     || die "restacked $b, but couldn't tell whether its PR still targets the parent; sd-parent left as is$($resolved && echo ". The agent resolved conflicts, so verify and review: sd act verify, sd act review")"
   if [[ -n $line ]]; then echo "$line"; else parent_to_default "$b" "$state"; fi
   if $resolved; then
+    hold_after "$b" "$old_base" "$RESOLVE_TOUCHED"
     echo "conflicts resolved by the agent, so $b's change is unreviewed: sd act review next"
     verify_run "$wt" "$b" || die "verify failed ($VERIFY_CMD) on the resolved branch; it is kept at ${new_head:0:7}, unpushed. Fix, then sd act verify"
   fi
@@ -1890,8 +1960,10 @@ EOF
 # resolve_conflicts <branch> <worktree> <old-base> <old-head> <onto>: a rebase
 # has stopped; the agent resolves each stop in the branch's session, the
 # pipeline adds and continues. Any failure rolls the branch back and returns 1.
+# RESOLVE_TOUCHED is the files the agent changed, one per line.
 resolve_conflicts() {
   local b=$1 wt=$2 old_base=$3 old_head=$4 onto=$5 stops=0 files hunks task result outcome replayed replaying replaying_stat guidance
+  RESOLVE_TOUCHED=""
   task=$(git config --get "branch.$b.sd-task" || true)
   replayed=$(git log --reverse --no-merges --topo-order --format='%h %s' "$old_base..$old_head")
   step_session "$b" implement
@@ -1937,6 +2009,9 @@ resolve_conflicts() {
       echo "sd act: the agent gave up: $(prc_val "$result" 'coalesce(summary, "")'); rolled back to ${old_head:0:7}" >&2
       return 1
     fi
+    # What the agent changed: the conflicting files and whatever else it edited
+    # or added, unstaged (the rebase staged the rest of the replayed commit).
+    RESOLVE_TOUCHED+=$(git -C "$wt" diff --name-only --no-renames; git -C "$wt" ls-files --others --exclude-standard)$'\n'
     if (cd "$wt" && grep -lE '^(<<<<<<< |>>>>>>> )' $files 2>/dev/null | grep -q .); then
       restack_rollback "$wt" "$b" "$old_head"
       echo "sd act: conflict markers left in: $(cd "$wt" && grep -lE '^(<<<<<<< |>>>>>>> )' $files | tr '\n' ' '); rolled back to ${old_head:0:7}" >&2

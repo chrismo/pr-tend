@@ -404,6 +404,25 @@ EOF
   [ "$(git log -1 --format=%s)" = "add a third line" ]
 }
 
+@test "implement: a commit that changes CI config is held for chrismo; the agent's own commits count (#124)" {
+  started
+  printf '#!/usr/bin/env bash\necho c >> file.txt\nmkdir -p .github/workflows && echo x > .github/workflows/ci.yml && git add -A && git commit -qm "agent made it"\necho d >> file.txt\n' > "$FX/agent"
+  run "$SD_ACT" implement
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"held: the agent changed CI config (.github/workflows/ci.yml): review, then sd act push"* ]]
+  [ "$(git config --get branch.feat-x.sd-held)" = "$(git rev-parse HEAD)"$'\n'".github/workflows/ci.yml" ]
+}
+
+@test "implement: a review-fix round that changes CI config is held too, joined with the hold before it (#124)" {
+  started
+  git config branch.feat-x.sd-held "$(git rev-parse HEAD)"$'\n'".rwx/tests.yml"
+  findings_at HEAD 1
+  printf '#!/usr/bin/env bash\nmkdir -p .circleci && echo x > .circleci/config.yml\n' > "$FX/agent"
+  run "$SD_ACT" implement
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"held: the agent changed CI config (.circleci/config.yml, .rwx/tests.yml)"* ]]
+}
+
 @test "implement: done with nothing changed is a failure" {
   started
   rm "$FX/agent"
