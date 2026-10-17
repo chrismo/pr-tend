@@ -43,7 +43,7 @@ values {...s, remote}
       stacked:=(on(pr.base != sync.default) and (on(parent.pr.state == "OPEN") or on(parent.merged))),
       parent_closed:=(on(pr.base != sync.default) and on(parent.pr.state == "CLOSED")),
       parent_unpushed:=on(parent.unpushed),
-      no_base:=(sync.old_base is null and on(sync.target != sync.default)),
+      no_base:=(sync.old_base is null and (on(sync.target != sync.default) or on(parent.merged))),
       restack:=(sync.old_base is null ? f"git rebase {remote}/{sync.target}"
                 : f"git rebase --onto {remote}/{sync.target} {sync.old_base[0:12]}"),
       need_review:=((on(pr.state == "OPEN") or trails(review.local) or trails(review.bot) or trails(review.accepted)
@@ -79,7 +79,7 @@ values {...s, remote}
          ? step("conflict", "you", f"restack onto {sync.target} by tree conflicts, which --resolve can'"'"'t do: resolve it by hand (sd act restack says how)", "sd act restack")
          : step("conflict", "agent", f"restack onto {sync.target} conflicts: resolve it", "sd act restack --resolve")) : null,
     open and not undone and not parent_closed and on(sync.up_to_date == false) and not on(sync.conflict) and chase
-      ? (sync.old_base is null
+      ? (no_base
          ? step("behind", "you", f"restack onto {sync.target} ({sync.behind} behind): no base to restack from; see sd state'"'"'s errors", "sd state --json")
          : step("behind", "run", on(sync.by_tree) ? f"restack onto {sync.target} by tree ({sync.behind} behind): its commits become one"
                                                   : f"restack onto {sync.target} ({sync.behind} behind)",
