@@ -466,6 +466,29 @@ three" "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
   [ "$(field .sync.by_tree)" = false ]
 }
 
+@test "sync: rebased onto main outside sheepdog, pin left below it: the merge-base, not main's commits (#120)" {
+  git switch -qc feat && commit a.txt a
+  git update-ref refs/sheepdog/feat/base main
+  commit m.txt m "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
+  git fetch -q && git rebase -q origin/main
+  state
+  [ "$(field .sync.up_to_date)" = true ]
+  [ "$(field .sync.old_base)" = "$(git rev-parse origin/main)" ]
+  [ "$(field '.errors | length')" = 0 ]
+}
+
+@test "sync: stacked on an open parent, main moved on: the pin stays the base (#120)" {
+  git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  git update-ref refs/sheepdog/feat/base parent
+  commit m.txt m "$TMP/other" && git -C "$TMP/other" push -q origin main 2>/dev/null
+  git fetch -q
+  state
+  [ "$(field .sync.target)" = parent ]
+  [ "$(field .sync.old_base)" = "$(git rev-parse parent)" ]
+}
+
 # lost_pin_stack [nopin|same]: parent (p1, p2) squash-merged into main and its
 # branch deleted; feat stacked on it, rewritten outside sheepdog so p2 is a
 # copy, not p2: a changed one, or with "same" an exact one. Pins the base at p2
@@ -1199,6 +1222,17 @@ squash_parent_away() {
   git update-ref refs/sheepdog/feat/local HEAD
   printf 'different\n' > a.txt && git commit -qa --amend --no-edit
   state
+  [ "$(field .review.local.status)" = unknown ]
+}
+
+@test "review: stacked on an open parent with no base: a rewritten pin is unknown, not compared from the merge-base (#120)" {
+  git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
+  git switch -qc feat main && commit c.txt c
+  git config branch.feat.sd-parent parent
+  git update-ref refs/sheepdog/feat/local HEAD
+  git commit -q --amend -m "reworded"
+  state
+  [ "$(field .sync.old_base)" = null ]
   [ "$(field .review.local.status)" = unknown ]
 }
 

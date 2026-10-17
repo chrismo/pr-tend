@@ -297,6 +297,11 @@ else
   fi
   if [[ -n $base_pin ]] && is_ancestor "$base_pin" "$head"; then
     old_base=$base_pin
+    # A rebase or fast-forward outside sheepdog leaves the pin below the
+    # default branch's commits HEAD now holds (#120).
+    if [[ $target == "$default_branch" ]] && is_ancestor "$base_pin" "$target_ref"; then
+      old_base=$(git merge-base "$target_ref" "$head")
+    fi
   elif [[ $parent_merged == true && -n $merged_head ]] && is_ancestor "$merged_head" "$head"; then
     old_base=$merged_head
   elif [[ -n $(ref "refs/remotes/$remote/$parent") ]] \
@@ -412,7 +417,12 @@ pin_status() {
     local against=${target_ref:-$head} status=unknown pin_base head_base
     pin_base=$(ref "refs/sheepdog/$branch/$1-base")
     [[ -n $pin_base ]] || pin_base=$(git merge-base "$pin" "$against" || true)
-    head_base=${old_base:-$(git merge-base "$head" "$against" || true)}
+    head_base=$old_base
+    # Not with an open stacked parent: the merge-base can lie below its old
+    # commits (#97).
+    if [[ -z $head_base && $target == "$default_branch" ]]; then
+      head_base=$(git merge-base "$head" "$against" || true)
+    fi
     if [[ -n $pin_base && -n $head_base ]]; then
       status=rewritten-changed
       [[ $(patch_id "$pin_base" "$pin") == "$(patch_id "$head_base" "$head")" ]] && status=rewritten-same
