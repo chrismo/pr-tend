@@ -289,6 +289,16 @@ remote_feat() { git -C "$TMP/origin.git" rev-parse feat; }
   [ "$(git config --get branch.feat.sd-held)" = "$(git rev-parse HEAD)"$'\n'".rwx/tests.yml" ]
 }
 
+@test "a CI config change the agent committed itself is held all the same (#124)" {
+  printf '#!/usr/bin/env bash\nprintf "one\\ntwo\\nTHREE\\n" > file.txt\nmkdir -p .rwx && echo "tasks: []" > .rwx/tests.yml\ngit add -A && git commit -qm "agent made it"\n' > "$FX/agent"
+  before=$(remote_feat)
+  run "$SD_ACT" address
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"the agent changed CI config (.rwx/tests.yml)"* ]]
+  [ "$(remote_feat)" = "$before" ]
+  [ "$(git config --get branch.feat.sd-held)" = "$(git rev-parse HEAD)"$'\n'".rwx/tests.yml" ]
+}
+
 @test "a rewritten branch of our own is pushed with a lease, like sd act push" {
   git commit -q --amend -m "feat, reworded"
   run "$SD_ACT" address

@@ -624,6 +624,15 @@ rebase_in_progress() { [[ -e $(git rev-parse --git-path rebase-merge) || -e $(gi
   [ "$(git config --get branch.feat.sd-held)" = "$(git rev-parse feat)"$'\n'".github/workflows/new.yml" ]
 }
 
+@test "--resolve: a CI config edit the agent staged itself is held all the same (#124)" {
+  upstream main 's/^g$/X/'
+  resolver GX
+  printf 'mkdir -p .github/workflows && echo x > .github/workflows/new.yml && git add .github/workflows/new.yml\n' >> "$FX/agent"
+  run "$SD_ACT" restack --resolve
+  [ "$status" -eq 0 ]
+  [ "$(git config --get branch.feat.sd-held)" = "$(git rev-parse feat)"$'\n'".github/workflows/new.yml" ]
+}
+
 @test "--resolve: a resolution that stays out of CI config holds nothing (#124)" {
   upstream main 's/^g$/X/'
   resolver GX

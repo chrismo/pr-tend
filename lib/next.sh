@@ -129,7 +129,7 @@ values {...s, remote}
              : on(push.diverged) ? f"force-push {plural(coalesce(sync.ahead, push.ahead), "commit")} (rewritten); a plain git push is rejected, and pulling would undo the rewrite"
              : n(push.ahead) == 0 ? f"force-push: drop {plural(push.behind, "commit")} the remote has, reset away here"
              : f"push {plural(push.ahead, "commit")}", "sd act push") : null,
-    pr is null and len(errors) == 0 and not parent_unpushed
+    pr is null and len(errors) == 0 and not parent_unpushed and not ci_held
       ? spends(budget, step("open-pr", "run", "ship: push, open a draft PR", "sd act ship")) : null,
     has_pr and draft_ready and not need_review and not bot_due and not bot_waiting
       ? step("draft", "run", f"{on(ci.verdict == "none") ? "reviewed, no CI checks" : "CI green and reviewed"}: mark the PR ready for review",

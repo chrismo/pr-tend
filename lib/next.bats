@@ -323,7 +323,7 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
     = "the agent changed CI config (.github/workflows/test.yml, .rwx/tests.yml): review, then sd act push" ]
   [ "$(step ci-config cmd '.push.ahead = 1' "$held")" = "sd act push" ]
   [ "$(keys '.push.ahead = 1' '.ci.verdict = "red"' '.ci.failing = ["test"]' "$held")" = ci-config ]
-  [ "$(keys '.pr = null' '.push = {"remote_sha": null, "ahead": 1, "behind": 0}' "$held")" = "ci-config open-pr" ]
+  [ "$(keys '.pr = null' '.push = {"remote_sha": null, "ahead": 1, "behind": 0}' "$held")" = ci-config ]   # ship would refuse
   [ "$(keys '.push.ahead = 1' '.push.held = null')" = push ]
 }
 

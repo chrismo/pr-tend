@@ -521,6 +521,8 @@ address() {
   guidance=$(cd "$wt" && step_guidance addressPrompt "$b" "$gbase" "$SD_LIB/prompts/address.md") \
     || die "can't read the address guidance"
   echo "sd act: $h ($mode session $sid) is addressing $(prc_val "$findings" 'len(this)') item(s) on $b…" >&2
+  local before
+  before=$(git rev-parse "refs/heads/$b")
   result=$(cd "$wt" && HARNESS_STEP=address HARNESS_BRANCH=$b harness_run "$h" "$sid" "$mode" "$timeout" \
              "$guidance"$'\n\n'"$ADDRESS_CONTRACT"$'\n\nPR '"$(prc_val "$state" pr.url)"$'\nFindings:\n'"$(printf '%s\n' "$findings" | prc_super -i json -J -c 'values this' -)" "$SCHEMA" "$cfg") \
     || die "the $h step failed or returned no usable result (session $sid)"
@@ -540,12 +542,14 @@ address() {
     || die "couldn't read the agent's answer; edits (if any) are left uncommitted in $wt"
   plan=$(prc_json "$SCRUB_Q" "$plan") || die "couldn't scrub the replies; edits (if any) are left uncommitted in $wt"
 
-  local msg before
+  local msg
   if $changed; then
     msg=$(prc_line 'values {m: coalesce(commit_message, null)}
       | values case when is(m, <string>) and grep("\\S", m) then m else "Address review feedback" end' "$result")
-    before=$(git rev-parse "refs/heads/$b")
     git -C "$wt" add -A && git -C "$wt" commit -q -m "$msg" || die "commit failed; the edits are left in $wt"
+  fi
+  # Commits the agent made itself count too: the deny on git commit is no guarantee.
+  if [[ $(git rev-parse "refs/heads/$b") != "$before" ]]; then
     hold_after "$b" "$gbase" "$(git -C "$wt" diff --name-only --no-renames "$before" "refs/heads/$b")"
   fi
   verify_autofix "$wt" "$b" || die "verify failed ($verify); the commit is kept in $wt, nothing pushed or posted"
@@ -1884,6 +1888,8 @@ restack() {
     fi
     resolve_conflicts "$b" "$wt" "$old_base" "$old_head" "$remote/$target" || exit 1
     resolved=true
+    # Before anything below can die: the resolution is on the branch now.
+    hold_after "$b" "$old_base" "$RESOLVE_TOUCHED"
   fi
   new_head=$(git rev-parse "refs/heads/$b")
   # A resolution changes the branch's diff by definition, so the check only
@@ -1905,7 +1911,6 @@ restack() {
     || die "restacked $b, but couldn't tell whether its PR still targets the parent; sd-parent left as is$($resolved && echo ". The agent resolved conflicts, so verify and review: sd act verify, sd act review")"
   if [[ -n $line ]]; then echo "$line"; else parent_to_default "$b" "$state"; fi
   if $resolved; then
-    hold_after "$b" "$old_base" "$RESOLVE_TOUCHED"
     echo "conflicts resolved by the agent, so $b's change is unreviewed: sd act review next"
     verify_run "$wt" "$b" || die "verify failed ($VERIFY_CMD) on the resolved branch; it is kept at ${new_head:0:7}, unpushed. Fix, then sd act verify"
   fi
@@ -1957,12 +1962,26 @@ read -r -d '' RESOLVE_SCHEMA <<'EOF' || true
  "properties": {"outcome": {"enum": ["done", "gave-up", "already-on-target"]}, "summary": {"type": "string"}}}
 EOF
 
+# worktree_tree <worktree>: the tree of everything in it, tracked or not
+# (ignored files aside), staged or not, through a scratch index; the real
+# index, mid-rebase, is left alone.
+worktree_tree() {
+  local dir tree rc=0
+  dir=$(mktemp -d) || return 1
+  tree=$(export GIT_INDEX_FILE=$dir/index
+         git -C "$1" read-tree HEAD && git -C "$1" add -A && git -C "$1" write-tree) || rc=1
+  rm -rf "$dir"
+  (( rc == 0 )) && echo "$tree"
+}
+
 # resolve_conflicts <branch> <worktree> <old-base> <old-head> <onto>: a rebase
 # has stopped; the agent resolves each stop in the branch's session, the
 # pipeline adds and continues. Any failure rolls the branch back and returns 1.
-# RESOLVE_TOUCHED is the files the agent changed, one per line.
+# RESOLVE_TOUCHED is the files the agent changed, one per line: the worktree
+# before and after each stop compared whole, so staging or committing them
+# itself hides nothing.
 resolve_conflicts() {
-  local b=$1 wt=$2 old_base=$3 old_head=$4 onto=$5 stops=0 files hunks task result outcome replayed replaying replaying_stat guidance
+  local b=$1 wt=$2 old_base=$3 old_head=$4 onto=$5 stops=0 files hunks task result outcome replayed replaying replaying_stat guidance snap after
   RESOLVE_TOUCHED=""
   task=$(git config --get "branch.$b.sd-task" || true)
   replayed=$(git log --reverse --no-merges --topo-order --format='%h %s' "$old_base..$old_head")
@@ -1986,6 +2005,11 @@ resolve_conflicts() {
     hunks=$(git -C "$wt" diff)
     replaying=$(git -C "$wt" log -1 --format='%h %s' REBASE_HEAD)
     replaying_stat=$(git -C "$wt" show --stat --format= REBASE_HEAD)
+    if ! snap=$(worktree_tree "$wt"); then
+      restack_rollback "$wt" "$b" "$old_head"
+      echo "sd act: can't snapshot $wt before the agent runs; rolled back to ${old_head:0:7}" >&2
+      return 1
+    fi
     echo "sd act: $STEP_H ($STEP_MODE session $STEP_SID) is resolving conflicts in: ${files//$'\n'/, } (stop $stops)…" >&2
     if ! result=$(cd "$wt" && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" \
                     "$guidance"$'\n\n'"$RESOLVE_CONTRACT"$'\n\nBranch: '"$b"$', rebasing onto '"$onto"$'\nTask: '"${task:-(none recorded)}"$'\nReplaying: '"$replaying"$'\n'"$replaying_stat"$'\n\n'"Commits being replayed, oldest first:"$'\n'"$replayed"$'\n\nConflicting files:\n'"$files"$'\n\nConflict hunks:\n'"$hunks" \
@@ -2009,9 +2033,12 @@ resolve_conflicts() {
       echo "sd act: the agent gave up: $(prc_val "$result" 'coalesce(summary, "")'); rolled back to ${old_head:0:7}" >&2
       return 1
     fi
-    # What the agent changed: the conflicting files and whatever else it edited
-    # or added, unstaged (the rebase staged the rest of the replayed commit).
-    RESOLVE_TOUCHED+=$(git -C "$wt" diff --name-only --no-renames; git -C "$wt" ls-files --others --exclude-standard)$'\n'
+    if ! after=$(worktree_tree "$wt"); then
+      restack_rollback "$wt" "$b" "$old_head"
+      echo "sd act: can't read what the agent changed in $wt; rolled back to ${old_head:0:7}" >&2
+      return 1
+    fi
+    RESOLVE_TOUCHED+=$(git diff-tree -r --name-only --no-renames "$snap" "$after")$'\n'
     if (cd "$wt" && grep -lE '^(<<<<<<< |>>>>>>> )' $files 2>/dev/null | grep -q .); then
       restack_rollback "$wt" "$b" "$old_head"
       echo "sd act: conflict markers left in: $(cd "$wt" && grep -lE '^(<<<<<<< |>>>>>>> )' $files | tr '\n' ' '); rolled back to ${old_head:0:7}" >&2
