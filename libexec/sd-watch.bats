@@ -1340,11 +1340,14 @@ SH
 
 @test "rate limit: plenty left, or none reported, checks every branch" {
   git branch other && enroll other
-  low feat 4000
-  ps_fixture other
+  git branch third && enroll third
+  ps_fixture feat
+  low other 4000
+  ps_fixture third
   pass
   [ "$(cat "$PS_FIXTURES/calls")" = "$TMP/repo feat
-$TMP/repo other" ]
+$TMP/repo other
+$TMP/repo third" ]
   ! grep -q "rate limit" "$SHEEPDOG_STATE_DIR/last-pass"
 }
 
@@ -1391,6 +1394,25 @@ $TMP/repo other" ]
   run "$SD_WATCH" refresh feat
   [ "$status" -eq 0 ]
   [[ "$output" == *"feat  ✅"* ]]
+  [[ "$output" != *"rate limit"* ]]
+}
+
+@test "rate limit: a stopped pass keeps only the skipped branches' glyphs" {
+  git branch other && enroll other
+  git worktree add -q "$TMP/other-wt" other
+  git clone -q "$TMP/origin.git" "$TMP/repo2" 2>/dev/null
+  git -C "$TMP/repo2" branch -q z && git -C "$TMP/repo2" config branch.z.sheepdog true
+  git -C "$TMP/repo2" worktree add -q "$TMP/z-wt" z
+  register "$TMP/repo2"
+  ps_fixture feat && ps_fixture other && ps_fixture z
+  pass
+  [ "$(glyph z-wt)" = ✅ ]
+  git config --global --unset sheepdog.repo "$TMP/repo2"
+  low feat
+  pass
+  [ "$(glyph other-wt)" = ✅ ]
+  [ ! -e "$STATUS_DIR/z-wt.pr" ]
+  [ -z "$("$SD_WATCH" glyph "$TMP/z-wt")" ]
 }
 
 # ── status ───────────────────────────────────────────────────────────────────

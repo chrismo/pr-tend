@@ -374,10 +374,10 @@ run_pass() {
   mkdir -p "$STATE_DIR" "$STATUS_DIR"
   # The index's temp file sits beside it, so the mv is a rename a prompt never
   # sees half done.
-  WRITTEN=$(mktemp) GLYPHS=$(mktemp "$STATE_DIR/glyphs.XXXXXX") RATE_STOP=$(mktemp)
-  trap 'rm -f "$WRITTEN" "$GLYPHS" "$RATE_STOP"' EXIT
+  WRITTEN=$(mktemp) GLYPHS=$(mktemp "$STATE_DIR/glyphs.XXXXXX") RATE_STOP=$(mktemp) SKIPPED=$(mktemp)
+  trap 'rm -f "$WRITTEN" "$GLYPHS" "$RATE_STOP" "$SKIPPED"' EXIT
   local -a repos branches
-  local repo name b lines="" out stopped="" stop_line="" skipped=false rows
+  local repo name b lines="" out stopped="" stop_line="" wt row
   mapfile -t repos < <(git config --global --get-all sheepdog.repo || true)
   # A config failure is reported per repo by fetch, which then skips it.
   VACUUM_AFTER=$(prc_get settings.vacuumAfter "" true 2>/dev/null) || VACUUM_AFTER=0
@@ -404,12 +404,13 @@ run_pass() {
     if [[ -z $stopped ]]; then
       out=$(fetch "$repo" "$name") || { lines+=$out$'\n'; continue; }
       [[ -z $out ]] || lines+=$out$'\n'
-      load_worktrees "$repo"
     fi
+    load_worktrees "$repo"
 
     for b in "${branches[@]}"; do
       if [[ -n $stopped ]]; then
-        lines+=$stop_line"$name"$'\t'"$b"$'\t-\tnot checked: rate limit\n' stop_line="" skipped=true
+        lines+=$stop_line"$name"$'\t'"$b"$'\t-\tnot checked: rate limit\n' stop_line=""
+        printf '%s\t%s\n' "${worktree_of[$b]:-}" "$b" >> "$SKIPPED"
         continue
       fi
       lines+=$(check "$repo" "$name" "$b" "${worktree_of[$b]:-}")$'\n' || true
@@ -417,17 +418,17 @@ run_pass() {
     done
   done
 
+  # The branches not checked keep their glyphs, files and index rows both.
   local f
-  if $skipped; then
-    # The branches not checked keep their glyphs, files and index rows both.
-    rows=$(awk -F'\t' 'FILENAME == ARGV[1] { seen[$1]; next } !($1 in seen)' "$GLYPHS" "$STATE_DIR/glyphs" 2>/dev/null) || true
-    [[ -z $rows ]] || printf '%s\n' "$rows" >> "$GLYPHS"
-  else
-    for f in "$STATUS_DIR"/*.pr; do
-      [[ -e $f ]] || continue
-      grep -qxF "$f" "$WRITTEN" || rm -f "$f"
-    done
-  fi
+  while IFS= read -r row; do
+    printf '%s\n' "$row" >> "$GLYPHS"
+    wt=${row%%$'\t'*}
+    echo "$STATUS_DIR/$(basename "$wt").pr" >> "$WRITTEN"
+  done < <(awk -F'\t' 'FILENAME == ARGV[1] { keep[$1 FS $2]; next } ($1 FS $2) in keep' "$SKIPPED" "$STATE_DIR/glyphs" 2>/dev/null)
+  for f in "$STATUS_DIR"/*.pr; do
+    [[ -e $f ]] || continue
+    grep -qxF "$f" "$WRITTEN" || rm -f "$f"
+  done
   drop_ambiguous "$GLYPHS"
   mv "$GLYPHS" "$STATE_DIR/glyphs"
   { date '+last pass: %Y-%m-%d %H:%M:%S'; printf '%s' "$lines"; } > "$STATE_DIR/last-pass"
