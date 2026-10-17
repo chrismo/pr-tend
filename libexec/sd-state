@@ -34,6 +34,9 @@
 #   fresh     false when GitHub's PR / parent-PR head differs from the local
 #             remote-tracking ref, i.e. sync and push answers need a fetch
 #   stored    what sheepdog keeps for the branch: handled ids, refs/sheepdog/<b>/*
+#   rate_limit  GitHub's GraphQL quota: cost (this run's calls, summed),
+#             remaining and reset_at (the last call's; null when none
+#             answered), limited (a call was refused for the rate limit)
 #   next      what to do, in order: {key, who, say, cmd} (lib/next.sh)
 #
 # Output:
@@ -44,8 +47,17 @@
 #             (r, severity, file:line, body)
 #   --json    everything
 #
-# Read-only: never fetches or writes. Remote refs are as fresh as the last
-# fetch. One gh GraphQL call, two for a non-default parent. A gh failure is
+# Never fetches, and writes only the PR numbers it finds (branch.<b>.sd-pr,
+# the parent's too), when they change. That makes it a .git/config writer:
+# while it holds config.lock, another git config write fails. Remote refs
+# are as fresh as the last fetch. One gh GraphQL call per PR (the branch's,
+# and a non-default parent's), by its stored number; a discovery by branch
+# comes first for a PR not yet known, and is the only call for a branch with
+# none. A stored PR that merged stays the branch's PR, even once a newer one
+# is open from the same branch: the branch is done (#122). Only a local
+# branch stores a number, so a parent that isn't one, or a fresh clone, gets
+# discovery's pick (an open PR first); git config --unset branch.<b>.sd-pr
+# makes sd state look again. A gh failure is
 # recorded in .errors and the git facts are still reported.
 #
 # Config: read with lib/config.sh (branch file over global file over
@@ -63,7 +75,8 @@
 # trigger that lands after a later one counts as the later one's reply.
 # botTimeout (seconds, 3600): how long to wait on that reply before
 # bot-silent.
-# State: branch.<name>.pr-{parent,tend,harness,session,lock}, branch.<name>.sd-handled
+# State: branch.<name>.pr-{parent,tend,harness,session,lock}, branch.<name>.sd-pr
+# (the PR's number, written here), branch.<name>.sd-handled
 # (multi-valued: node ids of bot reviews/comments already dealt with),
 # branch.<name>.sd-bot-triggered (when sd act trigger posted its comment).
 
@@ -73,32 +86,48 @@ source "$(dirname "$(realpath "$0")")/../lib/config.sh"
 source "$(dirname "$(realpath "$0")")/../lib/next.sh"
 source "$(dirname "$(realpath "$0")")/../lib/sheepdog.sh"
 
+# By number: GitHub multiplies each connection's cost by its parents' page
+# sizes, so under pullRequests(first: 10) this cost 21 points, not 2 (#122).
 read -r -d '' QUERY <<'EOF' || true
-query($owner: String!, $repo: String!, $branch: String!, $commits: Boolean!) {
+query($owner: String!, $repo: String!, $number: Int!, $commits: Boolean!) {
   viewer { login }
+  rateLimit { cost remaining resetAt }
+  repository(owner: $owner, name: $repo) {
+    defaultBranchRef { name }
+    pullRequest(number: $number) {
+      number url state isDraft isCrossRepository headRepositoryOwner { login } headRefName baseRefName headRefOid mergeable mergedAt
+      mergeStateStatus reviewDecision
+      reviewRequests(first: 20) { nodes { requestedReviewer {
+        ... on User { login } ... on Bot { login } ... on Mannequin { login } ... on Team { slug } } } }
+      # GitHub takes up to 250 on a PR's commits, not the usual 100.
+      allCommits: commits(last: 250) @include(if: $commits) { nodes { commit { oid } } }
+      commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes {
+        __typename
+        ... on CheckRun { name status conclusion }
+        ... on StatusContext { context state }
+      } } } } } }
+      reviewThreads(first: 100) { nodes {
+        id isResolved isOutdated path line
+        first: comments(first: 1) { nodes { author { __typename login } url body } }
+        last: comments(last: 1) { nodes { author { __typename login } } }
+      } }
+      reviews(last: 50) { nodes { id url state body createdAt submittedAt author { __typename login } } }
+      comments(last: 50) { nodes { id url body createdAt author { __typename login } } }
+    }
+  }
+}
+EOF
+
+# A branch's PRs, with only what PICK_PR needs: ten, since a common branch
+# name also matches strangers' fork PRs.
+read -r -d '' DISCOVER <<'EOF' || true
+query($owner: String!, $repo: String!, $branch: String!) {
+  viewer { login }
+  rateLimit { cost remaining resetAt }
   repository(owner: $owner, name: $repo) {
     defaultBranchRef { name }
     pullRequests(headRefName: $branch, first: 10, orderBy: {field: CREATED_AT, direction: DESC}) {
-      nodes {
-        number url state isDraft isCrossRepository headRepositoryOwner { login } baseRefName headRefOid mergeable mergedAt
-        mergeStateStatus reviewDecision
-        reviewRequests(first: 20) { nodes { requestedReviewer {
-          ... on User { login } ... on Bot { login } ... on Mannequin { login } ... on Team { slug } } } }
-        # GitHub takes up to 250 on a PR's commits, not the usual 100.
-        allCommits: commits(last: 250) @include(if: $commits) { nodes { commit { oid } } }
-        commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes {
-          __typename
-          ... on CheckRun { name status conclusion }
-          ... on StatusContext { context state }
-        } } } } } }
-        reviewThreads(first: 100) { nodes {
-          id isResolved isOutdated path line
-          first: comments(first: 1) { nodes { author { __typename login } url body } }
-          last: comments(last: 1) { nodes { author { __typename login } } }
-        } }
-        reviews(last: 50) { nodes { id url state body createdAt submittedAt author { __typename login } } }
-        comments(last: 50) { nodes { id url body createdAt author { __typename login } } }
-      }
+      nodes { number state isCrossRepository headRepositoryOwner { login } }
     }
   }
 }
@@ -147,18 +176,25 @@ review_rounds=$(prc_get settings.reviewRounds "$branch" false) || die "sd config
 [[ $(prc_val "$ignore_body" 'len(coalesce([unnest this | where is_error(regexp(this, ""))], [])) == 0' 2>/dev/null) == true ]] \
   || die "botIgnoreBody has an invalid regex: $ignore_body"
 
-# -f, not -F, for the branch: -F would send "1234" or "true" as a non-string.
-# gh_query <branch> [true]: true also fetches its PRs' commits.
+# gh_call <label> <field>...: one GraphQL call into RESP, its rateLimit added
+# to rl_*. A failure is recorded in errors, unless it's a number GitHub can't
+# resolve (returns 2: the caller re-discovers), and a rate-limit refusal sets
+# rl_limited.
 RESP=""
 GH_ERR=$(mktemp)
 trap 'rm -f "$GH_ERR"' EXIT
-gh_query() {
-  if ! RESP=$(gh api graphql -F owner='{owner}' -F repo='{repo}' -f branch="$1" -F commits="${2:-false}" \
-                -f query="$QUERY" 2>"$GH_ERR"); then
-    errors+=("gh ($1): $(tr '\n' ' ' <"$GH_ERR")")
+rl_cost=null rl_remaining=null rl_reset="" rl_limited=false
+gh_call() {
+  local label=$1 cost remaining reset; shift
+  if ! RESP=$(gh api graphql -F owner='{owner}' -F repo='{repo}' "$@" 2>"$GH_ERR"); then
     RESP=""
+    grep -q 'Could not resolve to a PullRequest' "$GH_ERR" && return 2
+    grep -Eqi 'rate.?limit' "$GH_ERR" && rl_limited=true
+    errors+=("gh ($label): $(tr '\n' ' ' <"$GH_ERR")")
     return 1
   fi
+  read -r cost remaining reset < <(prc_line 'values f"{coalesce(data.rateLimit.cost, 0)} {coalesce(data.rateLimit.remaining, "null")} {coalesce(data.rateLimit.resetAt, "")}"' "$RESP")
+  rl_cost=$(( ${rl_cost/null/0} + cost )) rl_remaining=$remaining rl_reset=$reset
 }
 # headRefName also matches strangers' fork PRs from a same-named branch; keep
 # same-repo PRs and PRs from the viewer's own fork.
@@ -167,14 +203,52 @@ values {me: data.viewer.login, nodes: coalesce(data.repository.pullRequests.node
 | values coalesce([unnest {me, x: nodes} | where not on(x.isCrossRepository) or on(x.headRepositoryOwner.login == me) | values x], [])
 | values coalesce(coalesce([unnest this | where on(state == "OPEN")], [])[0], this[0], null)
 EOF
-pick_pr() { prc_json "$PICK_PR" "$RESP"; }
+
+# lookup_pr <branch> [true]: the branch's PR into PR (null for none), RESP
+# holding the last answer; true also fetches its commits. By the number in
+# branch.<b>.sd-pr, unless GitHub has no such PR, its head is another branch,
+# or it was closed unmerged (a new one may have been opened since; a merged
+# one stays, as the branch is done): then discovery picks one and stores its
+# number (unset for none), for a local branch only: git branch -d removes the
+# config of only those. Returns 1 when gh failed.
+# -f, not -F, for the branch: -F would send "1234" or "true" as a non-string.
+lookup_pr() {
+  local b=$1 commits=${2:-false} n fetched="" pick rc=0 head st is_local=false
+  n=$(git config --get "branch.$b.sd-pr" || true)
+  git show-ref -q --verify "refs/heads/$b" && is_local=true
+  PR=null
+  if [[ -n $n ]]; then
+    gh_call "$b" -F number="$n" -F commits="$commits" -f query="$QUERY" || rc=$?
+    (( rc != 1 )) || return 1
+    if (( rc == 0 )); then
+      PR=$(prc_json 'values coalesce(data.repository.pullRequest, null)' "$RESP") || die "couldn't read gh's answer"
+      read -r head st < <(prc_line 'values f"{coalesce(headRefName, "")} {coalesce(state, "")}"' "$PR")
+      [[ $head == "$b" && $st != CLOSED ]] && return 0
+      [[ $head == "$b" ]] && fetched=$n
+    fi
+  fi
+  gh_call "$b" -f branch="$b" -f query="$DISCOVER" || return 1
+  pick=$(prc_line "$PICK_PR"$'\n| values coalesce(number, "")' "$RESP") || die "couldn't read gh's answer"
+  if [[ -z $pick ]]; then
+    PR=null
+    [[ -z $n ]] || ! $is_local || git config --unset "branch.$b.sd-pr" 2>/dev/null || true
+    return 0
+  fi
+  # A lost race with another writer only costs a discovery next time.
+  [[ $pick == "$n" ]] || ! $is_local || git config "branch.$b.sd-pr" "$pick" 2>/dev/null || true
+  [[ $pick != "$fetched" ]] || return 0
+  rc=0
+  gh_call "$b" -F number="$pick" -F commits="$commits" -f query="$QUERY" || rc=$?
+  (( rc == 0 )) || { (( rc == 1 )) || errors+=("gh ($b): GitHub has no PR #$pick, which it just listed"); return 1; }
+  PR=$(prc_json 'values coalesce(data.repository.pullRequest, null)' "$RESP") || die "couldn't read gh's answer"
+}
 
 # ── O1 PR, O2 parent ─────────────────────────────────────────────────────────
 
 pr=null viewer="" default_branch="" gh_ok=false
-if gh_query "$branch"; then
+if lookup_pr "$branch"; then
   gh_ok=true
-  pr=$(pick_pr) || die "couldn't read gh's answer"
+  pr=$PR
   { read -r viewer; read -r default_branch; } \
     < <(prc_line 'values coalesce(data.viewer.login, ""), coalesce(data.repository.defaultBranchRef.name, "")' "$RESP")
 fi
@@ -206,7 +280,7 @@ fi
 parent_pr=null parent_ok=$gh_ok
 [[ $parent_source == config ]] && parent_ok=true
 if [[ $parent != "$default_branch" ]]; then
-  if gh_query "$parent" true; then parent_pr=$(pick_pr); else parent_ok=false; fi
+  if lookup_pr "$parent" true; then parent_pr=$PR; else parent_ok=false; fi
 fi
 parent_merged=null
 if $parent_ok; then
@@ -588,6 +662,7 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
                unnest {p: f"refs/sheepdog/{s.branch}/", r: s.refs}
                | values {key: [split(r, " ")[0][len(p):]], value: split(r, " ")[1]}
              ], []))},
+    rate_limit: {cost: s.rl_cost, remaining: s.rl_remaining, reset_at: s.rl_reset, limited: s.rl_limited},
     errors: s.errors
   }
 EOF
@@ -599,13 +674,15 @@ args=$(printf '{"branch": %s, "head": %s, "pr": %s, "parent": %s, "parent_source
   "target": %s, "default_branch": %s, "sync_ahead": %s, "behind": %s, "up_to_date": %s, "old_base": %s, "by_tree": %s, "conflict": %s, "undone": %s,
   "remote_sha": %s, "ahead": %s, "push_behind": %s, "diverged": %s, "remote_ours": %s, "theirs": %s, "remote_made": %s, "dirty": %s, "stale": %s,
   "r_local": %s, "r_bot": %s, "r_accepted": %s, "r_findings": %s, "r_findings_at_head": %s, "review_rounds": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s, "bot_triggered": %s, "bot_timeout": %s, "now": %s,
-  "ignore": %s, "ignore_body": %s, "handled": %s, "refs": %s, "enrolled": %s, "harness": %s, "session": %s, "lock": %s, "errors": %s}\n' \
+  "ignore": %s, "ignore_body": %s, "handled": %s, "refs": %s, "enrolled": %s, "harness": %s, "session": %s, "lock": %s,
+  "rl_cost": %s, "rl_remaining": %s, "rl_reset": %s, "rl_limited": %s, "errors": %s}\n' \
   "$(jstr "$branch")" "$(jstr "$head")" "$pr" "$(jstr "$parent")" "$(jstr "$parent_source")" "$parent_pr" "$parent_merged" "$parent_local" "$parent_remote" "$parent_unpushed" \
   "$(jstr "$target")" "$(jstr "$default_branch")" "$sync_ahead" "$behind" "$up_to_date" "$(jnull "$old_base")" "$by_tree" "$conflict" "$undone" \
   "$(jnull "$remote_sha")" "$ahead" "$push_behind" "$diverged" "$remote_ours" "$theirs" "$remote_made" "$dirty" "$stale_json" \
   "${review[local]}" "${review[bot]}" "${review[accepted]}" "$r_findings" "$r_findings_at_head" "$review_rounds" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" "$(jnull "$bot_triggered")" "$bot_timeout" "$(jstr "$(date -u +%Y-%m-%dT%H:%M:%SZ)")" \
   "$ignore" "$ignore_body" "$(jlist "branch.$branch.sd-handled")" "$refs_json" \
-  "$(jstr "$(cfg sheepdog)")" "$(jstr "$(cfg sd-harness)")" "$(jstr "$(cfg sd-session)")" "$(jstr "$(cfg sd-lock)")" "$errors_json")
+  "$(jstr "$(cfg sheepdog)")" "$(jstr "$(cfg sd-harness)")" "$(jstr "$(cfg sd-session)")" "$(jstr "$(cfg sd-lock)")" \
+  "$rl_cost" "$rl_remaining" "$(jnull "$rl_reset")" "$rl_limited" "$errors_json")
 state=$(prc_json "$ASSEMBLE" "$args") || die "couldn't assemble the state"
 next=$(printf '%s\n' "$state" | prn_next "$remote") || die "lib/next.sh failed"
 state=$(prc_json 'values {...s, next}' "{\"s\": $state, \"next\": $next}") || die "lib/next.sh failed"

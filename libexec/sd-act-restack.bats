@@ -8,7 +8,8 @@ bats_require_minimum_version 1.5.0
 #
 # Real git (a bare origin, our clone, and $TMP/other for other people's
 # pushes) and the real sd state. Fake gh: answers from $GH/<branch>.json, else
-# "no PR"; GH_FAIL_FOR=<branch> makes that branch's lookup fail.
+# "no PR", and a fetch by number with that node of whichever file has it;
+# GH_FAIL_FOR=<branch> makes that branch's lookups fail.
 
 SD_ACT="$BATS_TEST_DIRNAME/sd-act"
 
@@ -24,10 +25,19 @@ setup() {
   cat > "$TMP/fakebin/gh" <<'EOF'
 #!/usr/bin/env bash
 if [[ $1 == pr && $2 == edit ]]; then echo "$*" >> "$GH/calls"; exit 0; fi
-b=""
-for a; do [[ $a == branch=* ]] && b=${a#branch=}; done
+b="" n=""
+for a; do [[ $a == branch=* ]] && b=${a#branch=}; [[ $a == number=* ]] && n=${a#number=}; done
+# By number: the node with that number, from the one branch file that has it.
+if [[ -n $n ]]; then
+  f=$(jq -rn --argjson n "$n" 'inputs | select(any(.data.repository.pullRequests.nodes[]?; .number == $n)) | input_filename' "$GH"/*.json 2>/dev/null)
+  [[ $f != *$'\n'* ]] || { echo "fake gh: #$n is in more than one fixture: $f" >&2; exit 2; }
+  b=$(basename "${f:-none}" .json)
+fi
 [[ ${GH_FAIL_FOR:-} == "$b" ]] && { echo "gh: boom for $b" >&2; exit 1; }
-if [[ -f $GH/$b.json ]]; then cat "$GH/$b.json"
+if [[ -n $n ]]; then
+  [[ -n $f ]] || { echo "gh: Could not resolve to a PullRequest with the number of $n." >&2; exit 1; }
+  jq --argjson n "$n" '.data.repository |= {defaultBranchRef, pullRequest: (.pullRequests.nodes[] | select(.number == $n))}' "$f"
+elif [[ -f $GH/$b.json ]]; then cat "$GH/$b.json"
 else echo '{"data":{"viewer":{"login":"me"},"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"nodes":[]}}}}'
 fi
 EOF

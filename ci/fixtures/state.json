@@ -204,6 +204,7 @@
       "local-base": "0000000000000000000000000000000000000000"
     }
   },
+  "rate_limit": {"cost": 3, "remaining": 4321, "reset_at": "2026-10-16T13:00:00Z", "limited": false},
   "errors": [
     "gh (other): boom"
   ],

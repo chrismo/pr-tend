@@ -2,11 +2,15 @@
 
 bats_require_minimum_version 1.5.0
 
-# Test suite for libexec/sd-state (read-only: where a branch's PR stands).
+# Test suite for libexec/sd-state (where a branch's PR stands; writes only its number).
 #
 # Real git: a bare origin, a working clone, and a second clone ("other") that
-# plays everyone else pushing. GitHub is a fake `gh` that answers the one
-# GraphQL query sd state makes, from $GH_FIXTURES/<branch>.json.
+# plays everyone else pushing. GitHub is a fake `gh` that answers sd state's two
+# GraphQL queries from $GH_FIXTURES/<branch>.json: a discovery by branch= gets
+# the file, and a fetch by number= gets the node with that number from
+# whichever file has it, its headRefName that file's branch unless the node
+# names one. Discovery costs 1, a fetch 2, both with $GH_FAKE_REMAINING left.
+# GH_FAKE_GONE=<n>: a fetch of #n finds no such PR.
 
 SD_STATE="$BATS_TEST_DIRNAME/sd-state"
 
@@ -23,7 +27,7 @@ setup() {
   cat > "$TMP/fakebin/gh" <<'EOF'
 #!/usr/bin/env bash
 if [[ -n ${GH_FAKE_FAIL:-} ]]; then echo "$GH_FAKE_FAIL" >&2; exit 1; fi
-b="" c="" prev=""
+b="" c="" n="" prev=""
 for a; do
   case $a in
     branch=*)
@@ -32,17 +36,36 @@ for a; do
       if [[ $prev == -F && $b =~ ^([0-9]+|true|false|null)$ ]]; then
         echo "gh: Variable \$branch of type String! was provided invalid value" >&2; exit 1
       fi ;;
+    number=*) n=${a#number=} ;;
     commits=*) c=$a ;;
   esac
   prev=$a
 done
-[[ -n $b ]] || { echo "fake gh: no branch= field in: $*" >&2; exit 2; }
+rl() { printf '{"cost": %s, "remaining": %s, "resetAt": "2026-10-16T13:00:00Z"}' "$1" "${GH_FAKE_REMAINING:-4999}"; }
+if [[ -n $n ]]; then
+  f=$(jq -rn --argjson n "$n" 'inputs | select(any(.data.repository.pullRequests.nodes[]?; .number == $n)) | input_filename' \
+        "$GH_FIXTURES"/*.json 2>/dev/null)
+  [[ $f != *$'\n'* ]] || { echo "fake gh: #$n is in more than one fixture: $f" >&2; exit 2; }
+  b=$(basename "$f" .json) b=${b//__//}
+  if [[ -n $b && ${GH_FAKE_FAIL_FOR:-} == "$b" ]]; then echo "gh: boom for $b" >&2; exit 1; fi
+  echo "#$n" >> "$GH_FIXTURES/calls"
+  echo "#$n ${c:-}" >> "$GH_FIXTURES/commits"
+  if [[ -z $f || $n == "${GH_FAKE_GONE:-}" ]]; then
+    echo "{\"data\":{\"rateLimit\":$(rl 1),\"repository\":{\"pullRequest\":null}}}"
+    echo "gh: Could not resolve to a PullRequest with the number of $n." >&2; exit 1
+  fi
+  jq --argjson n "$n" --arg b "$b" --argjson rl "$(rl 2)" '.data as $d | {data: {viewer: $d.viewer, rateLimit: $rl,
+    repository: {defaultBranchRef: $d.repository.defaultBranchRef,
+                 pullRequest: ($d.repository.pullRequests.nodes[] | select(.number == $n) | .headRefName //= $b)}}}' "$f"
+  exit 0
+fi
+[[ -n $b ]] || { echo "fake gh: no branch= or number= field in: $*" >&2; exit 2; }
 if [[ ${GH_FAKE_FAIL_FOR:-} == "$b" ]]; then echo "gh: boom for $b" >&2; exit 1; fi
 echo "$b" >> "$GH_FIXTURES/calls"
-echo "$b ${c:-}" >> "$GH_FIXTURES/commits"
+echo "$b${c:+ $c}" >> "$GH_FIXTURES/commits"
 f="$GH_FIXTURES/${b//\//__}.json"
-if [[ -f $f ]]; then cat "$f"; else
-  echo '{"data":{"viewer":{"login":"me"},"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"nodes":[]}}}}'
+if [[ -f $f ]]; then jq --argjson rl "$(rl 1)" '.data.rateLimit = $rl' "$f"; else
+  echo "{\"data\":{\"viewer\":{\"login\":\"me\"},\"rateLimit\":$(rl 1),\"repository\":{\"defaultBranchRef\":{\"name\":\"main\"},\"pullRequests\":{\"nodes\":[]}}}}"
 fi
 EOF
   chmod +x "$TMP/fakebin/gh"
@@ -131,9 +154,11 @@ field() { jq -r "$@" <<<"$output"; }
   [ "$(git branch --show-current)" = main ]
 }
 
-@test "makes exactly one gh call when the parent is the default branch" {
+@test "makes exactly one gh call when the parent is the default branch and the PR's number is stored" {
   git switch -qc feat
   pr_fixture feat
+  state
+  rm "$GH_FIXTURES/calls"
   state
   [ "$(wc -l < "$GH_FIXTURES/calls" | tr -d ' ')" = 1 ]
 }
@@ -314,6 +339,170 @@ field() { jq -r "$@" <<<"$output"; }
   [[ "$(field '.errors[0]')" == *"boom for parent"* ]]
 }
 
+# ── O1 the PR by its stored number (#122) ────────────────────────────────────
+
+calls() { tr '\n' ' ' < "$GH_FIXTURES/calls"; rm -f "$GH_FIXTURES/calls"; }
+
+@test "PR number: the one found is stored, and the next run asks for it by number alone" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat
+  state
+  [ "$(calls)" = "feat #7 " ]
+  [ "$(git config branch.feat.sd-pr)" = 7 ]
+  state
+  [ "$(calls)" = "#7 " ]
+  [ "$(field .pr.number)" = 7 ]
+}
+
+@test "PR number: a stored one is used without discovery" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat
+  git config branch.feat.sd-pr 7
+  state
+  [ "$(calls)" = "#7 " ]
+  [ "$(field .pr.state)" = OPEN ]
+}
+
+@test "PR number: a stored one whose PR has another head re-discovers and stores the branch's" {
+  git switch -qc other && commit o.txt o
+  pr_fixture other '.number = 8'
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat
+  git config branch.feat.sd-pr 8
+  state
+  [ "$(calls)" = "#8 feat #7 " ]
+  [ "$(field .pr.number)" = 7 ]
+  [ "$(git config branch.feat.sd-pr)" = 7 ]
+}
+
+@test "PR number: a stored one GitHub can't resolve re-discovers, with no error" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat
+  git config branch.feat.sd-pr 42
+  state
+  [ "$(calls)" = "#42 feat #7 " ]
+  [ "$(field .pr.number)" = 7 ]
+  [ "$(field '.errors | length')" = 0 ]
+}
+
+@test "PR number: a stored one closed without merging re-discovers, and a newer PR from the branch wins" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat '.number = 9'
+  jq '.data.repository.pullRequests.nodes |= . + [(.[0] | .number = 5 | .state = "CLOSED")]' \
+    "$GH_FIXTURES/feat.json" > "$TMP/x" && mv "$TMP/x" "$GH_FIXTURES/feat.json"
+  git config branch.feat.sd-pr 5
+  state
+  [ "$(calls)" = "#5 feat #9 " ]
+  [ "$(field .pr.number)" = 9 ]
+  [ "$(git config branch.feat.sd-pr)" = 9 ]
+}
+
+@test "PR number: a stored closed one that discovery still picks is kept, not fetched again" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat '.number = 5' '.state = "CLOSED"'
+  git config branch.feat.sd-pr 5
+  state
+  [ "$(calls)" = "#5 feat " ]
+  [ "$(field .pr.number)" = 5 ]
+  [ "$(field .pr.state)" = CLOSED ]
+  [ "$(git config branch.feat.sd-pr)" = 5 ]
+}
+
+@test "PR number: a stored merged one stays, even with a newer open PR from the branch" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat '.number = 9'
+  jq '.data.repository.pullRequests.nodes |= . + [(.[0] | .number = 5 | .state = "MERGED")]' \
+    "$GH_FIXTURES/feat.json" > "$TMP/x" && mv "$TMP/x" "$GH_FIXTURES/feat.json"
+  git config branch.feat.sd-pr 5
+  state
+  [ "$(calls)" = "#5 " ]
+  [ "$(field .pr.state)" = MERGED ]
+}
+
+@test "PR number: a stored one dropped when discovery finds no PR for the branch" {
+  git switch -qc other && commit o.txt o
+  pr_fixture other '.number = 8'
+  git switch -qc feat && commit a.txt a
+  git config branch.feat.sd-pr 8
+  state
+  [ "$(calls)" = "#8 feat " ]
+  [ "$(field .pr)" = null ]
+  [ -z "$(git config branch.feat.sd-pr || true)" ]
+}
+
+@test "PR number: no PR yet costs one discovery a run, and stores nothing" {
+  git switch -qc feat && commit a.txt a
+  state
+  [ "$(calls)" = "feat " ]
+  state
+  [ "$(calls)" = "feat " ]
+  [ -z "$(git config branch.feat.sd-pr || true)" ]
+}
+
+@test "PR number: the parent's is stored and used the same way" {
+  git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  pr_fixture feat
+  pr_fixture parent '.number = 3'
+  state
+  [ "$(calls)" = "feat #7 parent #3 " ]
+  [ "$(git config branch.parent.sd-pr)" = 3 ]
+  state
+  [ "$(calls)" = "#7 #3 " ]
+  [ "$(field .parent.pr.number)" = 3 ]
+}
+
+@test "PR number: a PR discovery lists but the fetch can't resolve is an error, and no PR" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat
+  GH_FAKE_GONE=7 state
+  [ "$(calls)" = "feat #7 " ]
+  [ "$(field .pr)" = null ]
+  [ "$(field .fresh)" = null ]
+  [[ "$(field '.errors[0]')" == *"GitHub has no PR #7, which it just listed"* ]]
+}
+
+@test "PR number: a parent that isn't a local branch has its number looked up, not stored" {
+  git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
+  git switch -qc feat && commit c.txt c
+  git branch -D -q parent
+  git config branch.feat.sd-parent parent
+  pr_fixture feat
+  pr_fixture parent '.number = 3'
+  state
+  [ "$(field .parent.pr.number)" = 3 ]
+  [ -z "$(git config branch.parent.sd-pr || true)" ]
+}
+
+@test "PR number: gh failing stores nothing and keeps what was stored" {
+  git switch -qc feat && commit a.txt a
+  GH_FAKE_FAIL="gh: down" state
+  [ -z "$(git config branch.feat.sd-pr || true)" ]
+  git config branch.feat.sd-pr 7
+  GH_FAKE_FAIL="gh: down" state
+  [ "$(git config branch.feat.sd-pr)" = 7 ]
+}
+
+# ── rate limit (#122) ────────────────────────────────────────────────────────
+
+@test "rate_limit: the calls' cost summed, with the last call's remaining and reset" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat
+  GH_FAKE_REMAINING=1234 state
+  [ "$(field -c .rate_limit)" = '{"cost":3,"remaining":1234,"reset_at":"2026-10-16T13:00:00Z","limited":false}' ]
+  state
+  [ "$(field .rate_limit.cost)" = 2 ]
+}
+
+@test "rate_limit: GitHub refusing for the rate limit is limited; another failure isn't" {
+  git switch -qc feat && commit a.txt a
+  GH_FAKE_FAIL="gh: API rate limit exceeded for user ID 1." state
+  [ "$(field -c .rate_limit)" = '{"cost":null,"remaining":null,"reset_at":null,"limited":true}' ]
+  GH_FAKE_FAIL="gh: down" state
+  [ "$(field .rate_limit.limited)" = false ]
+}
+
 @test "summary: errors are flagged" {
   git switch -qc feat && commit a.txt a
   GH_FAKE_FAIL="gh: down" run "$SD_STATE"
@@ -378,9 +567,13 @@ field() { jq -r "$@" <<<"$output"; }
   git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
   git switch -qc feat && commit c.txt c
   git config branch.feat.sd-parent parent
+  pr_fixture feat
+  pr_fixture parent '.number = 3'
   state
-  [ "$(cat "$GH_FIXTURES/commits")" = "feat commits=false
-parent commits=true" ]
+  [ "$(cat "$GH_FIXTURES/commits")" = "feat
+#7 commits=false
+parent
+#3 commits=true" ]
 }
 
 @test "bot: the configured trigger command is reported, null when there is none" {

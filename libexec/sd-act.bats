@@ -117,12 +117,13 @@ SH
   run "$SD_ACT" enroll kid
   [ "$status" -eq 0 ]
   [ -z "$(git config branch.kid.sd-parent || true)" ]
+  # One answer for both of sd state's queries: discovery's list and the fetch by number.
+  pr='{"number":3,"url":"u","state":"OPEN","isDraft":false,"baseRefName":"main","headRefName":"kid","headRefOid":"'"$(git rev-parse kid)"'",
+  "mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"mergedAt":null}'
   cat > "$TMP/fakebin/gh" <<SH
 #!/usr/bin/env bash
 cat <<'JSON'
-{"data":{"viewer":{"login":"me"},"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"nodes":[
- {"number":3,"url":"u","state":"OPEN","isDraft":false,"baseRefName":"main","headRefName":"kid","headRefOid":"$(git rev-parse kid)",
-  "mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"mergedAt":null}]}}}}
+{"data":{"viewer":{"login":"me"},"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"nodes":[$pr]},"pullRequest":$pr}}}
 JSON
 SH
   run "$SD_ACT" enroll kid

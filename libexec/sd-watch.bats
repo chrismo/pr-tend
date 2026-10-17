@@ -1287,6 +1287,134 @@ SH
   [ "$(glyph repo)" = "✅" ]
 }
 
+# ── GitHub's rate limit (#122) ───────────────────────────────────────────────
+
+# low <branch> [remaining]: sd state for <branch> leaves that much of the quota.
+low() { ps_fixture "$1" ".rate_limit = {cost: 2, remaining: ${2:-100}, reset_at: \"2026-10-16T13:00:00Z\", limited: false}"; }
+# rate_gh: a fake gh whose REST rate_limit says GraphQL resets at 14:00.
+rate_gh() {
+  cat > "$TMP/fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+echo "$*" >> "$PS_FIXTURES/gh-calls"
+[[ $1 == api && $2 == rate_limit ]] || exit 1
+echo 2026-10-16T14:00:00Z
+SH
+  chmod +x "$TMP/fakebin/gh"
+}
+
+@test "rate limit: remaining under settings.rateLimitFloor stops the pass after that branch, and status says until when" {
+  git branch other && enroll other
+  low feat
+  ps_fixture other
+  pass
+  [ "$(cat "$PS_FIXTURES/calls")" = "$TMP/repo feat" ]
+  run "$SD_WATCH" status
+  [[ "$output" == *"repo  feat  ✅"* ]]
+  [[ "$output" == *"GitHub rate limit: 100 points left, under settings.rateLimitFloor (250): the branches below weren't checked (the quota resets at 2026-10-16T13:00:00Z)"* ]]
+  [[ "$output" == *"repo  other  -  not checked: rate limit"* ]]
+}
+
+@test "rate limit: low after the pass's last branch stops nothing" {
+  git branch other && enroll other
+  ps_fixture feat
+  low other
+  pass
+  [ "$(wc -l < "$PS_FIXTURES/calls" | tr -d ' ')" = 2 ]
+  ! grep -q "rate limit" "$SHEEPDOG_STATE_DIR/last-pass"
+}
+
+@test "rate limit: a stopped pass still does the later repos' local housekeeping" {
+  low feat
+  git clone -q "$TMP/origin.git" "$TMP/repo2" 2>/dev/null
+  git -C "$TMP/repo2" config branch.gone.sheepdog true
+  git -C "$TMP/repo2" branch -q z && git -C "$TMP/repo2" config branch.z.sheepdog true
+  git -C "$TMP/repo2" update-ref refs/sheepdog/old/base HEAD
+  register "$TMP/repo2"
+  ps_fixture z
+  pass
+  [ "$(cat "$PS_FIXTURES/calls")" = "$TMP/repo feat" ]
+  [ -z "$(git -C "$TMP/repo2" config branch.gone.sheepdog || true)" ]
+  [ -z "$(git -C "$TMP/repo2" for-each-ref refs/sheepdog/)" ]
+  grep -q "repo2	z	-	not checked: rate limit" "$SHEEPDOG_STATE_DIR/last-pass"
+}
+
+@test "rate limit: plenty left, or none reported, checks every branch" {
+  git branch other && enroll other
+  git branch third && enroll third
+  ps_fixture feat
+  low other 4000
+  ps_fixture third
+  pass
+  [ "$(cat "$PS_FIXTURES/calls")" = "$TMP/repo feat
+$TMP/repo other
+$TMP/repo third" ]
+  ! grep -q "rate limit" "$SHEEPDOG_STATE_DIR/last-pass"
+}
+
+@test "rate limit: settings.rateLimitFloor sets the floor" {
+  git branch other && enroll other
+  "$SD_CONFIG" set --global settings.rateLimitFloor 50
+  low feat
+  ps_fixture other
+  pass
+  [ "$(wc -l < "$PS_FIXTURES/calls" | tr -d ' ')" = 2 ]
+}
+
+@test "rate limit: a call refused for the rate limit stops the pass, other repos too, with GitHub's reset time" {
+  rate_gh
+  ps_fixture feat '.rate_limit = {cost: null, remaining: null, reset_at: null, limited: true}
+                   | .errors = ["gh (feat): API rate limit exceeded for user ID 1."] | .fresh = null'
+  git clone -q "$TMP/origin.git" "$TMP/repo2" 2>/dev/null
+  git -C "$TMP/repo2" branch -q z && git -C "$TMP/repo2" config branch.z.sheepdog true
+  register "$TMP/repo2"
+  ps_fixture z
+  pass
+  [ "$(cat "$PS_FIXTURES/calls")" = "$TMP/repo feat" ]
+  grep -q "GitHub refused a call for the rate limit: the branches below weren't checked (the quota resets at 2026-10-16T14:00:00Z)" "$SHEEPDOG_STATE_DIR/last-pass"
+  grep -q "repo2	z	-	not checked: rate limit" "$SHEEPDOG_STATE_DIR/last-pass"
+}
+
+@test "rate limit: a stopped pass leaves the unchecked branches' glyphs as they were" {
+  git branch other && enroll other
+  git worktree add -q "$TMP/other-wt" other
+  ps_fixture feat
+  ps_fixture other
+  pass
+  [ "$(glyph other-wt)" = ✅ ]
+  low feat
+  ps_fixture other '.ci.verdict = "red"'
+  pass
+  [ "$(glyph other-wt)" = ✅ ]
+  [ "$("$SD_WATCH" glyph "$TMP/other-wt")" = ✅ ]
+  [ "$(glyph repo)" = ✅ ]
+}
+
+@test "rate limit: refresh checks its branch and notes nothing to stop" {
+  low feat
+  run "$SD_WATCH" refresh feat
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"feat  ✅"* ]]
+  [[ "$output" != *"rate limit"* ]]
+}
+
+@test "rate limit: a stopped pass keeps only the skipped branches' glyphs" {
+  git branch other && enroll other
+  git worktree add -q "$TMP/other-wt" other
+  git clone -q "$TMP/origin.git" "$TMP/repo2" 2>/dev/null
+  git -C "$TMP/repo2" branch -q z && git -C "$TMP/repo2" config branch.z.sheepdog true
+  git -C "$TMP/repo2" worktree add -q "$TMP/z-wt" z
+  register "$TMP/repo2"
+  ps_fixture feat && ps_fixture other && ps_fixture z
+  pass
+  [ "$(glyph z-wt)" = ✅ ]
+  git config --global --unset sheepdog.repo "$TMP/repo2"
+  low feat
+  pass
+  [ "$(glyph other-wt)" = ✅ ]
+  [ ! -e "$STATUS_DIR/z-wt.pr" ]
+  [ -z "$("$SD_WATCH" glyph "$TMP/z-wt")" ]
+}
+
 # ── status ───────────────────────────────────────────────────────────────────
 
 @test "status: prints the last pass" {

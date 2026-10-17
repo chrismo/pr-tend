@@ -11,7 +11,7 @@
 # is always piped.
 
 PRC_DEFAULTS='{"harness": "claude",
-  "settings": {"remote": "origin", "stepTimeout": 1800, "stepBudget": 0, "reviewRounds": 3, "botTimeout": 3600, "interval": 300, "vacuumAfter": 604800, "replyPrefix": "🤖 ",
+  "settings": {"remote": "origin", "stepTimeout": 1800, "stepBudget": 0, "reviewRounds": 3, "botTimeout": 3600, "interval": 300, "vacuumAfter": 604800, "rateLimitFloor": 250, "replyPrefix": "🤖 ",
                "verify": "", "autofix": "", "localReview": "", "botCommand": "", "notify": "",
                "reviewPrompt": "", "implementPrompt": "", "reviewFixPrompt": "", "describePrompt": "",
                "addressPrompt": "", "resolvePrompt": "", "ciFixPrompt": "",
@@ -22,7 +22,7 @@ PRC_SKELETON='{"harness": "claude", "harnesses": {"claude": {}, "pi": {}}, "step
 # settings are the watcher's, which reads no branch file.
 PRC_HARNESSES=(claude pi)
 PRC_STEPS=(address ci-fix describe implement review)
-PRC_GLOBAL_ONLY=(remote interval notify vacuumAfter)
+PRC_GLOBAL_ONLY=(remote interval notify vacuumAfter rateLimitFloor)
 PRC_SETTINGS='stepTimeout?:uint64,stepBudget?:float64,reviewRounds?:uint64,replyPrefix?:string,verify?:string,autofix?:string,localReview?:string,botCommand?:string,botTimeout?:uint64,
               reviewPrompt?:string,implementPrompt?:string,reviewFixPrompt?:string,describePrompt?:string,
               addressPrompt?:string,resolvePrompt?:string,ciFixPrompt?:string,
@@ -33,7 +33,7 @@ type harness = enum(claude,pi)
 type step = {harness?:harness,claude?:hclaude,pi?:hpi}
 type steps = {'"$(printf '"%s"?:step,' "${PRC_STEPS[@]}" | sed 's/,$//')"'}
 type branch_settings = {'"$PRC_SETTINGS"'}
-type global_settings = {remote?:string,interval?:uint64,notify?:string,vacuumAfter?:uint64,'"$PRC_SETTINGS"'}'
+type global_settings = {remote?:string,interval?:uint64,notify?:string,vacuumAfter?:uint64,rateLimitFloor?:uint64,'"$PRC_SETTINGS"'}'
 
 # One line per problem: a key the layer's type doesn't have, or a value that
 # doesn't cast. cast drops unknown keys silently, hence the diff of the input's

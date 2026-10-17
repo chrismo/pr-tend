@@ -62,11 +62,19 @@
 # acts on that clock, and a new reason restarts it. Each timed unenroll
 # notifies, once; one for no local branch is only a pass line.
 #
+# GitHub's rate limit: a pass checks no more branches after one whose sd
+# state found less than settings.rateLimitFloor GraphQL points left (default
+# 250), or had a call refused for the rate limit. Status says so with the
+# reset time, and lists each branch not checked; those keep their glyphs and
+# cached state. The housekeeping that asks GitHub's GraphQL nothing still
+# runs. refresh checks its one branch either way.
+#
 # Env:    SHEEPDOG_STATE_DIR (~/.local/state/sheepdog), STATUS_DIR (~/.claude/tab-status)
 #         LOCAL_BIN (~/.local/bin): where install finds the sd link the job runs
 #         SHEEPDOG_WATCH_TIMEOUT (120): seconds a fetch or sd state may take
 # Config: read with lib/config.sh, no branch file (global file over
-#         built-in defaults): settings.notify, .interval, .remote, .vacuumAfter.
+#         built-in defaults): settings.notify, .interval, .remote, .vacuumAfter,
+#         .rateLimitFloor.
 #         notify — shell command, run with <title> <message> appended
 #         (default: a macOS notification)
 
@@ -148,7 +156,7 @@ glyph_of() {
 # is off: every failure is handled explicitly.
 check() {
   local repo=$1 name=$2 b=$3 wt=$4 json cls glyph state_file prev prev_failed key msg errf
-  local carry reason since prev_since prev_reason now stale=null unenrolled=
+  local carry reason since prev_since prev_reason now stale=null unenrolled= rl_limited rl_left rl_reset
   local -a sent=() failed=()
   errf=$(mktemp)
   if ! json=$(cd "$repo" && with_timeout "$TIMEOUT" sd-state --json "$b" 2>"$errf" </dev/null); then
@@ -164,6 +172,7 @@ check() {
     return 1
   fi
   glyph=$(prc_line 'values glyph' "$cls")
+  read -r rl_limited rl_left rl_reset < <(prc_line 'values f"{on(rate_limit.limited)} {coalesce(rate_limit.remaining, "-")} {coalesce(rate_limit.reset_at, "-")}"' "$json")
 
   state_file="$(state_dir "$repo")/$b.json"
   mkdir -p "$(dirname "$state_file")"
@@ -223,6 +232,21 @@ check() {
     notify "$name $b" "$unenrolled (sd act enroll $b to watch it again)"
     printf '%s\t%s\t-\t%s\n' "$name" "$b" "$unenrolled"
   fi
+  [[ -z ${RATE_STOP:-} ]] || rate_stop "$rl_limited" "$rl_left" "$rl_reset" > "$RATE_STOP"
+}
+
+# rate_stop <limited> <remaining> <reset_at, or ->: why the pass stops for
+# GitHub's GraphQL quota, if it must. A refusal carries no reset time;
+# GitHub's rate_limit endpoint, which costs nothing, has it.
+rate_stop() {
+  local why reset=$3
+  if [[ $1 == true ]]; then why="GitHub refused a call for the rate limit"
+  elif [[ $2 =~ ^[0-9]+$ ]] && (( $2 < RATE_FLOOR )); then why="GitHub rate limit: $2 points left, under settings.rateLimitFloor ($RATE_FLOOR)"
+  else return 0; fi
+  if [[ $reset == - ]]; then
+    reset=$(with_timeout "$TIMEOUT" gh api rate_limit --jq '.resources.graphql.reset | todate' 2>/dev/null </dev/null) || reset=
+  fi
+  echo "$why: the branches below weren't checked${reset:+ (the quota resets at $reset)}"
 }
 
 state_dir() { echo "$STATE_DIR/branches/$(basename "$1")-$(printf '%s' "$1" | shasum | cut -c1-8)"; }
@@ -350,13 +374,14 @@ run_pass() {
   mkdir -p "$STATE_DIR" "$STATUS_DIR"
   # The index's temp file sits beside it, so the mv is a rename a prompt never
   # sees half done.
-  WRITTEN=$(mktemp) GLYPHS=$(mktemp "$STATE_DIR/glyphs.XXXXXX")
-  trap 'rm -f "$WRITTEN" "$GLYPHS"' EXIT
+  WRITTEN=$(mktemp) GLYPHS=$(mktemp "$STATE_DIR/glyphs.XXXXXX") RATE_STOP=$(mktemp) SKIPPED=$(mktemp)
+  trap 'rm -f "$WRITTEN" "$GLYPHS" "$RATE_STOP" "$SKIPPED"' EXIT
   local -a repos branches
-  local repo name b lines="" out
+  local repo name b lines="" out stopped="" stop_line="" wt row
   mapfile -t repos < <(git config --global --get-all sheepdog.repo || true)
   # A config failure is reported per repo by fetch, which then skips it.
   VACUUM_AFTER=$(prc_get settings.vacuumAfter "" true 2>/dev/null) || VACUUM_AFTER=0
+  RATE_FLOOR=$(prc_get settings.rateLimitFloor "" true 2>/dev/null) || RATE_FLOOR=0
 
   for repo in "${repos[@]}"; do
     [[ -d $repo ]] || continue
@@ -376,16 +401,30 @@ run_pass() {
     [[ -z $out ]] || lines+=$out$'\n'
     (( ${#branches[@]} )) || continue
 
-    out=$(fetch "$repo" "$name") || { lines+=$out$'\n'; continue; }
-    [[ -z $out ]] || lines+=$out$'\n'
-
+    if [[ -z $stopped ]]; then
+      out=$(fetch "$repo" "$name") || { lines+=$out$'\n'; continue; }
+      [[ -z $out ]] || lines+=$out$'\n'
+    fi
     load_worktrees "$repo"
+
     for b in "${branches[@]}"; do
+      if [[ -n $stopped ]]; then
+        lines+=$stop_line"$name"$'\t'"$b"$'\t-\tnot checked: rate limit\n' stop_line=""
+        printf '%s\t%s\n' "${worktree_of[$b]:-}" "$b" >> "$SKIPPED"
+        continue
+      fi
       lines+=$(check "$repo" "$name" "$b" "${worktree_of[$b]:-}")$'\n' || true
+      if [[ -s $RATE_STOP ]]; then stopped=$(cat "$RATE_STOP") stop_line="$name"$'\t-\t⚠️\t'"$stopped"$'\n'; fi
     done
   done
 
+  # The branches not checked keep their glyphs, files and index rows both.
   local f
+  while IFS= read -r row; do
+    printf '%s\n' "$row" >> "$GLYPHS"
+    wt=${row%%$'\t'*}
+    echo "$STATUS_DIR/$(basename "$wt").pr" >> "$WRITTEN"
+  done < <(awk -F'\t' 'FILENAME == ARGV[1] { keep[$1 FS $2]; next } ($1 FS $2) in keep' "$SKIPPED" "$STATE_DIR/glyphs" 2>/dev/null)
   for f in "$STATUS_DIR"/*.pr; do
     [[ -e $f ]] || continue
     grep -qxF "$f" "$WRITTEN" || rm -f "$f"
