@@ -693,6 +693,19 @@ squash_parent_away() {
   [[ "$(field '.errors | join(" ")')" == *"no base for feat on parent: no base pin, and no fork-point"* ]]
 }
 
+@test "sync: open parent, stale pin, no fork-point: only the stale-pin error (#97)" {
+  git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
+  git switch -qc feat main && commit c.txt c
+  git config branch.feat.sd-parent parent
+  local pin; pin=$(git rev-parse feat)
+  git update-ref refs/sheepdog/feat/base "$pin"
+  git commit -q --amend -m "rewritten"
+  state
+  [ "$(field .sync.old_base)" = null ]
+  [ "$(field '.errors | length')" = 1 ]
+  [[ "$(field '.errors[0]')" == *"base pin ${pin:0:7} is no longer in feat's history"* ]]
+}
+
 @test "sync: open parent amended and force-pushed, no pin, reflog gone: no old base below the parent's commits (#97)" {
   git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
   git switch -qc feat && commit c.txt c

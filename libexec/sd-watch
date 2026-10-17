@@ -48,6 +48,7 @@
 #   bot: routine agent work, picked up when the branch is next worked on
 #   review review-fix: the same
 #   behind push open-pr ship-parent draft bot-trigger ci-rerun retarget: mechanical
+#     (behind with no old base is chrismo's, but its errors step shows ⚠️ first)
 #   ci-wait bot-wait review-wait parent-wait merge-wait: waiting; merge-wait (GitHub
 #     recomputing after the base moved) keeps ready notified
 # A notification that fails is tried once more, on the next pass that still
