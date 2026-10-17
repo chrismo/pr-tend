@@ -1116,6 +1116,10 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   run "$SD_WATCH" vacuum --dry-run feat
   [ "$status" -ne 0 ]
   [[ "$output" == *"usage: sd watch vacuum [--dry-run]"* ]] || false
+  ps_fixture feat '.pr.state = "MERGED"'
+  run "$SD_WATCH" vacuum ""
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"usage: sd watch vacuum [--dry-run]"* ]] || false
   enrolled feat
 }
 
@@ -1229,6 +1233,16 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   [[ "$output" == *"repo  feat  skipped, sd state is unsure: sd state gave no next steps"* ]] || false
   [[ "$output" == *"repo  other  skipped, sd state is unsure: unparseable sd state output"* ]] || false
   enrolled feat && enrolled other
+}
+
+@test "vacuum: unsure reasons that can't be read aren't called no next steps" {
+  git switch -q main
+  ps_fixture feat '.errors = ["gh: down"]'
+  jq -c '.errors = [{"odd": 1}]' "$PS_FIXTURES/feat.json" > "$TMP/f" && mv "$TMP/f" "$PS_FIXTURES/feat.json"
+  run "$SD_WATCH" vacuum
+  [ "$status" -eq 0 ]
+  [ "$output" = "repo  feat  skipped, sd state is unsure: its reasons couldn't be read" ]
+  enrolled feat
 }
 
 @test "vacuum: an unenroll that fails is said" {

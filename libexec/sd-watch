@@ -227,8 +227,9 @@ check() {
     fi
   fi
   if [[ $carry == true && -n ${VACUUM_LOG:-} ]]; then
-    vacuum_log "$name" "$b" "skipped, sd state is unsure: $(prc_line 'values sj([...coalesce(errors, []), ...coalesce(stale, [])], "; ")' "$json" 2>/dev/null \
-      | grep . || echo "sd state gave no next steps")"
+    vacuum_log "$name" "$b" "skipped, sd state is unsure: $(prc_line 'values coalesce(c.note,
+      sj([...coalesce(s.errors, []), ...coalesce(s.stale, [])], "; "), "its reasons couldn'"'"'t be read")' \
+      "{\"c\": $cls, \"s\": $json}" 2>/dev/null)"
   fi
 
   # A refresh can overlap a pass: unlocked, so both may notify a new reason
@@ -625,10 +626,10 @@ case ${1:-} in
       *) glyph_of "${2:-}" ;;
     esac ;;
   vacuum)
-    case "${*:2}" in
-      "") prc_super_init || exit 1; vacuum ;;
-      --dry-run) prc_super_init || exit 1; vacuum_preview ;;
-      -h|--help) usage ;;
+    case $#:${2:-} in
+      1:) prc_super_init || exit 1; vacuum ;;
+      2:--dry-run) prc_super_init || exit 1; vacuum_preview ;;
+      2:-h|2:--help) usage ;;
       *) die "usage: sd watch vacuum [--dry-run]" ;;
     esac ;;
   status)
