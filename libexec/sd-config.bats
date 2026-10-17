@@ -1123,6 +1123,22 @@ old_super() {
   [[ "$output" == *"settings.implementAllow"* ]]
 }
 
+@test "settings.flags (#125): typed lists with defaults; a file's list replaces only that one" {
+  [[ "$("$SD_CONFIG" get settings.flags.suppressions)" == *"shellcheck"* ]] || false
+  [[ "$("$SD_CONFIG" get settings.flags.testFiles)" == *"*.bats"* ]] || false
+  write_global '{"settings":{"flags":{"skips":[]}}}'
+  [ -z "$("$SD_CONFIG" get settings.flags.skips)" ]
+  [[ "$("$SD_CONFIG" get settings.flags.suppressions)" == *"shellcheck"* ]] || false
+  write_branch feat '{"settings":{"flags":{"skips":"skip"}}}'
+  run "$SD_CONFIG" get settings.flags.skips
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"settings.flags.skips"* ]]
+  write_branch feat '{"settings":{"flags":{"skip":[]}}}'
+  run "$SD_CONFIG" get settings.flags.skips
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"settings.flags.skip: unknown key"* ]]
+}
+
 @test "validate: a wrong type is an error with the bad value" {
   write_global '{"settings":{"stepTimeout":"30m"}}'
   run "$SD_CONFIG" get settings.remote

@@ -11,8 +11,8 @@
 # the output of the first.
 #
 # With no arguments, the built-in list: every `read -r -d '' NAME <<'EOF'`
-# query in libexec/sd-state, libexec/sd-act and libexec/sd-watch, and lib/next.sh's
-# PRN_QUERY, each over its ci/fixtures/*.json input; the field picks
+# query in libexec/sd-state, libexec/sd-act and libexec/sd-watch, lib/next.sh's
+# PRN_QUERY and lib/sheepdog.sh's FLAG_LINES, each over its ci/fixtures/*.json input; the field picks
 # (prc_val) and one-line queries use nothing these don't. Mode json (default)
 # runs the query through prc_json, line through prc_line. One line per
 # filter, then "super-stress: <filters> filters, <runs> runs each, <failures>
@@ -60,6 +60,8 @@ builtin_list() {
   add sd-state:ASSEMBLE "$(heredoc "$st" ASSEMBLE)" "$FIX/state-args.json"
   add sd-state:LINE "$(heredoc "$st" LINE)" "$FIX/state.json" line
   add sd-state:LONG "$(heredoc "$st" LONG)" "$FIX/state.json" line
+  add sd-state:FLAGS "$(heredoc "$st" FLAGS)" "$FIX/flags.json" line
+  add sheepdog:FLAG_LINES "$(heredoc "$ROOT/lib/sheepdog.sh" FLAG_LINES)" "$FIX/state.json" line
   add sd-watch:CLASSIFY "$(heredoc "$ROOT/libexec/sd-watch" CLASSIFY)" "$FIX/state.json"
   add sd-act:GATE "$(heredoc "$act" GATE)" "$FIX/state.json"
   add sd-act:TRIGGER_GATE "$(heredoc "$act" TRIGGER_GATE)" "$FIX/state.json"

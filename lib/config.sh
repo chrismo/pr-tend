@@ -15,7 +15,12 @@ PRC_DEFAULTS='{"harness": "claude",
                "verify": "", "autofix": "", "localReview": "", "botCommand": "", "notify": "",
                "reviewPrompt": "", "implementPrompt": "", "reviewFixPrompt": "", "describePrompt": "",
                "addressPrompt": "", "resolvePrompt": "", "ciFixPrompt": "",
-               "botLogin": [], "botIgnore": [], "botIgnoreBody": [], "implementAllow": []}}'
+               "botLogin": [], "botIgnore": [], "botIgnoreBody": [], "implementAllow": [],
+               "flags": {"suppressions": ["shellcheck\\s+disable", "eslint-disable", "#\\s*noqa", "@ts-ignore", "@ts-expect-error",
+                                          "#\\s*type:\\s*ignore", "//\\s*nolint", "rubocop:disable", "#!?\\[allow\\("],
+                         "skips": ["^\\s*skip(\\s|$)", "\\.skip\\(", "\\bxit\\(", "\\bxdescribe\\(", "\\bt\\.Skip(f|Now)?\\(",
+                                   "@pytest\\.mark\\.skip", "^\\s*pending(\\s|\\(|$)"],
+                         "testFiles": ["*_test.*", "*.test.*", "*.bats", "test/", "spec/", "tests/"]}}}'
 PRC_SKELETON='{"harness": "claude", "harnesses": {"claude": {}, "pi": {}}, "steps": {}, "settings": {}}'
 
 # A step is a sd act verb that runs an agent: add new ones here. The global-only
@@ -26,7 +31,8 @@ PRC_GLOBAL_ONLY=(remote interval notify vacuumAfter rateLimitFloor)
 PRC_SETTINGS='stepTimeout?:uint64,stepBudget?:float64,reviewRounds?:uint64,replyPrefix?:string,verify?:string,autofix?:string,localReview?:string,botCommand?:string,botTimeout?:uint64,
               reviewPrompt?:string,implementPrompt?:string,reviewFixPrompt?:string,describePrompt?:string,
               addressPrompt?:string,resolvePrompt?:string,ciFixPrompt?:string,
-              botLogin?:[string],botIgnore?:[string],botIgnoreBody?:[string],implementAllow?:[string]'
+              botLogin?:[string],botIgnore?:[string],botIgnoreBody?:[string],implementAllow?:[string],
+              flags?:{suppressions?:[string],skips?:[string],testFiles?:[string]}'
 PRC_TYPES='type hclaude = {model?:string,effort?:enum(low,medium,high,xhigh,max),args?:string,useApiKey?:bool}
 type hpi = {provider?:string,model?:string,effort?:enum(off,minimal,low,medium,high,xhigh,max),args?:string}
 type harness = enum(claude,pi)

@@ -35,6 +35,16 @@
 #             review.bot also has triggered (when sd act trigger posted, by
 #             GitHub's clock), replied (a bot has posted since; null with no
 #             trigger time or when gh fails) and waited (seconds since)
+#   flags     for chrismo, never a gate (#125): in the net diff old_base..HEAD
+#             (the whole branch, whoever wrote it), added lines matching
+#             settings.flags.suppressions, added skips (settings.flags.skips)
+#             in test files, and each hunk of changed or deleted lines in a
+#             test file the base had (test-edit); with the commit that added
+#             the line (blame), or for a test-edit the commits that touched
+#             the file. Test files: settings.flags.testFiles, globs on the
+#             file's name, a whole path when one has a /, or a directory
+#             anywhere when it ends in /. null without a base, or on an
+#             invalid pattern (an error)
 #   threads   what's owed, marked ! (blocks: unresolved threads, reviews
 #             requesting changes) or i (to read: bot review bodies and PR
 #             comments not yet marked handled)
@@ -53,8 +63,9 @@
 #   default   the one-liner (led by the PR's url, not the branch), then NEXT:
 #             the first step and how many follow
 #   --long    the one-liner, every step, then a line per owed item
-#             (mark, type, author, excerpt, url) and per open review finding
-#             (r, severity, file:line, body)
+#             (mark, type, author, excerpt, url), per open review finding
+#             (r, severity, file:line, body) and per flag (⚑, kind,
+#             file:line, the line, commits)
 #   --json    everything
 #
 # Never fetches, and writes only the PR numbers it finds (branch.<b>.sd-pr,
@@ -85,7 +96,9 @@
 # and runs into bot-silent. Nor is the commit checked: a slow reply to an earlier
 # trigger that lands after a later one counts as the later one's reply.
 # botTimeout (seconds, 3600): how long to wait on that reply before
-# bot-silent.
+# bot-silent. flags: {suppressions, skips} (RE2 regexes over a line's text)
+# and testFiles (globs); a list set in a file replaces that list's default,
+# and [] turns it off.
 # State: branch.<name>.pr-{parent,tend,harness,session,lock}, branch.<name>.sd-pr
 # (the PR's number, written here), branch.<name>.sd-handled
 # (multi-valued: node ids of bot reviews/comments already dealt with),
@@ -584,6 +597,108 @@ if [[ $pr != null && $(prc_val "$pr" 'on(state == "OPEN") and on(isDraft)') == t
   [[ $required != null ]] || errors+=("gh (required checks on $r_base): $(tr '\n' ' ' <"$GH_ERR")")
 fi
 
+# ── flags: what chrismo should see in base..HEAD (#125) ──────────────────────
+
+# Lines of the net diff (from git_diff_lines below), tab-separated:
+# +, line, 1, test (1|0), file, file, text: an added line;
+# -, first line, lines removed, 1, old file, new file, first removed line: a
+# hunk of a test file. Out: the same with the kind (suppression, skip,
+# test-edit) first. A skip counts only in a test file.
+read -r -d '' FLAGS <<'EOF' || true
+fn hit(t, res): len(coalesce([unnest {t, re: res} | where len(regexp(re, t)) > 0], [])) > 0
+unnest {p: flags, f: coalesce([unnest l | values split(this, "\t")], [])}
+| values {f, t: sj(f[6:], "\t"),
+          k: f[0] == "-" ? "test-edit"
+             : f[3] == "1" and hit(sj(f[6:], "\t"), p.skips) ? "skip"
+             : hit(sj(f[6:], "\t"), p.suppressions) ? "suppression" : ""}
+| where k != ""
+| values f"{k}\t{f[1]}\t{f[2]}\t{f[4]}\t{f[5]}\t{t}"
+EOF
+
+# is_test <path> <globs...>: a glob ending in / is a directory anywhere in the
+# path; one with a / matches the whole path; any other the file's name.
+is_test() {
+  local p=$1 g; shift
+  for g; do
+    if [[ $g == */ ]]; then [[ /$p == *"/$g"* ]] && return 0
+    elif [[ $g == */* ]]; then [[ $p == $g ]] && return 0
+    else [[ ${p##*/} == $g ]] && return 0
+    fi
+  done
+  return 1
+}
+
+# git_diff_lines <base> <head> <tests>: FLAGS's input. -U0, so a hunk is only
+# changed lines; a removed line is always one the base had.
+git_diff_lines() {
+  git -c core.quotePath=false diff -M -U0 --no-color --no-ext-diff --no-textconv \
+      --src-prefix=a/ --dst-prefix=b/ "$1" "$2" \
+    | SD_TESTS=$3 awk '
+      BEGIN { n = split(ENVIRON["SD_TESTS"], a, "\n"); for (i = 1; i <= n; i++) t[a[i]] = 1 }
+      ro > 0 || rn > 0 {
+        c = substr($0, 1, 1)
+        if (c == "-" && ro > 0) {
+          if (first && (old in t)) print "-\t" ol "\t" cnt "\t1\t" old "\t" new "\t" substr($0, 2)
+          first = 0; ro--
+        } else if (c == "+" && rn > 0) {
+          print "+\t" nl "\t1\t" ((new in t) ? 1 : 0) "\t" new "\t" new "\t" substr($0, 2); nl++; rn--
+        }
+        next
+      }
+      /^diff --git / { old = ""; new = ""; next }
+      /^--- / { old = substr($0, 5); sub(/^a\//, "", old); sub(/\t$/, "", old); next }
+      /^\+\+\+ / { new = substr($0, 5); sub(/^b\//, "", new); sub(/\t$/, "", new); next }
+      /^@@ / {
+        k = split(substr($2, 2), o, ","); ol = o[1] + 0; ro = k > 1 ? o[2] + 0 : 1
+        k = split(substr($3, 2), w, ","); nl = w[1] + 0; rn = k > 1 ? w[2] + 0 : 1
+        cnt = ro; first = 1
+      }'
+}
+
+# flags_json <base> <head> <flags-config>: a JSON list of {kind, file, line,
+# n, text, commits}: commits is the one that added the line (blame), or for a
+# test-edit every commit in base..head that touched the file. 1 with a message
+# on an invalid pattern or a failed step.
+flags_json() {
+  local base=$1 hd=$2 cfg=$3 tests="" st a b p lines hits kind line n file new text sha cj out=""
+  local -a globs paths
+  local -A touched
+  [[ $(prc_val "$cfg" 'len(coalesce([unnest [...suppressions, ...skips] | where is_error(regexp(this, ""))], [])) == 0' 2>/dev/null) == true ]] \
+    || { echo "settings.flags has an invalid regex: $cfg"; return 1; }
+  mapfile -t globs < <(prc_line 'unnest testFiles' "$cfg") || return 1
+  while IFS=$'\t' read -r st a b; do
+    for p in "$a" ${b:+"$b"}; do is_test "$p" "${globs[@]}" && tests+=$p$'\n'; done
+  done < <(git -c core.quotePath=false diff -M --name-status "$base" "$hd")
+  lines=$(git_diff_lines "$base" "$hd" "$tests" | prc_strings) || { echo "couldn't read the diff"; return 1; }
+  hits=$(prc_line "$FLAGS" "{\"flags\": $cfg, \"l\": $lines}") || { echo "couldn't match the diff"; return 1; }
+  while IFS=$'\t' read -r kind line n file new text; do
+    [[ -n $kind ]] || continue
+    if [[ $kind == test-edit ]]; then
+      if [[ -z ${touched[$file]+x} ]]; then
+        paths=("$file")
+        [[ $new == /dev/null || $new == "$file" ]] || paths+=("$new")
+        touched[$file]=$(git log --format=%H "$base..$hd" -- "${paths[@]}" | prc_strings) || return 1
+      fi
+      cj=${touched[$file]}
+    else
+      sha=$(git blame --porcelain -L "$line,+1" "$hd" -- "$file" 2>/dev/null) || sha=
+      sha=${sha%%$'\n'*} sha=${sha%% *}
+      cj='[]'
+      [[ -n $sha ]] && cj="[\"$sha\"]"
+    fi
+    text=${text//$'\t'/ } text=${text//[[:cntrl:]]/}
+    out+=${out:+,}$(printf '{"kind": "%s", "file": %s, "line": %s, "n": %s, "text": %s, "commits": %s}' \
+      "$kind" "$(jstr "$file")" "$line" "$n" "$(jstr "${text:0:200}")" "$cj")
+  done <<<"$hits"
+  echo "[$out]"
+}
+
+flags=null
+if [[ -n ${old_base:-} ]]; then
+  flag_cfg=$(prc_get settings.flags "$branch" false json) || die "sd config failed"
+  flags=$(flags_json "$old_base" "$head" "$flag_cfg") || { errors+=("flags: $flags"); flags=null; }
+fi
+
 # ── assemble ─────────────────────────────────────────────────────────────────
 
 # Over the facts gathered above, as one record (see `args` below).
@@ -715,6 +830,7 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
                             and len(coalesce([unnest s.r_findings.findings
                                               | where coalesce(severity, "") != "nit" and coalesce(action, "") != "declined"], [])) == 0,
                   cap: s.review_rounds, items: s.r_findings.findings}},
+    flags: s.flags,
     threads: {owed_bot: s.gh_ok ? len(ob) : null,
               owed_human: s.gh_ok ? len(coalesce([unnest owed | where kind == "human"], [])) : null,
               outdated: s.gh_ok ? len(coalesce([unnest owed | where on(outdated)], [])) : null,
@@ -740,13 +856,13 @@ refs_json=$(git for-each-ref --format='%(refname) %(objectname)' "refs/sheepdog/
 args=$(printf '{"branch": %s, "head": %s, "pr": %s, "parent": %s, "parent_source": %s, "parent_pr": %s, "parent_merged": %s, "parent_local": %s, "parent_remote": %s, "parent_unpushed": %s,
   "target": %s, "default_branch": %s, "sync_ahead": %s, "behind": %s, "up_to_date": %s, "old_base": %s, "by_tree": %s, "conflict": %s, "undone": %s,
   "remote_sha": %s, "ahead": %s, "push_behind": %s, "diverged": %s, "remote_ours": %s, "theirs": %s, "remote_made": %s, "dirty": %s, "stale": %s,
-  "r_local": %s, "r_bot": %s, "r_accepted": %s, "r_findings": %s, "r_findings_at_head": %s, "review_rounds": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s, "bot_triggered": %s, "bot_timeout": %s, "now": %s,
+  "r_local": %s, "r_bot": %s, "r_accepted": %s, "r_findings": %s, "r_findings_at_head": %s, "review_rounds": %s, "flags": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s, "bot_triggered": %s, "bot_timeout": %s, "now": %s,
   "required": %s, "ignore": %s, "ignore_body": %s, "handled": %s, "refs": %s, "enrolled": %s, "harness": %s, "session": %s, "lock": %s,
   "rl_cost": %s, "rl_remaining": %s, "rl_reset": %s, "rl_limited": %s, "errors": %s}\n' \
   "$(jstr "$branch")" "$(jstr "$head")" "$pr" "$(jstr "$parent")" "$(jstr "$parent_source")" "$parent_pr" "$parent_merged" "$parent_local" "$parent_remote" "$parent_unpushed" \
   "$(jstr "$target")" "$(jstr "$default_branch")" "$sync_ahead" "$behind" "$up_to_date" "$(jnull "$old_base")" "$by_tree" "$conflict" "$undone" \
   "$(jnull "$remote_sha")" "$ahead" "$push_behind" "$diverged" "$remote_ours" "$theirs" "$remote_made" "$dirty" "$stale_json" \
-  "${review[local]}" "${review[bot]}" "${review[accepted]}" "$r_findings" "$r_findings_at_head" "$review_rounds" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" "$(jnull "$bot_triggered")" "$bot_timeout" "$(jstr "$(date -u +%Y-%m-%dT%H:%M:%SZ)")" \
+  "${review[local]}" "${review[bot]}" "${review[accepted]}" "$r_findings" "$r_findings_at_head" "$review_rounds" "$flags" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" "$(jnull "$bot_triggered")" "$bot_timeout" "$(jstr "$(date -u +%Y-%m-%dT%H:%M:%SZ)")" \
   "$required" "$ignore" "$ignore_body" "$(jlist "branch.$branch.sd-handled")" "$refs_json" \
   "$(jstr "$(cfg sheepdog)")" "$(jstr "$(cfg sd-harness)")" "$(jstr "$(cfg sd-session)")" "$(jstr "$(cfg sd-lock)")" \
   "$rl_cost" "$rl_remaining" "$(jnull "$rl_reset")" "$rl_limited" "$errors_json")
@@ -777,6 +893,7 @@ values [
   pin("local", review.local), pin("bot", review.bot), pin("accepted", review.accepted),
   nul(review.findings) ? null
     : f"review: {review.findings.n} finding{review.findings.n == 1 ? "" : "s"} (round {review.findings.round}/{review.findings.cap}{on(review.findings.declined) ? ", declined" : ""}){review.findings.at_head ? "" : " on old head"}",
+  len(coalesce(flags, [])) > 0 ? f"⚑ {len(flags)} flagged" : null,
   on(session.locked) ? "locked" : null,
   on(fresh == false) ? "⚠ stale: fetch" : null,
   len(errors) > 0 ? f"⚠ {len(errors)} error(s)" : null
@@ -812,3 +929,4 @@ prc_line 'where not nul(review.findings) | unnest review.findings.items
   | values f"  r  {coalesce(severity, "?")}  {coalesce(file, "?")}:{coalesce(line, "?")}  {coalesce(body, "")}",
            coalesce(action, null) is null ? null : f"       {action}: {coalesce(reply, "")}"
   | where this is not null' "$state"
+flag_lines "$state"
