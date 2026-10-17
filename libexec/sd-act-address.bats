@@ -283,6 +283,7 @@ remote_feat() { git -C "$TMP/origin.git" rev-parse feat; }
   run "$SD_ACT" address
   [ "$status" -ne 0 ]
   [[ "$output" == *"the agent changed CI config (.rwx/tests.yml): review, then sd act push"* ]]
+  [[ "$output" == *"replies weren't posted"*"sd act address answers them again"* ]]
   [ "$(git log -1 --format=%s)" = "Uppercase three" ]
   [ "$(remote_feat)" = "$before" ]
   [ "$(gh_ops)" = nodes ]

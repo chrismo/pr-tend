@@ -727,21 +727,23 @@ guidance_repo() {
 
 # ── protected paths: CI config an agent's commit may not publish (#124) ─────
 
-@test "protected_paths: the default list, with no setting and no .sheepdog/protected-paths" {
+@test "protected_paths: the default list, with no setting and no .sheepdog/protected-paths; the list's file is protected too" {
   guidance_repo
   run protected_paths feat HEAD
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '%s\n' .github/workflows/ .github/actions/ .rwx/ .captain/ .circleci/ .gitlab-ci.yml .buildkite/)" ]
+  [ "$output" = "$(printf '%s\n' .github/workflows/ .github/actions/ .rwx/ .captain/ .circleci/ .gitlab-ci.yml .buildkite/ .sheepdog/protected-paths)" ]
 }
 
-@test "protected_paths: .sheepdog/protected-paths in the base commit, comments and blanks dropped; the branch's own copy ignored" {
+@test "protected_paths: .sheepdog/protected-paths in the base commit, comments and blanks dropped; the branch's own copy ignored; the file itself always protected" {
   guidance_repo
   mkdir -p .sheepdog && printf '# ours\n.github/\n\n  deploy/pipeline.yml  # the deploy\n' > .sheepdog/protected-paths
   git add .sheepdog && git commit -qm paths
   base=$(git rev-parse HEAD)
   printf 'nothing\n' > .sheepdog/protected-paths && git commit -qam weaken
-  [ "$(protected_paths feat "$base")" = "$(printf '%s\n' .github/ deploy/pipeline.yml)" ]
-  [ "$(protected_paths feat "")" = "$(protected_paths feat HEAD~2)" ]
+  [ "$(protected_paths feat "$base")" = "$(printf '%s\n' .github/ deploy/pipeline.yml .sheepdog/protected-paths)" ]
+  printf '# none\n' > .sheepdog/protected-paths && git commit -qam emptied
+  [ "$(protected_paths feat HEAD)" = .sheepdog/protected-paths ]
+  [ "$(protected_paths feat "")" = "$(protected_paths feat HEAD~3)" ]   # no base: the default list
 }
 
 @test "protected_paths: settings.protectedPaths wins, and an empty list protects nothing" {

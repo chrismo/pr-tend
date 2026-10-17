@@ -394,6 +394,15 @@ held() { git config --get branch.feat.sd-held; }
   done
 }
 
+@test "a CI config change the agent committed itself is held even when the step then fails (#124)" {
+  printf '#!/usr/bin/env bash\nmkdir -p .github/workflows && echo x > .github/workflows/x.yml && git add -A && git commit -qm "agent made it"\n' > "$FX/agent"
+  chmod +x "$FX/agent"
+  echo 'not json' > "$FX/result.json"
+  run "$SD_ACT" ci-fix
+  [ "$status" -ne 0 ]
+  [ "$(held)" = "$(git rev-parse HEAD)"$'\n'".github/workflows/x.yml" ]
+}
+
 @test "--no-publish with a CI config change: held all the same (#124)" {
   agent_touches_ci
   run "$SD_ACT" ci-fix --no-publish

@@ -184,7 +184,8 @@
 # again. Protected paths: settings.protectedPaths; else
 # .sheepdog/protected-paths in the base commit (one per line, # comments);
 # else .github/workflows/ .github/actions/ .rwx/ .captain/ .circleci/
-# .gitlab-ci.yml .buildkite/. One ending in / covers what's under it.
+# .gitlab-ci.yml .buildkite/; unless the setting is set,
+# .sheepdog/protected-paths itself too. One ending in / covers what's under it.
 #
 # --force:
 #   address         run even if the branch is unpushed, diverged or taken over
@@ -525,7 +526,7 @@ address() {
   before=$(git rev-parse "refs/heads/$b")
   result=$(cd "$wt" && HARNESS_STEP=address HARNESS_BRANCH=$b harness_run "$h" "$sid" "$mode" "$timeout" \
              "$guidance"$'\n\n'"$ADDRESS_CONTRACT"$'\n\nPR '"$(prc_val "$state" pr.url)"$'\nFindings:\n'"$(printf '%s\n' "$findings" | prc_super -i json -J -c 'values this' -)" "$SCHEMA" "$cfg") \
-    || die "the $h step failed or returned no usable result (session $sid)"
+    || { hold_since "$b" "$gbase" "$before"; die "the $h step failed or returned no usable result (session $sid)"; }
   git config "branch.$b.sd-session" "$sid"
   git config "branch.$b.sd-harness" "$h"
   hold_since "$b" "$gbase" "$before"
@@ -560,7 +561,9 @@ address() {
     return
   fi
 
-  hold_gate "$b" "pushing $b, so nothing posted"
+  # The plan isn't kept: after the push, the items are still owed, and a
+  # second address finds the fix already in (it spends tokens again).
+  hold_gate "$b" "pushing $b" "The replies weren't posted, so the items are still owed: after sd act push, sd act address answers them again, or answer them on GitHub"
   push_branch "$b" "$remote" || die "not pushed, so nothing posted"
   local prefix id action at reply line failed=0 pr_id body=""
   prefix=$(prc_get settings.replyPrefix "$b" false) || die "sd config failed"
@@ -1200,7 +1203,7 @@ implement_run() {
   echo "sd act: $STEP_H ($STEP_MODE session $STEP_SID) is implementing $b…" >&2
   result=$(cd "$wt" && HARNESS_CLAUDE_ALLOW=$allow \
              && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" "$prompt" "$schema" "$STEP_CFG") \
-    || die "the $STEP_H implement step failed or returned no usable result (session $STEP_SID)"
+    || { hold_since "$b" "$gbase" "$before"; die "the $STEP_H implement step failed or returned no usable result (session $STEP_SID)"; }
   step_store "$b"
   hold_since "$b" "$gbase" "$before"
   agent_head=$(git rev-parse "refs/heads/$b")
@@ -1419,7 +1422,7 @@ ci_fix() {
   before=$(git rev-parse "refs/heads/$b")
   result=$(cd "$wt" && HARNESS_CLAUDE_ALLOW=$allow \
              && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" "$prompt" "$CI_FIX_SCHEMA" "$STEP_CFG") \
-    || die "the $STEP_H ci-fix step failed or returned no usable result (session $STEP_SID)"
+    || { hold_since "$b" "$base" "$before"; die "the $STEP_H ci-fix step failed or returned no usable result (session $STEP_SID)"; }
   step_store "$b"
   hold_since "$b" "$base" "$before"
   agent_head=$(git rev-parse "refs/heads/$b")
@@ -1693,19 +1696,20 @@ hold_after() {
 }
 
 # hold_since <branch> <base> <since>: hold_after over <since>..the branch, if
-# it moved. Each agent step runs it right after the harness returns, before
-# any outcome can die (the agent may commit itself: the deny is no
+# it moved. Each agent step runs it right after the harness returns, failed
+# or not, before any outcome can die (the agent may commit itself: the deny is no
 # guarantee), and again from there over the pipeline's own commit.
 hold_since() {
   [[ $(git rev-parse "refs/heads/$1") != "$3" ]] || return 0
   hold_after "$1" "$2" "$(git diff --name-only --no-renames "$3" "refs/heads/$1")"
 }
 
-# hold_gate <branch> <doing>: refuse <doing> while a hold is active.
+# hold_gate <branch> <doing> [<then>]: refuse <doing> while a hold is active;
+# <then> follows the message.
 hold_gate() {
   local paths
   paths=$(hold_paths "$1") || return 0
-  die "not $2: $(hold_say "$paths")"
+  die "not $2: $(hold_say "$paths")${3:+. $3}"
 }
 
 # ── push ─────────────────────────────────────────────────────────────────────
