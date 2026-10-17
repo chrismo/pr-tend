@@ -18,12 +18,15 @@
 #
 # Past settings.branchBudget (spend.budget; 0 is none), nothing spends tokens
 # on the branch: the first agent step becomes chrismo's, the rest go, and the
-# run steps stay (#121). agent() makes that swap; the dedupe at the end keeps
-# the first.
+# run steps stay (#121). So does open-pr: sd act ship describes the branch
+# when its description is stale, which spends; ship-parent's describe spends
+# on the parent, against its budget. spends() makes that swap, agent() for
+# agent steps; the dedupe at the end keeps the first.
 PRN_QUERY='fn plural(k, w): f"{k} {w}{k == 1 ? "" : "s"}"
 fn step(key, who, say, cmd): {key: key, who: who, say: say, cmd: cmd}
 fn usd(x): f"${round(x * 100)::int64 / 100}.{round(x * 100)::int64 % 100 < 10 ? "0" : ""}{round(x * 100)::int64 % 100}"
-fn agent(budget, key, say, cmd): budget is null ? step(key, "agent", say, cmd) : budget
+fn spends(budget, s): budget is null ? s : budget
+fn agent(budget, key, say, cmd): spends(budget, step(key, "agent", say, cmd))
 fn covers(p): on(p.status in ["covered", "rewritten-same"])
 fn trails(p): on(p.status in ["uncovered", "rewritten-changed", "unknown"])
 fn why_blocked(m): m == "BLOCKED" ? "the merge is blocked"
@@ -117,7 +120,8 @@ values {...s, remote}
              : on(push.diverged) ? f"force-push {plural(coalesce(sync.ahead, push.ahead), "commit")} (rewritten); a plain git push is rejected, and pulling would undo the rewrite"
              : n(push.ahead) == 0 ? f"force-push: drop {plural(push.behind, "commit")} the remote has, reset away here"
              : f"push {plural(push.ahead, "commit")}", "sd act push") : null,
-    pr is null and len(errors) == 0 and not parent_unpushed ? step("open-pr", "run", "ship: push, open a draft PR", "sd act ship") : null,
+    pr is null and len(errors) == 0 and not parent_unpushed
+      ? spends(budget, step("open-pr", "run", "ship: push, open a draft PR", "sd act ship")) : null,
     has_pr and draft_ready and not need_review and not bot_due and not bot_waiting
       ? step("draft", "run", f"{on(ci.verdict == "none") ? "reviewed, no CI checks" : "CI green and reviewed"}: mark the PR ready for review",
              "gh pr ready") : null,

@@ -570,6 +570,15 @@ EOF
   [ "$(usage_last 'f"{nul(cost_usd)}|{estimated}"')" = "true|true" ]
 }
 
+@test "harness_run: a timed-out claude step whose cap came from harnesses.claude.args is charged that cap" {
+  harness_stubs
+  claude_stub_appends sid1 '{"message":{"role":"assistant","usage":{"input_tokens":9,"output_tokens":9}},"type":"assistant"}'
+  run harness_run claude sid1 resume 30 "do it" '{}' '{"harness": "claude", "args": "--verbose --max-budget-usd 7.5"}'
+  [ "$(usage_last 'f"{cost_usd == 7.5}|{estimated}"')" = "true|true" ]
+  run harness_run claude sid1 resume 30 "do it" '{}' '{"harness": "claude", "args": "--max-budget-usd=2"}'
+  [ "$(usage_last 'f"{cost_usd == 2.}|{estimated}"')" = "true|true" ]
+}
+
 @test "harness_run: a claude step that failed before any turn costs nothing, and isn't an estimate" {
   harness_stubs
   claude_stub_appends sid1 ""

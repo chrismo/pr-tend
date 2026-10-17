@@ -280,6 +280,16 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(keys "$over")" = ready ]
 }
 
+@test "past settings.branchBudget: open-pr is chrismo's too, since ship may describe (#121)" {
+  local nopr=('.pr = null' '.push = {"remote_sha": null, "ahead": 2, "behind": 0, "diverged": false, "remote_ours": null}')
+  [ "$(keys "${nopr[@]}")" = "push open-pr" ]
+  [ "$(keys '.spend = {"usd": 30, "budget": 25}' "${nopr[@]}")" = "push budget" ]
+  # the parent's ship spends on the parent, against its own budget
+  [ "$(keys '.spend = {"usd": 30, "budget": 25}' "${nopr[@]}" \
+            '.parent = {"name": "p", "source": "config", "merged": false, "local": true, "on_remote": false, "unpushed": true, "pr": null}' \
+            '.sync = {"target": "p", "default": "main", "behind": null, "up_to_date": null, "conflict": null, "old_base": null}')" = ship-parent ]
+}
+
 @test "within settings.branchBudget, or with none (0): the agent steps as usual" {
   [ "$(keys '.spend = {"usd": 24.9, "budget": 25}' '.threads.owed_bot = 2')" = bot ]
   [ "$(keys '.spend = {"usd": 99, "budget": 0}' '.threads.owed_bot = 2')" = bot ]

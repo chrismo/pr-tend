@@ -263,7 +263,7 @@ branch_spend() {
 # the step fails, and then all at once: nothing streams while it runs.
 harness_run() {
   local h=$1 sid=$2 mode=$3 timeout=$4 prompt=$5 schema=$6 settings=${7:-'{}'} out err rc said budget cap=""
-  local model effort provider use_key args fields before t0 cap_usd=0
+  local model effort provider use_key args fields before t0 cap_usd=0 args_cap=false i
   local -a typed=() extra f env=()
   # args last, so a newline in it shifts nothing; the end marker survives $( )
   # stripping the trailing newlines of empty fields.
@@ -284,7 +284,13 @@ harness_run() {
       budget=$(prc_get settings.stepBudget "$(harness_branch)" false) || { echo "sd config failed" >&2; rm -f "$err"; return 1; }
       [[ $budget != -* ]] || { echo "settings.stepBudget must be 0 or more: $budget" >&2; rm -f "$err"; return 1; }
       # A cap in args is the more specific one, so it replaces stepBudget's.
-      [[ $budget =~ ^0*(\.0*)?$ || " ${extra[*]} " =~ \ --max-budget-usd[\ =] ]] \
+      for i in "${!extra[@]}"; do
+        case ${extra[i]} in
+          --max-budget-usd) cap_usd=${extra[i+1]:-0} args_cap=true ;;
+          --max-budget-usd=*) cap_usd=${extra[i]#*=} args_cap=true ;;
+        esac
+      done
+      [[ $budget =~ ^0*(\.0*)?$ || $args_cap == true ]] \
         || { typed+=(--max-budget-usd "$budget"); cap=" (settings.stepBudget $budget USD)" cap_usd=$budget; } ;;
     pi)
       if [[ -n $provider ]]; then typed+=(--provider "$provider"); fi
