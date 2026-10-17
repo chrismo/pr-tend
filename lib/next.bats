@@ -277,6 +277,14 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(keys '.sync.undone = 1' '.pr.merge_state = "BEHIND"')" = restack-undone ]
 }
 
+# On a stacked parent a plain rebase would replay a rewritten parent's old commits (#97).
+@test "a restack undone on a stacked branch with no old base: no rebase offered, pin by hand (#97)" {
+  local s=('.sync.undone = 1' '.sync.target = "base"' '.parent.name = "base"' '.sync.old_base = null')
+  [ "$(step restack-undone who "${s[@]}")" = you ]
+  [[ "$(step restack-undone say "${s[@]}")" == *"no base to redo it from on base: pin one by hand (git update-ref refs/sheepdog/feat/base <the commit feat left base at>), then sd act restack" ]] || false
+  [ "$(step restack-undone cmd "${s[@]}")" = null ]
+}
+
 @test "the remote has commits this copy reset away (ours): force-push, which leases (#86)" {
   [ "$(step push say '.push.ahead = 0' '.push.behind = 1' '.push.remote_ours = true' '.push.remote_made = true')" = "force-push: drop 1 commit the remote has, reset away here" ]
   [ "$(step push cmd '.push.ahead = 0' '.push.behind = 2' '.push.remote_ours = true' '.push.remote_made = true')" = "sd act push" ]

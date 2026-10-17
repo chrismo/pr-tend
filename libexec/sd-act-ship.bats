@@ -422,6 +422,15 @@ remote() { git ls-remote origin "refs/heads/$1" | cut -f1; }
   [ "$(remote feat)" = "$(git rev-parse HEAD)" ]
 }
 
+@test "ship: stacked on an open parent it isn't built on, no pin: refused, says how to pin (#97)" {
+  git switch -q main && git switch -qc A && git commit -q --allow-empty -m A && git push -q origin A 2>/dev/null
+  git switch -q feat && git config branch.feat.sd-parent A
+  run "$SD_ACT" ship
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"can't find feat's base: no base for feat on A: no base pin"*"git update-ref refs/sheepdog/feat/base"* ]]
+  [ -z "$(calls)" ]
+}
+
 # ── ship: the upstream (#39) ─────────────────────────────────────────────────
 
 tracks() { git rev-parse --abbrev-ref "$1@{upstream}" 2>/dev/null; }

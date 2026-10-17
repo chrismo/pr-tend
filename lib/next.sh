@@ -43,6 +43,7 @@ values {...s, remote}
       stacked:=(on(pr.base != sync.default) and (on(parent.pr.state == "OPEN") or on(parent.merged))),
       parent_closed:=(on(pr.base != sync.default) and on(parent.pr.state == "CLOSED")),
       parent_unpushed:=on(parent.unpushed),
+      no_base:=(sync.old_base is null and on(sync.target != sync.default)),
       restack:=(sync.old_base is null ? f"git rebase {remote}/{sync.target}"
                 : f"git rebase --onto {remote}/{sync.target} {sync.old_base[0:12]}"),
       need_review:=((on(pr.state == "OPEN") or trails(review.local) or trails(review.bot) or trails(review.accepted)
@@ -69,8 +70,8 @@ values {...s, remote}
       ? step("human", "you", f"reply to {plural(threads.owed_human, "human item")}", "sd state --long") : null,
     open and undone
       ? step("restack-undone", "you",
-             f"the restack was undone ({sync.undone} of {sync.target}'"'"'s commits {sync.undone == 1 ? "is a copy" : "are copies"} on {branch}; a plain git push after a restack?): redo it, and don'"'"'t sd act push before that, which would publish the copies",
-             f"{restack} && sd act push") : null,
+             f"the restack was undone ({sync.undone} of {sync.target}'"'"'s commits {sync.undone == 1 ? "is a copy" : "are copies"} on {branch}; a plain git push after a restack?): redo it, and don'"'"'t sd act push before that, which would publish the copies{no_base ? f"; no base to redo it from on {sync.target}: pin one by hand (git update-ref refs/sheepdog/{branch}/base <the commit {branch} left {sync.target} at>), then sd act restack" : ""}",
+             no_base ? null : f"{restack} && sd act push") : null,
     open and parent_unpushed
       ? step("ship-parent", "run", f"ship the parent first: {parent.name} isn'"'"'t on {remote} yet", f"sd act ship {parent.name}") : null,
     open and not undone and not parent_closed and on(sync.up_to_date == false) and on(sync.conflict)
