@@ -415,13 +415,12 @@ pin_status() {
     printf '{"sha": "%s", "status": "uncovered", "uncovered": %s}\n' "$pin" "$(count "$pin..$head")"
   else
     local against=${target_ref:-$head} status=unknown pin_base head_base
-    pin_base=$(ref "refs/sheepdog/$branch/$1-base")
-    [[ -n $pin_base ]] || pin_base=$(git merge-base "$pin" "$against" || true)
-    head_base=$old_base
-    # Not with an open stacked parent: the merge-base can lie below its old
-    # commits (#97).
-    if [[ -z $head_base && $target == "$default_branch" ]]; then
-      head_base=$(git merge-base "$head" "$against" || true)
+    pin_base=$(ref "refs/sheepdog/$branch/$1-base") head_base=$old_base
+    # The merge-base only when not stacked, as in O3: with a stacked parent,
+    # open or merged, it can lie below the parent's commits (#97).
+    if [[ $target == "$parent" && $parent == "$default_branch" ]]; then
+      [[ -n $pin_base ]] || pin_base=$(git merge-base "$pin" "$against" || true)
+      [[ -n $head_base ]] || head_base=$(git merge-base "$head" "$against" || true)
     fi
     if [[ -n $pin_base && -n $head_base ]]; then
       status=rewritten-changed
