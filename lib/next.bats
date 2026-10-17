@@ -327,6 +327,15 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(keys '.push.ahead = 1' '.push.held = null')" = push ]
 }
 
+@test "CI config held where a push would be wrong (undone restack, foreign, parent unpushed): still shown, no sd act push offered (#124)" {
+  local held='.push.held = {"sha": "h2", "paths": [".rwx/tests.yml"]}'
+  [ "$(keys '.sync.undone = 1' '.sync.up_to_date = false' '.push.ahead = 1' "$held")" = "restack-undone ci-config" ]
+  [ "$(step ci-config cmd '.sync.undone = 1' '.sync.up_to_date = false' '.push.ahead = 1' "$held")" = null ]
+  [ "$(step ci-config cmd '.push.remote_ours = false' '.push.behind = 1' '.push.theirs = 1' '.push.ahead = 1' "$held")" = null ]
+  [ "$(step ci-config cmd '.parent.unpushed = true' '.push.ahead = 1' "$held")" = null ]
+  [ "$(step ci-config say '.sync.undone = 1' "$held")" = "the agent changed CI config (.rwx/tests.yml): review it; push once the steps above are done" ]
+}
+
 @test "a restack undone from outside sheepdog: redo it by hand, then sd act push (#47)" {
   [ "$(keys '.sync.undone = 1' '.sync.up_to_date = false' '.push.ahead = 1' '.push.behind = 0')" = restack-undone ]
   [ "$(step restack-undone who '.sync.undone = 1')" = you ]

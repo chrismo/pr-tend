@@ -1663,19 +1663,31 @@ trigger() {
 
 hold_say() { echo "the agent changed CI config (${1//$'\n'/, }): review, then sd act push"; }
 
-# hold_paths <branch>: the paths an active hold names, one per line; status 1
-# when there is none. A hold whose commit is on the remote was published some
+# hold_paths <branch> <remote>: the paths an active hold names, one per line.
+# Status 1: none; 2: the hold can't be read. It runs in $( ), so it never
+# dies (that would only end the subshell, and read as no hold): callers turn 2
+# into a refusal. A hold whose commit is on the remote was published some
 # other way, so it is cleared (reconcile, not enforce).
 hold_paths() {
-  local b=$1 v remote rsha
-  v=$(git config --get "branch.$b.sd-held") || return 1
-  remote=$(prc_get settings.remote "$b" false) || die "sd config failed"
-  rsha=$(git rev-parse -q --verify "refs/remotes/$remote/$b^{commit}" || true)
+  local b=$1 v rsha rc=0
+  v=$(git config --get "branch.$b.sd-held") || rc=$?
+  (( rc == 0 )) || { (( rc == 1 )) && return 1; return 2; }
+  rsha=$(git rev-parse -q --verify "refs/remotes/$2/$b^{commit}" || true)
   if [[ -n $rsha ]] && git merge-base --is-ancestor "${v%%$'\n'*}" "$rsha" 2>/dev/null; then
-    git config --unset "branch.$b.sd-held"
+    git config --unset "branch.$b.sd-held" || return 2
     return 1
   fi
   printf '%s\n' "${v#*$'\n'}"
+}
+
+# hold_read <branch> <doing>: hold_paths, with settings.remote read here
+# (outside $( ), where die exits) and an unreadable hold refused.
+hold_read() {
+  local remote rc=0
+  remote=$(prc_get settings.remote "$1" false) || die "sd config failed"
+  HOLD_PATHS=$(hold_paths "$1" "$remote") || rc=$?
+  (( rc != 2 )) || die "not $2: can't read branch.$1.sd-held, the CI config hold"
+  return "$rc"
 }
 
 # hold_after <branch> <base> <files>: after an agent step's edits are
@@ -1683,13 +1695,21 @@ hold_paths() {
 # (read from <base>). On a match, hold the branch: branch.<b>.sd-held is HEAD,
 # then the paths, an active hold's included, one per line. The automated
 # pushes (address, ci-fix, ship) refuse while it holds; chrismo running sd act
-# push is the approval, and clears it.
+# push is the approval, and clears it. A HEAD already on the remote-tracking
+# ref was pushed during the step, by the agent (the deny on git push is no
+# guarantee either): a hold would only be cleared as published, unseen, so
+# that fails loudly instead.
 hold_after() {
-  local b=$1 paths hits prev
+  local b=$1 paths hits prev="" remote rsha
   paths=$(protected_paths "$b" "$2") || die "sd config failed"
   hits=$(protected_hits "$paths" "$3")
   [[ -n $hits ]] || return 0
-  prev=$(hold_paths "$b") || prev=""
+  remote=$(prc_get settings.remote "$b" false) || die "sd config failed"
+  rsha=$(git rev-parse -q --verify "refs/remotes/$remote/$b^{commit}" || true)
+  if [[ -n $rsha ]] && git merge-base --is-ancestor "refs/heads/$b" "$rsha"; then
+    die "the agent pushed CI config itself (${hits//$'\n'/, }): it is on $remote/$b unreviewed; review it now (git log -p $remote/$b -- ${hits//$'\n'/ })"
+  fi
+  if hold_read "$b" "holding $b"; then prev=$HOLD_PATHS; fi
   hits=$(printf '%s\n' "$prev" "$hits" | sed '/^$/d' | sort -u)
   git config "branch.$b.sd-held" "$(git rev-parse "refs/heads/$b")"$'\n'"$hits"
   echo "held: $(hold_say "$hits")"
@@ -1707,9 +1727,8 @@ hold_since() {
 # hold_gate <branch> <doing> [<then>]: refuse <doing> while a hold is active;
 # <then> follows the message.
 hold_gate() {
-  local paths
-  paths=$(hold_paths "$1") || return 0
-  die "not $2: $(hold_say "$paths")${3:+. $3}"
+  hold_read "$1" "$2" || return 0
+  die "not $2: $(hold_say "$HOLD_PATHS")${3:+. $3}"
 }
 
 # ── push ─────────────────────────────────────────────────────────────────────

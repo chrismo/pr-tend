@@ -432,6 +432,16 @@ EOF
   [ "$(git config --get branch.feat-x.sd-held)" = "$(git rev-parse HEAD)"$'\n'".github/workflows/ci.yml" ]
 }
 
+@test "implement: an agent that pushed its CI config change itself fails loudly; no hold that would vanish (#124)" {
+  started
+  printf '#!/usr/bin/env bash\nmkdir -p .github/workflows && echo x > .github/workflows/ci.yml && git add -A && git commit -qm "agent made it" && git push -q origin feat-x 2>/dev/null\n' > "$FX/agent"
+  run "$SD_ACT" implement
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"the agent pushed CI config itself (.github/workflows/ci.yml)"* ]]
+  run git config --get branch.feat-x.sd-held
+  [ "$status" -eq 1 ]
+}
+
 @test "implement: a review-fix round that changes CI config is held too, joined with the hold before it (#124)" {
   started
   git config branch.feat-x.sd-held "$(git rev-parse HEAD)"$'\n'".rwx/tests.yml"

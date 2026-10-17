@@ -123,7 +123,9 @@ values {...s, remote}
     open and dropping and on(push.dirty)
       ? step("reset-dirty", "you", f"{remote}/{branch} has {plural(push.behind, "commit")} reset away here, and the worktree has uncommitted changes: commit them (then sd act push replaces the remote {n(push.behind) == 1 ? "commit" : "commits"}), or remove them (git reset --hard; git clean for untracked files)", null) : null,
     open and ci_held
-      ? step("ci-config", "you", f"the agent changed CI config ({join(push.held.paths, ", ")}): review, then sd act push", "sd act push") : null,
+      ? (foreign or undone or parent_unpushed
+         ? step("ci-config", "you", f"the agent changed CI config ({join(push.held.paths, ", ")}): review it; push once the steps above are done", null)
+         : step("ci-config", "you", f"the agent changed CI config ({join(push.held.paths, ", ")}): review, then sd act push", "sd act push")) : null,
     open and not ci_held and not foreign and not undone and not parent_unpushed and to_push
       ? step("push", "run", push.remote_sha is null ? f"push: not on {remote} yet"
              : on(push.diverged) ? f"force-push {plural(coalesce(sync.ahead, push.ahead), "commit")} (rewritten); a plain git push is rejected, and pulling would undo the rewrite"
