@@ -2029,6 +2029,160 @@ review() {
   [ "$status" -ne 0 ]
 }
 
+# ── flags: suppressions, skips, edited tests, for chrismo (#125) ─────────────
+
+@test "flags: a suppression added on the branch, with the commit that added it" {
+  git switch -qc feat
+  commit a.sh $'echo hi\n# shellcheck disable=SC2086\necho $x'
+  added=$(git rev-parse HEAD)
+  commit b.txt b
+  state
+  [ "$(field '.flags | length')" = 1 ]
+  [ "$(field '.flags[0] | [.kind, .file, .line, .n] | join(" ")')" = "suppression a.sh 2 1" ]
+  [ "$(field '.flags[0].text')" = "# shellcheck disable=SC2086" ]
+  [ "$(field '.flags[0].commits | join(" ")')" = "$added" ]
+}
+
+@test "flags: hits in one file each name their own commit" {
+  git switch -qc feat
+  commit a.sh $'# shellcheck disable=SC1\necho a'
+  first=$(git rev-parse HEAD)
+  commit a.sh $'# shellcheck disable=SC1\necho a\n# eslint-disable-line\n# noqa'
+  second=$(git rev-parse HEAD)
+  state
+  [ "$(field '[.flags[] | "\(.line) \(.commits[0])"] | join(", ")')" = "1 $first, 3 $second, 4 $second" ]
+}
+
+@test "flags: each default suppression is caught" {
+  git switch -qc feat
+  commit s.txt $'// eslint-disable-next-line\nx = 1  # noqa: E501\n// @ts-ignore\n// @ts-expect-error\ny = 2  # type: ignore\nz := 3 //nolint\n# rubocop:disable Style\n#[allow(dead_code)]\nplain line'
+  state
+  [ "$(field '[.flags[] | select(.kind == "suppression") | .line] | join(" ")')" = "1 2 3 4 5 6 7 8" ]
+}
+
+@test "flags: a test skip in a test file; the same word elsewhere isn't one" {
+  git switch -qc feat
+  commit x.bats $'@test "a" {\n  skip "later"\n  true\n}'
+  commit notes.txt $'skip this\nxit(1)'
+  mkdir -p spec test tests
+  commit spec/a_spec.rb $'it "b" do\n  pending "soon"\nend'
+  commit test/a.test.js $'xit("c", () => {})\ndescribe.skip("d")\nxdescribe("e")'
+  commit b_test.go $'func TestB(t *testing.T) {\n\tt.Skip("no")\n}'
+  commit tests/test_c.py $'@pytest.mark.skip(reason="x")\ndef test_c(): pass'
+  state
+  [ "$(field '[.flags[] | select(.kind == "skip") | "\(.file):\(.line)"] | join(" ")')" \
+    = "b_test.go:2 spec/a_spec.rb:2 test/a.test.js:1 test/a.test.js:2 test/a.test.js:3 tests/test_c.py:1 x.bats:2" ]
+}
+
+@test "flags: a guarded bats skip (cond || skip, && skip, ; skip) is a skip; skipped as a word isn't" {
+  git switch -qc feat
+  commit x.bats $'@test "a" {\n  command -v plutil || skip "no plutil"\n  [ -n "$CI" ] && skip\n  true; skip "later"\n  echo skipped\n}'
+  state
+  [ "$(field '[.flags[] | select(.kind == "skip") | .line] | join(" ")')" = "2 3 4" ]
+}
+
+@test "flags: a test file moved out of the test files, even unchanged, is a test-edit" {
+  commit a.bats $'@test "a" {\n  true\n}'
+  mkdir -p test && commit test/b.sh 'true'
+  commit c.bats $'@test "c" {\n  true\n}'
+  git push -q origin main 2>/dev/null
+  git switch -qc feat
+  git mv a.bats a.bats.off && git mv test/b.sh b.sh && git mv c.bats d.bats && git commit -qm "move"
+  moved=$(git rev-parse HEAD)
+  state
+  [ "$(field '[.flags[] | "\(.kind) \(.file):\(.line) -\(.n)"] | join(", ")')" = "test-edit a.bats:1 -3, test-edit test/b.sh:1 -1" ]
+  [ "$(field '.flags[] | select(.file == "a.bats") | .text')" = "moved to a.bats.off, out of the test files" ]
+  [ "$(field '.flags[] | select(.file == "a.bats") | .commits | join(" ")')" = "$moved" ]
+}
+
+@test "flags: a base that isn't in HEAD's history (a tree restack due) isn't diffed: flags_error says why" {
+  git switch -qc parent && commit s.txt X && commit t.txt Y && git push -q origin parent 2>/dev/null
+  local p1 p2; p1=$(git rev-parse parent~1) p2=$(git rev-parse parent)
+  git switch -qc feat main
+  printf 'X\n' > s.txt && printf 'Y\n' > t.txt && git add s.txt t.txt && git commit -qm "parent, copied" && commit c.sh '# noqa'
+  git config branch.feat.sd-parent parent
+  git update-ref refs/sheepdog/feat/base "$p1"
+  squash_parent_away
+  pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p2\""
+  state
+  [ "$(field .sync.by_tree)" = true ]
+  [ "$(field .flags)" = null ]
+  [[ "$(field .flags_error)" == *"isn't in feat's history"* ]]
+}
+
+@test "flags: lines changed or deleted in a test file the base had; added lines aren't" {
+  commit t.bats $'@test "one" {\n  [ 1 -eq 1 ]\n}\n@test "two" {\n  true\n}'
+  commit gone.bats $'@test "x" {\n  true\n}'
+  git push -q origin main 2>/dev/null
+  git switch -qc feat
+  commit t.bats $'@test "one" {\n  [ 1 -eq 2 ]\n}\n@test "two" {\n  true\n}\n@test "three" {\n  true\n}'
+  edited=$(git rev-parse HEAD)
+  git rm -q gone.bats && git commit -qm "drop gone"
+  dropped=$(git rev-parse HEAD)
+  commit new.bats $'@test "new" {\n  true\n}'
+  commit file.txt changed
+  state
+  [ "$(field '[.flags[] | "\(.kind) \(.file):\(.line) -\(.n)"] | join(", ")')" = "test-edit gone.bats:1 -3, test-edit t.bats:2 -1" ]
+  [ "$(field '.flags[] | select(.file == "t.bats") | .text')" = "  [ 1 -eq 1 ]" ]
+  [ "$(field '.flags[] | select(.file == "t.bats") | .commits | join(" ")')" = "$edited" ]
+  [ "$(field '.flags[] | select(.file == "gone.bats") | .commits | join(" ")')" = "$dropped" ]
+}
+
+@test "flags: a line added and removed again on the branch isn't one" {
+  git switch -qc feat
+  commit a.sh $'# shellcheck disable=SC2086\necho $x'
+  commit a.sh 'echo "$x"'
+  state
+  [ "$(field '.flags')" = "[]" ]
+}
+
+@test "flags: settings.flags replaces a list; the others keep their defaults" {
+  git switch -qc feat
+  commit a.sh $'# shellcheck disable=SC2086\n# lint-off: here'
+  mkdir checks && commit checks/a.sh 'skip'
+  "$SD_CONFIG" set --global --json settings.flags '{"suppressions": ["lint-off"], "testFiles": ["checks/"]}' >/dev/null
+  state
+  [ "$(field '[.flags[] | "\(.kind) \(.file):\(.line)"] | join(", ")')" = "suppression a.sh:2, skip checks/a.sh:1" ]
+}
+
+@test "flags: an invalid pattern is flags_error, not an error that steers NEXT; flags is null" {
+  git switch -qc feat && commit a.txt a
+  "$SD_CONFIG" set --global --json settings.flags '{"skips": ["("]}' >/dev/null
+  state
+  [ "$(field '.flags')" = null ]
+  [[ "$(field '.flags_error')" == *"settings.flags"* ]] || false
+  [ "$(field '.errors | length')" = 0 ]
+  [ "$(field '[.next[].key] | index("errors")')" = null ]
+  run "$SD_STATE"
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == *" · ⚑ check failed"* ]]
+}
+
+@test "flags: flags_error is null when the check ran" {
+  git switch -qc feat && commit a.txt a
+  state
+  [ "$(field '.flags_error')" = null ]
+}
+
+@test "flags: no base, no check: flags is null" {
+  git switch -qc feat && commit a.txt a
+  git config branch.feat.sd-parent gone
+  state
+  [ "$(field '.flags')" = null ]
+}
+
+@test "flags: counted on the one-liner, one line each in --long" {
+  git switch -qc feat
+  commit a.sh $'# shellcheck disable=SC2086\necho $x'
+  added=$(git rev-parse --short=7 HEAD)
+  run "$SD_STATE"
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == *" · ⚑ 1 flagged"* ]] || false
+  run "$SD_STATE" --long
+  [ "$status" -eq 0 ]
+  [[ "${lines[-1]}" =~ ^\ +⚑\ +suppression\ +a\.sh:1\ +#\ shellcheck\ disable=SC2086\ +$added$ ]]
+}
+
 # ── O8 session ───────────────────────────────────────────────────────────────
 
 @test "session: enrollment, harness, session and lock come from branch config" {

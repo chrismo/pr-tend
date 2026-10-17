@@ -208,6 +208,26 @@ findings_rec() { git cat-file blob refs/sheepdog/feat/findings | jq -c "$1"; }
   [ "$(findings_rec .round)" = 1 ]
 }
 
+@test "flags (#125): printed on stderr for chrismo, clean or not; never a gate" {
+  printf '@test "a" {\n  skip\n}\n' > a.bats && git add a.bats && git commit -qm skip
+  run --separate-stderr "$SD_ACT" review
+  [ "$status" -eq 0 ]
+  [ "$(pin local)" = "$(git rev-parse HEAD)" ]
+  [[ "$stderr" == *"1 flagged for chrismo"* ]] || false
+  [[ "$stderr" =~ ⚑\ +skip\ +a\.bats:2 ]] || false
+  echo '[{"file": "file.txt", "line": 3, "severity": "warning", "body": "c?"}]' > "$FX/findings.json"
+  run --separate-stderr "$SD_ACT" review
+  [ "$status" -eq 0 ]
+  [ "$(jq length <<<"$output")" = 1 ]
+  [[ "$stderr" =~ ⚑\ +skip\ +a\.bats:2 ]]
+}
+
+@test "no flags: nothing about them is printed" {
+  run --separate-stderr "$SD_ACT" review
+  [ "$status" -eq 0 ]
+  [[ "$stderr$output" != *"flagged"* ]]
+}
+
 @test "a second review of the same HEAD keeps the round; its findings start unanswered" {
   echo '[{"file": "file.txt", "line": 3, "severity": "error", "body": "c?"}]' > "$FX/findings.json"
   "$SD_ACT" review >/dev/null 2>&1

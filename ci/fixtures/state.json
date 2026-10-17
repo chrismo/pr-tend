@@ -68,6 +68,12 @@
       "status": "none"
     }
   },
+  "flags": [
+    {"kind": "suppression", "file": "a.sh", "line": 2, "n": 1, "text": "# shellcheck disable=SC2086",
+     "commits": ["2222222222222222222222222222222222222222"]},
+    {"kind": "test-edit", "file": "t.bats", "line": 2, "n": 3, "text": "  [ 1 -eq 1 ]",
+     "commits": ["3333333333333333333333333333333333333333", "4444444444444444444444444444444444444444"]}
+  ],
   "threads": {
     "owed_bot": 5,
     "owed_human": 3,

@@ -88,6 +88,15 @@ step_guidance() {
   fi
 }
 
+# flag_lines <state-json>: one line per sd state flag (#125), for sd state
+# --long and sd act review: kind, file:line (and the lines removed, for a
+# test-edit), the line, the commits.
+read -r -d '' FLAG_LINES <<'EOF' || true
+unnest coalesce(flags, [])
+| values f"  ⚑  {kind}  {file}:{line}{kind == "test-edit" ? f" (-{n})" : ""}  {regexp_replace(text, "^\\s+", "")}  {sj(coalesce([unnest commits | values this[0:7]], []), ",")}"
+EOF
+flag_lines() { prc_line "$FLAG_LINES" "$1"; }
+
 # Claude may read and edit; the pipeline commits, pushes and talks to GitHub.
 HARNESS_CLAUDE_ALLOW="Read,Edit,Write,Grep,Glob,Bash(git diff *),Bash(git log *),Bash(git show *),Bash(git status *)"
 HARNESS_CLAUDE_DENY="Bash(git commit *),Bash(git push *),Bash(gh *)"
