@@ -907,13 +907,13 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   enrolled feat
 }
 
-@test "vacuum: one past its threshold says it goes next pass" {
+@test "vacuum --dry-run: one past its threshold says the next pass takes it too" {
   git switch -q main
   ps_fixture feat '.ci.verdict = "pending"'
   pass
   aged feat 700000
-  run "$SD_WATCH" vacuum
-  [[ "$output" == *"checked out nowhere for 8d: unenrolled next pass"* ]] || false
+  run "$SD_WATCH" vacuum --dry-run
+  [[ "$output" == *"checked out nowhere for 8d: vacuum unenrolls it, as does the next pass"* ]] || false
 }
 
 @test "stale: a worktree whose directory was deleted doesn't count" {
@@ -1013,31 +1013,31 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   ! enrolled feat
 }
 
-@test "vacuum: thresholds under a day read in hours or minutes, and a config error is said" {
+@test "vacuum --dry-run: thresholds under a day read in hours or minutes, and a config error is said" {
   write_cfg '{"settings":{"vacuumAfter":7200}}'
   git switch -q main
   ps_fixture feat '.ci.verdict = "pending"'
   pass
   aged feat 90
-  run "$SD_WATCH" vacuum
-  [[ "$output" == *"checked out nowhere for 1m: unenrolled after 2h"* ]] || false
+  run "$SD_WATCH" vacuum --dry-run
+  [[ "$output" == *"checked out nowhere for 1m: vacuum unenrolls it; a pass, after 2h"* ]] || false
   printf '{not json\n' > "$SHEEPDOG_CONFIG"
-  run "$SD_WATCH" vacuum
+  run "$SD_WATCH" vacuum --dry-run
   [ "$status" -ne 0 ]
   [[ "$output" == *"sd config failed"* ]] || false
 }
 
-@test "vacuum: durations under a minute read in seconds, and a clock running behind reads 0s" {
+@test "vacuum --dry-run: durations under a minute read in seconds, and a clock running behind reads 0s" {
   write_cfg '{"settings":{"vacuumAfter":30}}'
   git switch -q main
   ps_fixture feat '.ci.verdict = "pending"'
   pass
   aged feat 5
-  run "$SD_WATCH" vacuum
-  [[ "$output" == *"checked out nowhere for "[5-9]"s: unenrolled after 30s"* ]] || false
+  run "$SD_WATCH" vacuum --dry-run
+  [[ "$output" == *"checked out nowhere for "[5-9]"s: vacuum unenrolls it; a pass, after 30s"* ]] || false
   aged feat -3600
-  run "$SD_WATCH" vacuum
-  [[ "$output" == *"checked out nowhere for 0s: unenrolled after 30s"* ]] || false
+  run "$SD_WATCH" vacuum --dry-run
+  [[ "$output" == *"checked out nowhere for 0s: vacuum unenrolls it; a pass, after 30s"* ]] || false
 }
 
 @test "stale: vacuumAfter 0 never unenrolls" {
@@ -1060,7 +1060,7 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   ! enrolled feat
 }
 
-@test "vacuum: previews what's on the clock and changes nothing" {
+@test "vacuum --dry-run: says what vacuum would unenroll, and when a pass would, and changes nothing" {
   git branch other && enroll other
   git switch -q main
   ps_fixture feat '.ci.verdict = "pending"'
@@ -1070,21 +1070,40 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   aged feat 172800
   aged other 120
   local before; before=$(cat "$SHEEPDOG_STATE_DIR/last-pass")
-  run "$SD_WATCH" vacuum
+  run "$SD_WATCH" vacuum --dry-run
   [ "$status" -eq 0 ]
-  [[ "$output" == *"repo  feat  checked out nowhere for 2d: unenrolled after 7d"* ]] || false
-  [[ "$output" == *"repo  other  merged for 2m: unenrolled after 7d"* ]] || false
+  [[ "$output" == *"repo  feat  checked out nowhere for 2d: vacuum unenrolls it; a pass, after 7d"* ]] || false
+  [[ "$output" == *"repo  other  merged for 2m: vacuum unenrolls it; a pass, after 7d"* ]] || false
   enrolled feat && enrolled other
   [ "$(cat "$SHEEPDOG_STATE_DIR/last-pass")" = "$before" ]
 }
 
-@test "vacuum: a branch enrolled since the last pass is skipped, not an error" {
+@test "vacuum --dry-run: a branch enrolled since the last pass is said to be unchecked, not an error" {
   ps_fixture feat
   pass
   git branch other && enroll other
-  run "$SD_WATCH" vacuum
+  run "$SD_WATCH" vacuum --dry-run
   [ "$status" -eq 0 ]
-  [ "$output" = "nothing stale" ]
+  [ "$output" = "repo  other  not checked yet: vacuum checks it first" ]
+}
+
+@test "vacuum --dry-run: vacuumAfter 0, an unsure last check, and a gone branch" {
+  write_cfg '{"settings":{"vacuumAfter":0}}'
+  git branch other && enroll other
+  git branch gone && enroll gone
+  git switch -q main
+  ps_fixture feat '.pr.state = "MERGED"'
+  ps_fixture other '.errors = ["gh: down"]'
+  ps_fixture gone
+  pass
+  git update-ref -d refs/heads/gone
+  aged feat 120
+  run "$SD_WATCH" vacuum --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"repo  feat  merged for 2m: vacuum unenrolls it; a pass doesn't (vacuumAfter 0)"* ]] || false
+  [[ "$output" == *"repo  other  unsure at the last saved check: vacuum skips it if sd state still is"* ]] || false
+  [[ "$output" == *"repo  gone  no local branch: vacuum unenrolls it, as does the next pass"* ]] || false
+  enrolled feat && enrolled other && enrolled gone
 }
 
 @test "vacuum: -h prints the help; arguments are refused" {
@@ -1093,7 +1112,15 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   [[ "$output" == *"Usage: sd watch"* ]] || false
   run "$SD_WATCH" vacuum feat
   [ "$status" -ne 0 ]
-  [[ "$output" == *"usage: sd watch vacuum"* ]] || false
+  [[ "$output" == *"usage: sd watch vacuum [--dry-run]"* ]] || false
+  run "$SD_WATCH" vacuum --dry-run feat
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"usage: sd watch vacuum [--dry-run]"* ]] || false
+  ps_fixture feat '.pr.state = "MERGED"'
+  run "$SD_WATCH" vacuum ""
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"usage: sd watch vacuum [--dry-run]"* ]] || false
+  enrolled feat
 }
 
 @test "stale: a worktree paused mid-rebase still has the branch checked out" {
@@ -1109,12 +1136,134 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   [ "$(glyph repo)" = "⏳" ]
 }
 
-@test "vacuum: nothing stale says so" {
+@test "vacuum --dry-run: nothing stale says so" {
   ps_fixture feat
   pass
+  run "$SD_WATCH" vacuum --dry-run
+  [ "$status" -eq 0 ]
+  [ "$output" = "nothing stale" ]
+}
+
+@test "vacuum: unenrolls a merged branch inside the clock, and only unenrolls it" {
+  git update-ref refs/sheepdog/feat/base HEAD
+  ps_fixture feat '.pr.state = "MERGED"'
+  pass
+  aged feat 120
+  run "$SD_WATCH" vacuum
+  [ "$status" -eq 0 ]
+  [ "$output" = "repo  feat  unenrolled: merged for 2m (sd act enroll feat to watch it again)" ]
+  ! enrolled feat || false
+  git rev-parse -q --verify refs/heads/feat
+  [ -n "$(git for-each-ref refs/sheepdog/feat/)" ]
+  [[ "$(notified)" != *unenrolled* ]] || false
+  grep -q "feat.*unenrolled: merged for 2m" "$SHEEPDOG_STATE_DIR/last-pass"
+}
+
+@test "vacuum: observes before acting, so a branch no pass has seen is judged too" {
+  git branch other && enroll other
+  ps_fixture feat
+  ps_fixture other '.pr.state = "CLOSED"'
+  run "$SD_WATCH" vacuum
+  [ "$status" -eq 0 ]
+  [ "$output" = "repo  other  unenrolled: closed for 0s (sd act enroll other to watch it again)" ]
+  enrolled feat
+  ! enrolled other || false
+}
+
+@test "vacuum: acts with vacuumAfter 0 too, and on a branch that's gone" {
+  write_cfg '{"settings":{"vacuumAfter":0}}'
+  git branch other && enroll other
+  git update-ref -d refs/heads/other
+  git switch -q main
+  ps_fixture feat '.ci.verdict = "pending"'
+  run "$SD_WATCH" vacuum
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"repo  other  unenrolled: no local branch"* ]] || false
+  [[ "$output" == *"repo  feat  unenrolled: checked out nowhere for 0s (sd act enroll feat to watch it again)"* ]] || false
+  ! enrolled feat && ! enrolled other
+}
+
+@test "vacuum: VACUUM_LOG from the environment doesn't make a pass a vacuum" {
+  git switch -q main
+  ps_fixture feat '.ci.verdict = "pending"'
+  echo keep > "$TMP/keep"
+  VACUUM_LOG="$TMP/keep" pass
+  enrolled feat
+  [ "$(cat "$TMP/keep")" = keep ]
+}
+
+@test "vacuum: an active branch is kept" {
+  ps_fixture feat
   run "$SD_WATCH" vacuum
   [ "$status" -eq 0 ]
   [ "$output" = "nothing stale" ]
+  enrolled feat
+}
+
+@test "vacuum: an unsure branch is skipped, and says why" {
+  git branch other && enroll other
+  git switch -q main
+  ps_fixture feat '.ci.verdict = "pending"'
+  pass
+  aged feat 120
+  ps_fixture feat '.errors = ["gh: down"]'
+  run "$SD_WATCH" vacuum
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"repo  feat  skipped, sd state is unsure: gh: down"* ]] || false
+  [[ "$output" == *"repo  other  skipped, sd state is unsure: sd state failed: sd state: no fixture for other"* ]] || false
+  enrolled feat && enrolled other
+}
+
+@test "vacuum: a repo whose config can't be read is skipped" {
+  ps_fixture feat '.pr.state = "MERGED"'
+  printf '{not json\n' > "$SHEEPDOG_CONFIG"
+  run "$SD_WATCH" vacuum
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"repo  feat  skipped: sd config failed"* ]] || false
+  enrolled feat
+}
+
+@test "vacuum: no next steps or unparseable sd state output is unsure too" {
+  git branch other && enroll other
+  git switch -q main
+  ps_fixture feat '.next = []'
+  echo 'not json {' > "$PS_FIXTURES/other.json"
+  run "$SD_WATCH" vacuum
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"repo  feat  skipped, sd state is unsure: sd state gave no next steps"* ]] || false
+  [[ "$output" == *"repo  other  skipped, sd state is unsure: unparseable sd state output"* ]] || false
+  enrolled feat && enrolled other
+}
+
+@test "vacuum: unsure reasons that can't be read aren't called no next steps" {
+  git switch -q main
+  ps_fixture feat '.errors = ["gh: down"]'
+  jq -c '.errors = [{"odd": 1}]' "$PS_FIXTURES/feat.json" > "$TMP/f" && mv "$TMP/f" "$PS_FIXTURES/feat.json"
+  run "$SD_WATCH" vacuum
+  [ "$status" -eq 0 ]
+  [ "$output" = "repo  feat  skipped, sd state is unsure: its reasons couldn't be read" ]
+  enrolled feat
+}
+
+@test "vacuum: an unenroll that fails is said" {
+  [ "$(id -u)" -ne 0 ] || skip "root writes through a read-only .git"
+  git switch -q main
+  ps_fixture feat '.pr.state = "MERGED"'
+  chmod a-w .git
+  run "$SD_WATCH" vacuum
+  chmod u+w .git
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"repo  feat  couldn't unenroll: merged for 0s"* ]] || false
+  enrolled feat
+}
+
+@test "vacuum: stale remote refs are unsure too" {
+  git switch -q main
+  ps_fixture feat '.fresh = false | .stale = ["origin/feat is not at GitHub'"'"'s abc1234"]'
+  run "$SD_WATCH" vacuum
+  [ "$status" -eq 0 ]
+  [ "$output" = "repo  feat  skipped, sd state is unsure: origin/feat is not at GitHub's abc1234" ]
+  enrolled feat
 }
 
 # ── glyph lookup (#3) ────────────────────────────────────────────────────────
@@ -1780,4 +1929,14 @@ write_cfg() {
   run "$SD_WATCH" install
   [ "$status" -ne 0 ]
   [ ! -e "$PLIST" ]
+}
+
+@test "rate limit: vacuum skips the branches the pass didn't check, and says so" {
+  git branch other && enroll other
+  low feat
+  ps_fixture other '.pr.state = "MERGED"'
+  run "$SD_WATCH" vacuum
+  [ "$status" -eq 0 ]
+  [ "$output" = "repo  other  skipped, not checked: GitHub rate limit" ]
+  enrolled other
 }
