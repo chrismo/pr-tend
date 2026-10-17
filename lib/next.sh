@@ -78,9 +78,11 @@ values {...s, remote}
          ? step("conflict", "you", f"restack onto {sync.target} by tree conflicts, which --resolve can'"'"'t do: resolve it by hand (sd act restack says how)", "sd act restack")
          : step("conflict", "agent", f"restack onto {sync.target} conflicts: resolve it", "sd act restack --resolve")) : null,
     open and not undone and not parent_closed and on(sync.up_to_date == false) and not on(sync.conflict) and chase
-      ? step("behind", "run", on(sync.by_tree) ? f"restack onto {sync.target} by tree ({sync.behind} behind): its commits become one"
-                                                : f"restack onto {sync.target} ({sync.behind} behind)",
-             sync.old_base is null ? restack : "sd act restack")
+      ? (sync.old_base is null
+         ? step("behind", "you", f"restack onto {sync.target} ({sync.behind} behind): no base to restack from; see sd state'"'"'s errors", "sd state --json")
+         : step("behind", "run", on(sync.by_tree) ? f"restack onto {sync.target} by tree ({sync.behind} behind): its commits become one"
+                                                  : f"restack onto {sync.target} ({sync.behind} behind)",
+                "sd act restack"))
       : has_pr and not undone and not parent_closed and not on(sync.conflict) and gh_behind
       ? step("behind", "run", f"restack onto {sync.default} ({n(sync.behind)} behind): GitHub requires branches to be up to date",
              "sd act restack") : null,

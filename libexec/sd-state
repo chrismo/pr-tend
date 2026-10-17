@@ -329,9 +329,12 @@ else
   elif [[ -z $old_base ]]; then
     up_to_date=false
     if [[ $parent != "$default_branch" && $target == "$parent" ]]; then
-      # A parent closed without merging is NEXT's parent-closed, not a missing pin.
-      [[ -n $base_pin || $(prc_val "$parent_pr" 'on(state == "CLOSED")') == true ]] \
-        || errors+=("no base for $branch on $parent: no base pin, and no fork-point in $remote/$parent's reflog; if $parent wasn't rewritten, pin where $branch left it: git update-ref refs/sheepdog/$branch/base \$(git merge-base $remote/$parent $branch)")
+      # A parent closed without merging needs a new target, not a pin.
+      if [[ $(prc_val "$parent_pr" 'on(state == "CLOSED")') == true ]]; then
+        errors+=("no base for $branch on $parent: $parent's PR #$(prc_val "$parent_pr" number) was closed without merging; decide what $branch targets")
+      elif [[ -z $base_pin ]]; then
+        errors+=("no base for $branch on $parent: no base pin, and no fork-point in $remote/$parent's reflog; if $parent wasn't rewritten, pin where $branch left it: git update-ref refs/sheepdog/$branch/base \$(git merge-base $remote/$parent $branch)")
+      fi
     elif [[ $target == "$parent" ]]; then
       errors+=("no merge base with $remote/$target")
     elif [[ -z $base_pin ]]; then

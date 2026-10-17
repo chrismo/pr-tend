@@ -207,8 +207,11 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(step conflict who "${STACKED[@]}" '.sync.conflict = true')" = agent ]
 }
 
-@test "behind with no old base: a plain rebase, which sd act restack refuses" {
-  [ "$(step behind cmd "${STACKED[@]}" '.sync.old_base = null')" = "git rebase origin/base" ]
+# A plain rebase there would replay a rewritten parent's old commits (#97).
+@test "behind with no old base: chrismo's, pointing at sd state's errors, no rebase" {
+  [ "$(step behind who "${STACKED[@]}" '.sync.old_base = null')" = you ]
+  [ "$(step behind say "${STACKED[@]}" '.sync.old_base = null')" = "restack onto base (3 behind): no base to restack from; see sd state's errors" ]
+  [ "$(step behind cmd "${STACKED[@]}" '.sync.old_base = null')" = "sd state --json" ]
 }
 
 @test "only behind the default branch: no step; main moves too often to chase" {

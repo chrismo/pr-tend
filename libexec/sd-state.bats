@@ -730,7 +730,7 @@ squash_parent_away() {
   [ "$(field '.errors | length')" = 0 ]
 }
 
-@test "sync: a parent closed without merging, no pin or fork-point: no missing-pin error, NEXT says parent-closed (#97)" {
+@test "sync: a parent closed without merging, no pin or fork-point: the error says the parent closed, NEXT says parent-closed (#97)" {
   git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
   git switch -qc feat && commit c.txt c
   (cd "$TMP/other" && git fetch -q origin && git switch -qc parent origin/parent \
@@ -741,8 +741,21 @@ squash_parent_away() {
   pr_fixture feat '.baseRefName = "parent"'
   state
   [ "$(field .sync.old_base)" = null ]
-  [ "$(field '.errors | length')" = 0 ]
+  [ "$(field '.errors | join(" ")')" = "no base for feat on parent: parent's PR #3 was closed without merging; decide what feat targets" ]
   [[ " $(field '[.next[].key] | join(" ")') " == *" parent-closed "* ]]
+}
+
+@test "sync: a parent closed without merging, no PR yet, no pin or fork-point: the error says the parent closed (#97)" {
+  git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  (cd "$TMP/other" && git fetch -q origin && git switch -qc parent origin/parent \
+     && git commit -q --allow-empty -m p2 && git push -q origin parent 2>/dev/null && git switch -q main)
+  git fetch -q
+  git reflog expire --expire=now --expire-unreachable=now refs/remotes/origin/parent
+  pr_fixture parent '.number = 3' '.state = "CLOSED"'
+  state
+  [[ "$(field '.errors | join(" ")')" == *"parent's PR #3 was closed without merging"* ]]
 }
 
 @test "sync: not stacked, pin lost: falls back to the merge-base, and reports the pin" {

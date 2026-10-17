@@ -211,8 +211,8 @@ notified() { cat "$PS_FIXTURES/notified" 2>/dev/null || true; }
 
 @test "glyph: work an agent will do later is 🔧" {
   local a
-  for a in '.sync.up_to_date = false | .sync.behind = 2 | .sync.target = "base"' \
-           '.sync.up_to_date = false | .parent.merged = true' '.threads.owed_bot = 1' \
+  for a in '.sync.up_to_date = false | .sync.behind = 2 | .sync.target = "base" | .sync.old_base = "abc"' \
+           '.sync.up_to_date = false | .parent.merged = true | .sync.old_base = "abc"' '.threads.owed_bot = 1' \
            '.push.ahead = 1' '.pr = null' '.review.local.status = "uncovered"'; do
     ps_fixture feat "$a"
     pass
