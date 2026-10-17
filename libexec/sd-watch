@@ -2,7 +2,7 @@
 #
 # sd watch - observe-only pass over every enrolled branch.
 #
-# Usage: sd watch [refresh [<branch>] | glyph [<path>] | vacuum | status | install | uninstall]
+# Usage: sd watch [refresh [<branch>] | glyph [<path>] | vacuum [--dry-run] | status | install | uninstall]
 #
 #   (none)     for each repo in global git config sheepdog.repo: fetch, then
 #              sd state every branch with branch.<name>.sheepdog=true. Writes a
@@ -20,8 +20,13 @@
 #   glyph      [<path>] the glyph for the worktree holding <path> (default .),
 #              if it's still on the branch the last check saw; for a shell
 #              prompt or tab title (fast: no super, no GitHub)
-#   vacuum     preview stale enrollments: each one's reason and how long it
-#              has been stale. Changes nothing
+#   vacuum     a pass that unenrolls every stale branch now, whatever the
+#              clock (or vacuumAfter 0): prints each one unenrolled and its
+#              reason, and each one sd state is unsure of, skipped, and why.
+#              It doesn't notify its own unenrolls.
+#              --dry-run: from the last check, nothing fetched or changed:
+#              each stale enrollment's reason, how long it has been stale and
+#              when a pass unenrolls it
 #   status     print the last pass
 #   install    launchd job: a pass every settings.interval seconds (default 300)
 #   uninstall  remove the job
@@ -60,7 +65,8 @@
 # settings.vacuumAfter seconds (default 7 days; 0 turns off these three). A
 # pass whose sd state reported errors or stale data neither starts, resets nor
 # acts on that clock, and a new reason restarts it. Each timed unenroll
-# notifies, once; one for no local branch is only a pass line.
+# notifies, once; one for no local branch is only a pass line. sd watch vacuum
+# runs the clock out at once, with the same reasons and the same limits.
 #
 # GitHub's rate limit: a pass checks no more branches after one whose sd
 # state found less than settings.rateLimitFloor GraphQL points left (default
@@ -162,6 +168,7 @@ check() {
   if ! json=$(cd "$repo" && with_timeout "$TIMEOUT" sd-state --json "$b" 2>"$errf" </dev/null); then
     write_glyph "$wt" "$b" ⚠️
     printf '%s\t%s\t⚠️\tsd state failed: %s\n' "$name" "$b" "$(head -1 "$errf")"
+    vacuum_log "$name" "$b" "skipped, sd state is unsure: sd state failed: $(head -1 "$errf")"
     rm -f "$errf"
     return 1
   fi
@@ -169,6 +176,7 @@ check() {
   if ! cls=$(prc_json "$CLASSIFY" "$json" 2>/dev/null) || [[ -z $cls ]]; then
     write_glyph "$wt" "$b" ⚠️
     printf '%s\t%s\t⚠️\tunparseable sd state output\n' "$name" "$b"
+    vacuum_log "$name" "$b" "skipped, sd state is unsure: unparseable sd state output"
     return 1
   fi
   glyph=$(prc_line 'values glyph' "$cls")
@@ -207,10 +215,14 @@ check() {
   fi
   if [[ -n $since ]]; then
     stale="{\"reason\": \"$reason\", \"since\": $since}"
-    if [[ $carry != true ]] && (( ${VACUUM_AFTER:-0} > 0 && now - since >= VACUUM_AFTER )); then
+    if [[ $carry != true ]] && { [[ -n ${VACUUM_LOG:-} ]] || (( ${VACUUM_AFTER:-0} > 0 && now - since >= VACUUM_AFTER )); }; then
       git -C "$repo" config --unset "branch.$b.sheepdog" \
-        && unenrolled="unenrolled: $reason for $(dur $(( now - since )))" stale=null
+        && unenrolled="unenrolled: $reason for $(dur $(( now - since ))) (sd act enroll $b to watch it again)" stale=null
     fi
+  fi
+  if [[ $carry == true && -n ${VACUUM_LOG:-} ]]; then
+    vacuum_log "$name" "$b" "skipped, sd state is unsure: $(prc_line 'values sj([...coalesce(errors, []), ...coalesce(stale, [])], "; ")' "$json" 2>/dev/null \
+      | grep . || echo "sd state gave no next steps")"
   fi
 
   # A refresh can overlap a pass: unlocked, so both may notify a new reason
@@ -229,8 +241,9 @@ check() {
   printf '%s\t%s\t%s\t%s\n' "$name" "$b" "$glyph" \
     "$(prc_line 'values sj(coalesce([unnest [...reasons, {msg: coalesce(note, null)}] | where msg is not null | values msg], []), "; ")' "$cls")"
   if [[ -n $unenrolled ]]; then
-    notify "$name $b" "$unenrolled (sd act enroll $b to watch it again)"
+    [[ -n ${VACUUM_LOG:-} ]] || notify "$name $b" "$unenrolled"
     printf '%s\t%s\t-\t%s\n' "$name" "$b" "$unenrolled"
+    vacuum_log "$name" "$b" "$unenrolled"
   fi
   [[ -z ${RATE_STOP:-} ]] || rate_stop "$rl_limited" "$rl_left" "$rl_reset" > "$RATE_STOP"
 }
@@ -248,6 +261,9 @@ rate_stop() {
   fi
   echo "$why: the branches below weren't checked${reset:+ (the quota resets at $reset)}"
 }
+
+# vacuum_log <name> <branch> <msg>: a line for sd watch vacuum, when one runs.
+vacuum_log() { [[ -z ${VACUUM_LOG:-} ]] || printf '%s\t%s\t%s\n' "$@" >> "$VACUUM_LOG"; }
 
 state_dir() { echo "$STATE_DIR/branches/$(basename "$1")-$(printf '%s' "$1" | shasum | cut -c1-8)"; }
 
@@ -375,7 +391,7 @@ run_pass() {
   # The index's temp file sits beside it, so the mv is a rename a prompt never
   # sees half done.
   WRITTEN=$(mktemp) GLYPHS=$(mktemp "$STATE_DIR/glyphs.XXXXXX") RATE_STOP=$(mktemp) SKIPPED=$(mktemp)
-  trap 'rm -f "$WRITTEN" "$GLYPHS" "$RATE_STOP" "$SKIPPED"' EXIT
+  trap 'rm -f "$WRITTEN" "$GLYPHS" "$RATE_STOP" "$SKIPPED" ${VACUUM_LOG:+"$VACUUM_LOG"}' EXIT
   local -a repos branches
   local repo name b lines="" out stopped="" stop_line="" wt row
   mapfile -t repos < <(git config --global --get-all sheepdog.repo || true)
@@ -394,6 +410,7 @@ run_pass() {
         kept+=("$b")
       elif git -C "$repo" config --unset "branch.$b.sheepdog"; then
         lines+="$name"$'\t'"$b"$'\t-\tunenrolled: no local branch\n'
+        vacuum_log "$name" "$b" "unenrolled: no local branch"
       fi
     done
     branches=("${kept[@]}")
@@ -402,7 +419,11 @@ run_pass() {
     (( ${#branches[@]} )) || continue
 
     if [[ -z $stopped ]]; then
-      out=$(fetch "$repo" "$name") || { lines+=$out$'\n'; continue; }
+      if ! out=$(fetch "$repo" "$name"); then
+        lines+=$out$'\n'
+        for b in "${branches[@]}"; do vacuum_log "$name" "$b" "skipped: ${out##*$'\t'}"; done
+        continue
+      fi
       [[ -z $out ]] || lines+=$out$'\n'
     fi
     load_worktrees "$repo"
@@ -411,6 +432,7 @@ run_pass() {
       if [[ -n $stopped ]]; then
         lines+=$stop_line"$name"$'\t'"$b"$'\t-\tnot checked: rate limit\n' stop_line=""
         printf '%s\t%s\n' "${worktree_of[$b]:-}" "$b" >> "$SKIPPED"
+        vacuum_log "$name" "$b" "skipped, not checked: GitHub rate limit"
         continue
       fi
       lines+=$(check "$repo" "$name" "$b" "${worktree_of[$b]:-}")$'\n' || true
@@ -479,6 +501,12 @@ refresh() {
   fi
   show <<<"$line"
   return $rc
+}
+
+vacuum() {
+  VACUUM_LOG=$(mktemp)
+  run_pass
+  if [[ -s $VACUUM_LOG ]]; then show < "$VACUUM_LOG"; else echo "nothing stale"; fi
 }
 
 # vacuum_preview: each enrolled branch on the stale clock, from cached state.
@@ -581,10 +609,11 @@ case ${1:-} in
       *) glyph_of "${2:-}" ;;
     esac ;;
   vacuum)
-    case ${2:-} in
-      "") prc_super_init || exit 1; vacuum_preview ;;
+    case "${*:2}" in
+      "") prc_super_init || exit 1; vacuum ;;
+      --dry-run) prc_super_init || exit 1; vacuum_preview ;;
       -h|--help) usage ;;
-      *) die "usage: sd watch vacuum (it takes no arguments)" ;;
+      *) die "usage: sd watch vacuum [--dry-run]" ;;
     esac ;;
   status)
     if [[ -f $STATE_DIR/last-pass ]]; then show < "$STATE_DIR/last-pass"; else echo "no pass yet"; fi ;;
