@@ -414,6 +414,14 @@ EOF
   [ "$(git config --get branch.feat-x.sd-held)" = "$(git rev-parse HEAD~1)"$'\n'".github/workflows/ci.yml" ]
 }
 
+@test "implement: a CI config file with a non-ASCII name is held under its own name (#124)" {
+  started
+  printf '#!/usr/bin/env bash\nmkdir -p .github/workflows && echo x > .github/workflows/tëst.yml\n' > "$FX/agent"
+  run "$SD_ACT" implement
+  [ "$status" -eq 0 ]
+  [ "$(git config --get branch.feat-x.sd-held)" = "$(git rev-parse HEAD)"$'\n'".github/workflows/tëst.yml" ]
+}
+
 @test "implement: a CI config change the agent committed itself before needing input is held (#124)" {
   started
   printf '#!/usr/bin/env bash\nmkdir -p .github/workflows && echo x > .github/workflows/ci.yml && git add -A && git commit -qm "agent made it"\n' > "$FX/agent"

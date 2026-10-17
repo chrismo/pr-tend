@@ -185,7 +185,7 @@
 # .sheepdog/protected-paths in the base commit (one per line, # comments);
 # else .github/workflows/ .github/actions/ .rwx/ .captain/ .circleci/
 # .gitlab-ci.yml .buildkite/; unless the setting is set,
-# .sheepdog/protected-paths itself too. One ending in / covers what's under it.
+# .sheepdog/protected-paths itself too. Each covers itself and what's under it.
 #
 # --force:
 #   address         run even if the branch is unpushed, diverged or taken over
@@ -1721,7 +1721,7 @@ hold_after() {
 # guarantee), and again from there over the pipeline's own commit.
 hold_since() {
   [[ $(git rev-parse "refs/heads/$1") != "$3" ]] || return 0
-  hold_after "$1" "$2" "$(git diff --name-only --no-renames "$3" "refs/heads/$1")"
+  hold_after "$1" "$2" "$(git diff -z --name-only --no-renames "$3" "refs/heads/$1" | tr '\0' '\n')"
 }
 
 # hold_gate <branch> <doing> [<then>]: refuse <doing> while a hold is active;
@@ -2075,7 +2075,7 @@ resolve_conflicts() {
       echo "sd act: can't read what the agent changed in $wt; rolled back to ${old_head:0:7}" >&2
       return 1
     fi
-    RESOLVE_TOUCHED+=$(git diff-tree -r --name-only --no-renames "$snap" "$after")$'\n'
+    RESOLVE_TOUCHED+=$(git diff-tree -z -r --name-only --no-renames "$snap" "$after" | tr '\0' '\n')$'\n'
     if (cd "$wt" && grep -lE '^(<<<<<<< |>>>>>>> )' $files 2>/dev/null | grep -q .); then
       restack_rollback "$wt" "$b" "$old_head"
       echo "sd act: conflict markers left in: $(cd "$wt" && grep -lE '^(<<<<<<< |>>>>>>> )' $files | tr '\n' ' '); rolled back to ${old_head:0:7}" >&2

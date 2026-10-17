@@ -758,10 +758,10 @@ guidance_repo() {
   [ -z "$output" ]
 }
 
-@test "protected_hits: a path ending in / covers what's under it; any other names one file" {
-  local list=$'.github/workflows/\n.gitlab-ci.yml'
-  run protected_hits "$list" $'.github/workflows/test.yml\n.github/dependabot.yml\n.gitlab-ci.yml\n.gitlab-ci.yml.bak\nsrc/.github/workflows/x.yml'
-  [ "$output" = "$(printf '%s\n' .github/workflows/test.yml .gitlab-ci.yml)" ]
+@test "protected_hits: a path covers itself and what's under it, trailing / or not" {
+  local list=$'.github/workflows/\n.gitlab-ci.yml\n.rwx'
+  run protected_hits "$list" $'.github/workflows/test.yml\n.github/dependabot.yml\n.gitlab-ci.yml\n.gitlab-ci.yml.bak\nsrc/.github/workflows/x.yml\n.rwx/tests.yml\n.rwxrc'
+  [ "$output" = "$(printf '%s\n' .github/workflows/test.yml .gitlab-ci.yml .rwx/tests.yml)" ]
   run protected_hits "" ".github/workflows/test.yml"
   [ -z "$output" ]
 }

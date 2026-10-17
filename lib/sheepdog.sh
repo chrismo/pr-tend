@@ -98,7 +98,7 @@ EOF
 flag_lines() { prc_line "$FLAG_LINES" "$1"; }
 
 # CI config: an agent step's commit that touches one of these isn't pushed
-# until chrismo has looked (#124). A path ending in / covers what's under it.
+# until chrismo has looked (#124). A path covers itself and what's under it.
 PROTECTED_PATHS_DEFAULT=(.github/workflows/ .github/actions/ .rwx/ .captain/ .circleci/ .gitlab-ci.yml .buildkite/)
 
 # protected_paths <branch> <base>: the protected paths, one per line:
@@ -131,7 +131,7 @@ protected_hits() {
     [[ -n $f ]] || continue
     while IFS= read -r p; do
       [[ -n $p ]] || continue
-      if [[ $f == "$p" || ( $p == */ && $f == "$p"* ) ]]; then echo "$f"; break; fi
+      if [[ $f == "${p%/}" || $f == "${p%/}"/* ]]; then echo "$f"; break; fi
     done <<<"$1"
   done <<<"$2"
 }
