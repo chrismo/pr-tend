@@ -48,7 +48,8 @@
 #   --json    everything
 #
 # Never fetches, and writes only the PR numbers it finds (branch.<b>.sd-pr,
-# the parent's too). Remote refs are as fresh as the last fetch. One gh
+# the parent's too), when they change. That makes it a .git/config writer:
+# while it holds config.lock, another git config write fails. Remote refs are as fresh as the last fetch. One gh
 # GraphQL call per PR (the branch's, and a non-default parent's), by its
 # stored number; a discovery by branch comes first for a PR not yet known,
 # and is the only call for a branch with none. A gh failure is recorded in
@@ -201,13 +202,15 @@ EOF
 # lookup_pr <branch> [true]: the branch's PR into PR (null for none), RESP
 # holding the last answer; true also fetches its commits. By the number in
 # branch.<b>.sd-pr, unless GitHub has no such PR, its head is another branch,
-# or it was closed unmerged (a new one may have been opened since): then
-# discovery picks one and stores its number (unset for none). Returns 1 when
-# gh failed.
+# or it was closed unmerged (a new one may have been opened since; a merged
+# one stays, as the branch is done): then discovery picks one and stores its
+# number (unset for none), for a local branch only: git branch -d removes the
+# config of only those. Returns 1 when gh failed.
 # -f, not -F, for the branch: -F would send "1234" or "true" as a non-string.
 lookup_pr() {
-  local b=$1 commits=${2:-false} n fetched="" pick rc=0 head st
+  local b=$1 commits=${2:-false} n fetched="" pick rc=0 head st is_local=false
   n=$(git config --get "branch.$b.sd-pr" || true)
+  git show-ref -q --verify "refs/heads/$b" && is_local=true
   PR=null
   if [[ -n $n ]]; then
     gh_call "$b" -F number="$n" -F commits="$commits" -f query="$QUERY" || rc=$?
@@ -223,11 +226,11 @@ lookup_pr() {
   pick=$(prc_line "$PICK_PR"$'\n| values coalesce(number, "")' "$RESP") || die "couldn't read gh's answer"
   if [[ -z $pick ]]; then
     PR=null
-    [[ -z $n ]] || git config --unset "branch.$b.sd-pr" 2>/dev/null || true
+    [[ -z $n ]] || ! $is_local || git config --unset "branch.$b.sd-pr" 2>/dev/null || true
     return 0
   fi
   # A lost race with another writer only costs a discovery next time.
-  [[ $pick == "$n" ]] || git config "branch.$b.sd-pr" "$pick" 2>/dev/null || true
+  [[ $pick == "$n" ]] || ! $is_local || git config "branch.$b.sd-pr" "$pick" 2>/dev/null || true
   [[ $pick != "$fetched" ]] || return 0
   rc=0
   gh_call "$b" -F number="$pick" -F commits="$commits" -f query="$QUERY" || rc=$?

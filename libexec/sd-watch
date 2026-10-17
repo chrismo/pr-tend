@@ -376,7 +376,7 @@ run_pass() {
   WRITTEN=$(mktemp) GLYPHS=$(mktemp "$STATE_DIR/glyphs.XXXXXX") RATE_STOP=$(mktemp)
   trap 'rm -f "$WRITTEN" "$GLYPHS" "$RATE_STOP"' EXIT
   local -a repos branches
-  local repo name b lines="" out stopped="" kept
+  local repo name b lines="" out stopped="" rows
   mapfile -t repos < <(git config --global --get-all sheepdog.repo || true)
   # A config failure is reported per repo by fetch, which then skips it.
   VACUUM_AFTER=$(prc_get settings.vacuumAfter "" true 2>/dev/null) || VACUUM_AFTER=0
@@ -414,8 +414,8 @@ run_pass() {
   local f
   if [[ -n $stopped ]]; then
     # The branches not checked keep their glyphs, files and index rows both.
-    kept=$(awk -F'\t' 'FILENAME == ARGV[1] { seen[$1]; next } !($1 in seen)' "$GLYPHS" "$STATE_DIR/glyphs" 2>/dev/null) || true
-    [[ -z $kept ]] || printf '%s\n' "$kept" >> "$GLYPHS"
+    rows=$(awk -F'\t' 'FILENAME == ARGV[1] { seen[$1]; next } !($1 in seen)' "$GLYPHS" "$STATE_DIR/glyphs" 2>/dev/null) || true
+    [[ -z $rows ]] || printf '%s\n' "$rows" >> "$GLYPHS"
   else
     for f in "$STATUS_DIR"/*.pr; do
       [[ -e $f ]] || continue

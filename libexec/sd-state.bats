@@ -10,6 +10,7 @@ bats_require_minimum_version 1.5.0
 # the file, and a fetch by number= gets the node with that number from
 # whichever file has it, its headRefName that file's branch unless the node
 # names one. Discovery costs 1, a fetch 2, both with $GH_FAKE_REMAINING left.
+# GH_FAKE_GONE=<n>: a fetch of #n finds no such PR.
 
 SD_STATE="$BATS_TEST_DIRNAME/sd-state"
 
@@ -49,7 +50,7 @@ if [[ -n $n ]]; then
   if [[ -n $b && ${GH_FAKE_FAIL_FOR:-} == "$b" ]]; then echo "gh: boom for $b" >&2; exit 1; fi
   echo "#$n" >> "$GH_FIXTURES/calls"
   echo "#$n ${c:-}" >> "$GH_FIXTURES/commits"
-  if [[ -z $f ]]; then
+  if [[ -z $f || $n == "${GH_FAKE_GONE:-}" ]]; then
     echo "{\"data\":{\"rateLimit\":$(rl 1),\"repository\":{\"pullRequest\":null}}}"
     echo "gh: Could not resolve to a PullRequest with the number of $n." >&2; exit 1
   fi
@@ -450,6 +451,28 @@ calls() { tr '\n' ' ' < "$GH_FIXTURES/calls"; rm -f "$GH_FIXTURES/calls"; }
   state
   [ "$(calls)" = "#7 #3 " ]
   [ "$(field .parent.pr.number)" = 3 ]
+}
+
+@test "PR number: a PR discovery lists but the fetch can't resolve is an error, and no PR" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat
+  GH_FAKE_GONE=7 state
+  [ "$(calls)" = "feat #7 " ]
+  [ "$(field .pr)" = null ]
+  [ "$(field .fresh)" = null ]
+  [[ "$(field '.errors[0]')" == *"GitHub has no PR #7, which it just listed"* ]]
+}
+
+@test "PR number: a parent that isn't a local branch has its number looked up, not stored" {
+  git switch -qc parent && commit p.txt p && git push -q origin parent 2>/dev/null
+  git switch -qc feat && commit c.txt c
+  git branch -D -q parent
+  git config branch.feat.sd-parent parent
+  pr_fixture feat
+  pr_fixture parent '.number = 3'
+  state
+  [ "$(field .parent.pr.number)" = 3 ]
+  [ -z "$(git config branch.parent.sd-pr || true)" ]
 }
 
 @test "PR number: gh failing stores nothing and keeps what was stored" {
