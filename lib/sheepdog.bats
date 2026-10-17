@@ -417,7 +417,7 @@ usage_count() { prc_super -i sup -f line -c 'count()' "$SHEEPDOG_STATE_DIR/usage
   HARNESS_STEP=implement run harness_run claude sid1 resume 30 "do it" '{}'
   [ "$status" -eq 0 ]
   [ "$(wc -l < "$SHEEPDOG_STATE_DIR/usage.sup")" -eq 1 ]
-  [ "$(usage_last 'typeof(time) == <time> and typeof(cost_usd) == <float64> and typeof(input) == <int64>')" = true ]
+  [ "$(usage_last 'typeof(time) == <time> and typeof(cost_usd) == <float64> and typeof(input) == <int64> and estimated == false')" = true ]
   [ "$(usage_last 'f"{repo}|{branch}|{step}|{harness}|{session}|{mode}|{status}|{cost_usd}|{input}|{cache_create}|{cache_read}|{output}|{duration_ms}|{turns}"')" \
     = "$TMP/repo|feat|implement|claude|sid1|resume|0|0.25|10|200|3000|40|4321|3" ]
   run harness_run claude sid1 resume 30 "again" '{}'
@@ -521,9 +521,61 @@ EOF
   run branch_spend feat
   [ "$status" -eq 0 ]
   [ "$output" = 1.75 ]
-  echo 'not sup {' >> "$SHEEPDOG_STATE_DIR/usage.sup"
+}
+
+@test "branch_spend: a line that isn't a whole record (a cut-off append, a stray edit) is skipped, with a warning" {
+  mkdir -p "$SHEEPDOG_STATE_DIR"
+  cat > "$SHEEPDOG_STATE_DIR/usage.sup" <<EOF
+{time:2026-10-16T20:33:06Z,repo:"$TMP/repo",branch:"feat",step:"review",harness:"claude",session:"a",mode:"new",status:0,cost_usd:1.25}
+not sup {
+{time:2026-10-16T20:34:06Z,repo:"$TMP/repo",branch:"fe
+{time:2026-10-16T20:35:06Z,repo:"$TMP/repo",branch:"feat",step:"review",harness:"claude",session:"a",mode:"new",status:0,cost_usd:0.5}
+EOF
+  run --separate-stderr branch_spend feat
+  [ "$status" -eq 0 ]
+  [ "$output" = 1.75 ]
+  [[ "$stderr" == *"2 line(s) of $SHEEPDOG_STATE_DIR/usage.sup aren't usage records; their cost isn't counted"* ]]
+  # Shaped like a record but not one: the file can't be read.
+  echo '{time:soon}' >> "$SHEEPDOG_STATE_DIR/usage.sup"
   run branch_spend feat
   [ "$status" -ne 0 ]
+}
+
+# claude_stub_appends <session-id> <transcript-line|"">: a claude stub that
+# adds the line to the session's transcript, then fails without a result, as a
+# step killed by stepTimeout does.
+claude_stub_appends() {
+  local t="$CLAUDE_CONFIG_DIR/projects/-repo/$1.jsonl"
+  mkdir -p "${t%/*}"
+  echo '{"message":{"role":"assistant","usage":{"input_tokens":1,"output_tokens":1}},"type":"assistant"}' > "$t"
+  printf '%s\n' "$2" > "$FX/append"
+  cat > "$TMP/fakebin/claude" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" > "\$FX/args"
+grep . "\$FX/append" >> '$t'
+echo "timed out after 30s" >&2
+exit 124
+EOF
+}
+
+@test "harness_run: a claude step that ran turns but printed no result (timed out) is charged its cap, marked estimated" {
+  harness_stubs
+  claude_stub_appends sid1 '{"message":{"role":"assistant","usage":{"input_tokens":9,"output_tokens":9}},"type":"assistant"}'
+  run harness_run claude sid1 resume 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [ "$(usage_last 'f"{typeof(cost_usd)}|{cost_usd == 5.}|{estimated}|{nul(input)}"')" = "<float64>|true|true|true" ]
+  # With no cap there's nothing to charge: unknown, but still marked.
+  echo '{"settings": {"stepBudget": 0}}' > "$SHEEPDOG_CONFIG"
+  run harness_run claude sid1 resume 30 "do it" '{}'
+  [ "$(usage_last 'f"{nul(cost_usd)}|{estimated}"')" = "true|true" ]
+}
+
+@test "harness_run: a claude step that failed before any turn costs nothing, and isn't an estimate" {
+  harness_stubs
+  claude_stub_appends sid1 ""
+  run harness_run claude sid1 resume 30 "do it" '{}'
+  [ "$status" -ne 0 ]
+  [ "$(usage_last 'f"{nul(cost_usd)}|{estimated}"')" = "true|false" ]
 }
 
 @test "harness_run: a successful run keeps the harness's stderr off the terminal" {

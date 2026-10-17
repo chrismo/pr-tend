@@ -141,23 +141,27 @@ harness_transcript() {
 
 # harness_tally <harness> <session-id>: what the session's transcript says, as
 # one JSON object; {} with no transcript. context is its last turn's tokens,
-# the whole context then: what a resume or fork inherits (#121). For pi, which
-# prints no usage, also cost, input, cache_create, cache_read, output and turns,
-# summed over the session. A grep for the role first: a transcript runs to
-# megabytes. claude's top-level type is the record's; a nested one is a
-# subagent's progress, and a quoted one a tool result's text.
+# the whole context then: what a resume or fork inherits (#121). For claude,
+# also entries, its assistant lines: more after a step than before means the
+# step ran turns. For pi, which prints no usage, also cost, input,
+# cache_create, cache_read, output and turns, summed over the session. A grep
+# for the role first: a transcript runs to megabytes. claude's top-level type
+# is the record's; a nested one is a subagent's progress, and a quoted one a
+# tool result's text. Two passes each: an aggregate's collect has no order to
+# take the last from.
 harness_tally() {
-  local f r ctx
+  local f r ctx sel
   f=$(harness_transcript "$1" "$2")
   if [[ -n $f ]]; then
     case $1 in
       claude)
-        r=$(grep -F '"type":"assistant"' "$f" | prc_json 'where type == "assistant" and not on(isSidechain) and not nul(message.usage)
-          | tail 1
-          | values {context: n(message.usage.input_tokens) + n(message.usage.cache_creation_input_tokens)
-                             + n(message.usage.cache_read_input_tokens) + n(message.usage.output_tokens)}' 2>/dev/null) || r= ;;
+        sel='where type == "assistant" and not on(isSidechain) and not nul(message.usage)'
+        ctx=$(grep -F '"type":"assistant"' "$f" | prc_line "$sel | tail 1
+          | values n(message.usage.input_tokens) + n(message.usage.cache_creation_input_tokens)
+                   + n(message.usage.cache_read_input_tokens) + n(message.usage.output_tokens)" 2>/dev/null) || ctx=
+        r=$(grep -F '"type":"assistant"' "$f" | prc_json "$sel | aggregate entries:=count()
+          | values {...this, context: ${ctx:-null}}" 2>/dev/null) || r= ;;
       pi)
-        # Two passes: an aggregate's collect has no order to take the last from.
         ctx=$(grep -F '"role":"assistant"' "$f" | prc_line 'where on(message.role == "assistant") and not nul(message.usage)
           | tail 1 | values n(message.usage.totalTokens)' 2>/dev/null) || ctx=
         r=$(grep -F '"role":"assistant"' "$f" | prc_json 'where on(message.role == "assistant") and not nul(message.usage)
@@ -171,12 +175,17 @@ harness_tally() {
 }
 
 # The usage record, over {t, repo, branch, step, harness, session, mode,
-# status, ms, o: claude's result object, a and b: harness_tally after and
-# before}. t is passed in, not now(), so the output is the same every run.
+# status, ms, cap: the step's --max-budget-usd ("0": none known), o: claude's
+# result object, a and b: harness_tally after and before}. t is passed in, not
+# now(), so the output is the same every run. A claude step with no result
+# (killed by stepTimeout, or crashed) that still ran turns is charged its cap,
+# the most it could spend, and marked estimated; with no cap its cost is
+# unknown (null), and still marked.
 read -r -d '' USAGE_Q <<'EOF' || true
 fn nn(s): s == "" ? null : s
 values {time: t::time, repo: nn(repo), branch: nn(branch), step: nn(step), harness, session, mode, status,
-  context: coalesce(a.context, null),
+  context: coalesce(a.context, null), cap: cap::float64,
+  unseen: harness == "claude" and nul(o) and n(a.entries) > n(b.entries),
   u: harness == "claude"
      ? (nul(o) ? null : {cost: coalesce(o.total_cost_usd, 0), input: n(o.usage.input_tokens),
                          cache_create: n(o.usage.cache_creation_input_tokens), cache_read: n(o.usage.cache_read_input_tokens),
@@ -185,21 +194,23 @@ values {time: t::time, repo: nn(repo), branch: nn(branch), step: nn(step), harne
                                cache_create: a.cache_create - n(b.cache_create), cache_read: a.cache_read - n(b.cache_read),
                                output: a.output - n(b.output), duration_ms: ms, turns: a.turns - n(b.turns)})}
 | values {time, repo, branch, step, harness, session, mode, status: status::int64,
-          cost_usd: nul(u) ? null : u.cost::float64,
+          cost_usd: not nul(u) ? u.cost::float64 : unseen and cap > 0 ? cap : null,
+          estimated: unseen,
           input: nul(u) ? null : u.input::int64, cache_create: nul(u) ? null : u.cache_create::int64,
           cache_read: nul(u) ? null : u.cache_read::int64, output: nul(u) ? null : u.output::int64,
           duration_ms: nul(u) ? null : u.duration_ms::int64, turns: nul(u) ? null : u.turns::int64,
           context: nul(context) ? null : context::int64}
 EOF
 
-# harness_usage <harness> <session-id> <mode> <status> <output> <tally-before> <ms>:
+# harness_usage <harness> <session-id> <mode> <status> <output> <tally-before> <ms> <cap>:
 # one record per step, a line of Super (SUP) appended to usage.sup in
 # $SHEEPDOG_STATE_DIR: time, repo, branch, step, harness, session, mode, status,
-# cost_usd, the tokens (input, cache_create, cache_read, output), duration_ms,
-# turns, and context (harness_tally). claude's numbers are from its JSON
-# output; pi's, which prints none, are what its transcript gained during the
-# step; null when there are none. The cost is the harness's estimate, not how
-# it was billed. A usage.tsv from before #121 is left as it was.
+# cost_usd, estimated (USAGE_Q), the tokens (input, cache_create, cache_read,
+# output), duration_ms, turns, and context (harness_tally). claude's numbers
+# are from its JSON output; pi's, which prints none, are what its transcript
+# gained during the step; null when there are none. The cost is the harness's
+# estimate, not how it was billed. A usage.tsv from before #121 is left as it
+# was.
 harness_usage() {
   local file rec obj=null after strs
   file=$(usage_file)
@@ -209,20 +220,28 @@ harness_usage() {
            "$(date -u +%FT%TZ)" "$(prc_json_string "$(main_worktree 2>/dev/null)")" "$(prc_json_string "$(harness_branch)")" \
            "$(prc_json_string "${HARNESS_STEP:-}")" "$(prc_json_string "$1")" "$(prc_json_string "$2")" "$(prc_json_string "$3")") \
     || return 0
-  rec=$(printf '{%s, "status": %s, "ms": %s, "o": %s, "a": %s, "b": %s}\n' "$strs" "$4" "$7" "$obj" "$after" "$6" \
+  rec=$(printf '{%s, "status": %s, "ms": %s, "cap": "%s", "o": %s, "a": %s, "b": %s}\n' "$strs" "$4" "$7" "${8:-0}" "$obj" "$after" "$6" \
           | prc_super -i json -s -c "$PRC_FNS"$'\n'"$USAGE_Q" - 2>/dev/null) && [[ -n $rec ]] || return 0
   mkdir -p "${file%/*}" 2>/dev/null || return 0
   printf '%s\n' "$rec" >> "$file"
 }
 
 # branch_spend <branch>: what this repo's <branch> has cost so far, in USD, by
-# usage.sup, as a JSON number; 0 with no record. Fails on a file it can't read.
+# usage.sup, as a JSON number; 0 with no record. The file is every repo's and
+# branch's, so a line that isn't a whole record (an append cut off, a stray
+# edit) is skipped with a warning rather than failing every branch's sd state;
+# one shaped like a record that still doesn't parse fails it. A filter, not
+# parse_sup per line: on super 0.3.0 that misreported valid lines around a bad
+# one, and -e=false still stops at a SUP syntax error.
 branch_spend() {
-  local file repo b out
+  local file repo b out skipped
   file=$(usage_file)
   [[ -s $file ]] || { echo 0; return 0; }
   repo=$(prc_json_string "$(main_worktree)") && b=$(prc_json_string "$1") || return 1
-  out=$(prc_super -i sup -j -c "where repo == $repo and branch == $b | aggregate usd:=sum(cost_usd) | values coalesce(usd, 0)" "$file") \
+  skipped=$(grep -cvE '^\{time:.*\}$' "$file") || true
+  (( skipped == 0 )) || echo "warning: $skipped line(s) of $file aren't usage records; their cost isn't counted" >&2
+  out=$({ grep -E '^\{time:.*\}$' "$file" || true; } \
+          | prc_super -i sup -j -c "where repo == $repo and branch == $b | aggregate usd:=sum(cost_usd) | values coalesce(usd, 0)" - 2>/dev/null) \
     || return 1
   echo "${out:-0}"
 }
@@ -244,7 +263,7 @@ branch_spend() {
 # the step fails, and then all at once: nothing streams while it runs.
 harness_run() {
   local h=$1 sid=$2 mode=$3 timeout=$4 prompt=$5 schema=$6 settings=${7:-'{}'} out err rc said budget cap=""
-  local model effort provider use_key args fields before='{}' t0
+  local model effort provider use_key args fields before t0 cap_usd=0
   local -a typed=() extra f env=()
   # args last, so a newline in it shifts nothing; the end marker survives $( )
   # stripping the trailing newlines of empty fields.
@@ -266,13 +285,13 @@ harness_run() {
       [[ $budget != -* ]] || { echo "settings.stepBudget must be 0 or more: $budget" >&2; rm -f "$err"; return 1; }
       # A cap in args is the more specific one, so it replaces stepBudget's.
       [[ $budget =~ ^0*(\.0*)?$ || " ${extra[*]} " =~ \ --max-budget-usd[\ =] ]] \
-        || { typed+=(--max-budget-usd "$budget"); cap=" (settings.stepBudget $budget USD)"; } ;;
+        || { typed+=(--max-budget-usd "$budget"); cap=" (settings.stepBudget $budget USD)" cap_usd=$budget; } ;;
     pi)
       if [[ -n $provider ]]; then typed+=(--provider "$provider"); fi
       if [[ -n $model ]]; then typed+=(--model "$model"); fi
-      if [[ -n $effort ]]; then typed+=(--thinking "$effort"); fi
-      before=$(harness_tally pi "$sid") ;;
+      if [[ -n $effort ]]; then typed+=(--thinking "$effort"); fi ;;
   esac
+  before=$(harness_tally "$h" "$sid")
   t0=${EPOCHREALTIME//[.,]/}
   case $h in
     claude)
@@ -296,7 +315,7 @@ harness_run() {
     *) echo "unknown harness: $h (claude or pi)" >&2; rm -f "$err"; return 1 ;;
   esac
   rc=$?
-  harness_usage "$h" "$sid" "$mode" "$rc" "$out" "$before" $(( (${EPOCHREALTIME//[.,]/} - t0) / 1000 ))
+  harness_usage "$h" "$sid" "$mode" "$rc" "$out" "$before" $(( (${EPOCHREALTIME//[.,]/} - t0) / 1000 )) "$cap_usd"
   if (( rc != 0 )); then
     tail -n 40 "$err" >&2
     # The end of the harness's own account of the failure: the budget hit,

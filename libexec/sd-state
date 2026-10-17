@@ -205,7 +205,7 @@ bot_timeout=$(prc_get settings.botTimeout "$branch" false) || die "sd config fai
 bot_triggered=$(cfg sd-bot-triggered)   # when trigger posted its comment, by GitHub's clock (#63)
 review_rounds=$(prc_get settings.reviewRounds "$branch" false) || die "sd config failed"
 branch_budget=$(prc_get settings.branchBudget "$branch" false json) || die "sd config failed"
-spend=$(branch_spend "$branch" 2>/dev/null) || { spend=null; errors+=("usage: can't read $(usage_file)"); }
+spend=$(branch_spend "$branch" 2> >(sed 's/^/sd state: /' >&2)) || { spend=null; errors+=("usage: can't read $(usage_file)"); }
 [[ $(prc_val "$ignore_body" 'len(coalesce([unnest this | where is_error(regexp(this, ""))], [])) == 0' 2>/dev/null) == true ]] \
   || die "botIgnoreBody has an invalid regex: $ignore_body"
 

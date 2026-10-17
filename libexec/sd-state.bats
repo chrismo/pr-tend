@@ -2235,10 +2235,22 @@ usage_row() { # usage_row <branch> <cost_usd> [repo]
   [ "${lines[1]}" = 'NEXT  you    spent $2.50 on this branch, past settings.branchBudget ($2.00): raise it, or take over  → sd act attach' ]
 }
 
-@test "spend: an unreadable usage.sup is an error, not a stop" {
+@test "spend: a line of usage.sup that isn't a record is skipped with a warning, not an error on every branch" {
+  git switch -qc feat
+  usage_row feat 1.5
+  echo '{time:2026-10-16T20:34:06Z,repo:"cut off' >> "$SHEEPDOG_STATE_DIR/usage.sup"
+  usage_row feat 2.
+  run --separate-stderr "$SD_STATE" --json
+  [ "$status" -eq 0 ]
+  [ "$(field .spend.usd)" = 3.5 ]
+  [ "$(field -c .errors)" = '[]' ]
+  [[ "$stderr" == "sd state: warning: 1 line(s) of $SHEEPDOG_STATE_DIR/usage.sup aren't usage records"* ]]
+}
+
+@test "spend: a usage.sup that still won't read is an error, not a stop" {
   git switch -qc feat
   mkdir -p "$SHEEPDOG_STATE_DIR"
-  echo 'not sup {' > "$SHEEPDOG_STATE_DIR/usage.sup"
+  echo '{time:soon}' > "$SHEEPDOG_STATE_DIR/usage.sup"
   state
   [ "$(field .spend.usd)" = null ]
   [[ "$(field '.errors[]')" == *"usage.sup"* ]]
