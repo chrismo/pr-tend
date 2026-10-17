@@ -1962,7 +1962,7 @@ record_lineage() {
     echo "base pinned at ${old_base:0:7}"
   else
     local why; why=$(no_base_why "$b" "$state")
-    echo "sd act: warning: no base pinned for $b${why:+: $why}" >&2
+    echo "sd act: warning: no usable base for $b${why:+: $why}" >&2
   fi
 }
 

@@ -285,6 +285,7 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(step restack-undone cmd "${s[@]}")" = null ]
   local m=('.sync.undone = 1' '.parent.name = "base"' '.parent.merged = true' '.sync.old_base = null')
   [ "$(step restack-undone cmd "${m[@]}")" = null ]
+  [[ "$(step restack-undone say "${m[@]}")" == *"no base to redo it from on main: pin one by hand (git update-ref refs/sheepdog/feat/base <the commit feat left base at>), then sd act restack" ]] || false
 }
 
 @test "the remote has commits this copy reset away (ours): force-push, which leases (#86)" {

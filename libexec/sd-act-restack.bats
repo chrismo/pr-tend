@@ -568,7 +568,7 @@ child" ]
   [ "$status" -eq 0 ]
   [ "$(git config branch.child.sd-parent)" = A ]
   [ -z "$(git rev-parse -q --verify refs/sheepdog/child/base || true)" ]
-  [[ "$output" == *"warning: no base pinned for child: no base for child on A"*"git update-ref refs/sheepdog/child/base"* ]]
+  [[ "$output" == *"warning: no usable base for child: no base for child on A"*"git update-ref refs/sheepdog/child/base"* ]]
 }
 
 @test "enroll records nothing for a branch whose PR targets the default branch" {
