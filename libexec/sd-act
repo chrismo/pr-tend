@@ -55,7 +55,8 @@
 #             (sd act review) go into the prompt; changing nothing for them
 #             declines them, which hands them to chrismo. Spends tokens
 #   enroll    mark the branch for sd watch, and register this repo; for a
-#             stacked PR, store its parent and base before a merge erases them;
+#             stacked PR, store its parent and base before a merge erases them
+#             (or warn that git can't find the base, and how to pin it);
 #             with no PR and no sd-parent, store the branch it was made from by
 #             a plain git branch (#94), or say why git can't pick one (a tie,
 #             or a parent that moved on) and store nothing
@@ -1959,6 +1960,9 @@ record_lineage() {
   if [[ -n $old_base ]]; then
     git update-ref "refs/sheepdog/$b/base" "$old_base"
     echo "base pinned at ${old_base:0:7}"
+  else
+    local why; why=$(no_base_why "$b" "$state")
+    echo "sd act: warning: no base pinned for $b${why:+: $why}" >&2
   fi
 }
 

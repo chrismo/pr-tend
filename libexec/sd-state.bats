@@ -719,6 +719,21 @@ squash_parent_away() {
   [ "$(field '.errors | length')" = 0 ]
 }
 
+@test "sync: a parent closed without merging, no pin or fork-point: no missing-pin error, NEXT says parent-closed (#97)" {
+  git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
+  git switch -qc feat && commit c.txt c
+  (cd "$TMP/other" && git fetch -q origin && git switch -qc parent origin/parent \
+     && git commit -q --allow-empty -m p2 && git push -q origin parent 2>/dev/null && git switch -q main)
+  git fetch -q
+  git reflog expire --expire=now --expire-unreachable=now refs/remotes/origin/parent
+  pr_fixture parent '.number = 3' '.state = "CLOSED"'
+  pr_fixture feat '.baseRefName = "parent"'
+  state
+  [ "$(field .sync.old_base)" = null ]
+  [ "$(field '.errors | length')" = 0 ]
+  [[ " $(field '[.next[].key] | join(" ")') " == *" parent-closed "* ]]
+}
+
 @test "sync: not stacked, pin lost: falls back to the merge-base, and reports the pin" {
   git switch -qc feat && commit a.txt a
   local fork; fork=$(git rev-parse main)

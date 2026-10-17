@@ -550,6 +550,27 @@ child" ]
   [ "$(git log --format=%s origin/main..child)" = child ]
 }
 
+# As on a second machine: the parent moved on before this clone saw where the
+# branch left it, so there's no fork-point and nothing to pin (#97).
+@test "enroll of a stacked branch whose base git can't find: records the parent, pins nothing, says how to pin it" {
+  git switch -q main && git switch -qc A
+  edit 's/^c$/C/' a1
+  git push -q origin A 2>/dev/null
+  git switch -qc child
+  edit 's/^f$/F/' child
+  git push -q -u origin child 2>/dev/null
+  upstream A 's/^d$/D/' a2
+  git fetch -q
+  git reflog expire --expire=now --expire-unreachable=now refs/remotes/origin/A
+  open_pr A main 1
+  open_pr child A 2
+  run "$SD_ACT" enroll child
+  [ "$status" -eq 0 ]
+  [ "$(git config branch.child.sd-parent)" = A ]
+  [ -z "$(git rev-parse -q --verify refs/sheepdog/child/base || true)" ]
+  [[ "$output" == *"warning: no base pinned for child: no base for child on A"*"git update-ref refs/sheepdog/child/base"* ]]
+}
+
 @test "enroll records nothing for a branch whose PR targets the default branch" {
   open_pr feat main 1
   run "$SD_ACT" enroll
