@@ -21,7 +21,8 @@
 #              if it's still on the branch the last check saw; for a shell
 #              prompt or tab title (fast: no super, no GitHub)
 #   vacuum     a pass that unenrolls every stale branch now, whatever the
-#              clock (or vacuumAfter 0): prints each one unenrolled and its
+#              clock (or vacuumAfter 0), so an open PR's branch that no
+#              worktree holds goes too: prints each one unenrolled and its
 #              reason, and each one sd state is unsure of, skipped, and why.
 #              It doesn't notify its own unenrolls.
 #              --dry-run: what vacuum would do, judged from the last check
@@ -97,6 +98,7 @@ LABEL=com.sheepdog.watch
 OLD_LABELS=(com.agent-rig.pr-watch com.pr-tend.pr-watch)
 LAUNCH_AGENTS=${SHEEPDOG_WATCH_LAUNCH_AGENTS:-$HOME/Library/LaunchAgents}
 TIMEOUT=${SHEEPDOG_WATCH_TIMEOUT:-120}
+VACUUM_LOG=
 
 read -r -d '' CLASSIFY <<'EOF' || true
 values {next: kind(next) == "array" ? next : []}

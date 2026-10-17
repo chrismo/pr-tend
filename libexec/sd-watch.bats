@@ -1179,6 +1179,15 @@ enrolled() { [ "$(git config "branch.$1.sheepdog")" = true ]; }
   ! enrolled feat && ! enrolled other
 }
 
+@test "vacuum: VACUUM_LOG from the environment doesn't make a pass a vacuum" {
+  git switch -q main
+  ps_fixture feat '.ci.verdict = "pending"'
+  echo keep > "$TMP/keep"
+  VACUUM_LOG="$TMP/keep" pass
+  enrolled feat
+  [ "$(cat "$TMP/keep")" = keep ]
+}
+
 @test "vacuum: an active branch is kept" {
   ps_fixture feat
   run "$SD_WATCH" vacuum
