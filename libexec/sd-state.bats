@@ -29,9 +29,11 @@ setup() {
 if [[ -n ${GH_FAKE_FAIL:-} ]]; then echo "$GH_FAKE_FAIL" >&2; exit 1; fi
 # REST: the base branch's rulesets and classic protection, from
 # $GH_FIXTURES/rules.json and branch.json (default: none, unprotected).
+# GH_FAKE_FAIL_REST fails the paths matching GH_FAKE_FAIL_REST_ON (default all).
 if [[ $1 == api && $2 == repos/* ]]; then
   echo "$2" >> "$GH_FIXTURES/rest"
-  [[ -n ${GH_FAKE_FAIL_REST:-} ]] && { echo "$GH_FAKE_FAIL_REST" >&2; exit 1; }
+  # shellcheck disable=SC2053 # the pattern is a glob on purpose
+  if [[ -n ${GH_FAKE_FAIL_REST:-} && $2 == ${GH_FAKE_FAIL_REST_ON:-*} ]]; then echo "$GH_FAKE_FAIL_REST" >&2; exit 1; fi
   case $2 in
     */rules/branches/*) cat "$GH_FIXTURES/rules.json" 2>/dev/null || echo '[]' ;;
     */branches/*) cat "$GH_FIXTURES/branch.json" 2>/dev/null || echo '{"name": "main", "protected": false}' ;;
@@ -1276,16 +1278,24 @@ required_rules() { # required_rules <context>...: a ruleset requiring them
     [$ARGS.positional[] | {context: ., integration_id: 15368}], strict_required_status_checks_policy: false}}]' \
     --args "$@" > "$GH_FIXTURES/rules.json"
 }
+# reviewed_draft: feat pushed, its local review covering HEAD, and its PR a
+# draft, so CI is all that decides whether NEXT has the draft step.
+reviewed_draft() {
+  git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
+  git update-ref refs/sheepdog/feat/local HEAD
+  pr_fixture feat '.isDraft = true' "$@"
+}
+keys() { field '[.next[].key] | join(" ")'; }
 
 @test "ci: a draft's required check with no context on the head is pending, not none" {
-  git switch -qc feat && commit a.txt a
-  pr_fixture feat '.isDraft = true'
+  reviewed_draft
   required_rules test
   state
   [ "$(field .ci.verdict)" = pending ]
   [ "$(field -c .ci.required)" = '["test"]' ]
   [ "$(field -c .ci.missing)" = '["test"]' ]
-  [ "$(field '[.next[].key] | index("draft")')" = null ]
+  [ "$(keys)" = ci-wait ]
+  [ "$(field '.next[0].say')" = "waiting on required check test to report" ]
 }
 
 @test "ci: a draft's required check missing beside green ones is pending" {
@@ -1310,14 +1320,39 @@ required_rules() { # required_rules <context>...: a ruleset requiring them
   [ "$(field -c .ci.missing)" = '[]' ]
 }
 
-@test "ci: a draft with no required checks and nothing reported is still none" {
-  git switch -qc feat && commit a.txt a
-  pr_fixture feat '.isDraft = true'
+@test "ci: a draft with no required checks and nothing reported is still none, and undrafts" {
+  reviewed_draft
   state
   [ "$(field .ci.verdict)" = none ]
   [ "$(field -c .ci.required)" = '[]' ]
   [ "$(field -c '[.errors[]]')" = '[]' ]
   [ "$(sort "$GH_FIXTURES/rest" | tr '\n' ' ')" = "repos/{owner}/{repo}/branches/main repos/{owner}/{repo}/rules/branches/main?per_page=100 " ]
+  [ "$(keys)" = draft ]
+  [ "$(field '.next[0].say')" = "reviewed, no CI checks: mark the PR ready for review" ]
+}
+
+@test "ci: a 404 or 403 from either source is no rules from it, not an error" {
+  reviewed_draft
+  required_rules test
+  GH_FAKE_FAIL_REST="gh: Not Found (HTTP 404)" GH_FAKE_FAIL_REST_ON='*/rules/*' state
+  [ "$(field -c '[.errors[]]')" = '[]' ]
+  [ "$(field -c .ci.required)" = '[]' ]
+  [ "$(keys)" = draft ]
+  echo '{"name": "main", "protected": true, "protection": {"required_status_checks": {"contexts": ["test"], "checks": []}}}' \
+    > "$GH_FIXTURES/branch.json"
+  GH_FAKE_FAIL_REST="gh: Resource not accessible by integration (HTTP 403)" GH_FAKE_FAIL_REST_ON='*/rules/*' state
+  [ "$(field -c .ci.required)" = '["test"]' ]
+  [ "$(keys)" = ci-wait ]
+  GH_FAKE_FAIL_REST="gh: Must have admin rights to Repository. (HTTP 403)" GH_FAKE_FAIL_REST_ON='*/branches/main' state
+  [ "$(field -c '[.errors[]]')" = '[]' ]
+  [ "$(field -c .ci.required)" = '["test"]' ]
+}
+
+@test "ci: a 403 for a rate limit is still an error" {
+  reviewed_draft
+  GH_FAKE_FAIL_REST="gh: API rate limit exceeded for user ID 1. (HTTP 403)" state
+  [ "$(field .ci.required)" = null ]
+  [[ "$(field '.errors | join(" ")')" == *"required checks on main"*"rate limit"* ]]
 }
 
 @test "ci: required checks aren't read for a PR that isn't a draft" {
@@ -1330,13 +1365,12 @@ required_rules() { # required_rules <context>...: a ruleset requiring them
   [ ! -e "$GH_FIXTURES/rest" ]
 }
 
-@test "ci: reading required checks failing is an error, and the draft step waits on it" {
-  git switch -qc feat && commit a.txt a
-  pr_fixture feat '.isDraft = true'
-  GH_FAKE_FAIL_REST="gh: HTTP 502" state
+@test "ci: reading required checks failing is an error, and no draft step until it's known" {
+  reviewed_draft
+  GH_FAKE_FAIL_REST="gh: Server Error (HTTP 502)" state
   [ "$(field .ci.required)" = null ]
   [[ "$(field '.errors | join(" ")')" == *"required checks on main"*"HTTP 502"* ]]
-  [ "$(field '.next[0].key')" = errors ]
+  [ "$(keys)" = errors ]
 }
 
 @test "ci: checks on a SHA other than local HEAD are flagged" {

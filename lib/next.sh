@@ -38,7 +38,9 @@ values {...s, remote}
       draft_ready:=(on(pr.draft) and not (push.remote_sha is null or n(push.ahead) > 0
                                            or (on(push.remote_ours) and n(push.behind) > 0 and n(push.ahead) == 0))
                     and not (on(push.remote_ours == false) and n(push.theirs) > 0)
-                    and (on(ci.verdict == "green") or on(ci.verdict == "none"))),
+                    and (on(ci.verdict == "green") or on(ci.verdict == "none"))
+                    -- sd state reads the required checks of every draft: null is a failed read
+                    and not on(ci.required is null)),
       review_required:=on(pr.review_decision == "REVIEW_REQUIRED"),
       stacked:=(on(pr.base != sync.default) and (on(parent.pr.state == "OPEN") or on(parent.merged))),
       parent_closed:=(on(pr.base != sync.default) and on(parent.pr.state == "CLOSED")),

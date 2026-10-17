@@ -362,6 +362,8 @@ STACKED=('.parent.name = "base"' '.sync.target = "base"' '.sync.up_to_date = fal
   [ "$(step draft cmd '.pr.draft = true')" = "gh pr ready" ]
   [ "$(step draft say '.pr.draft = true')" = "CI green and reviewed: mark the PR ready for review" ]
   [ "$(keys '.pr.draft = true' '.ci.verdict = "none"')" = draft ]
+  [ "$(keys '.pr.draft = true' '.ci.verdict = "none"' '.ci.required = null')" = "" ]
+  [ "$(keys '.pr.draft = true' '.ci.verdict = "none"' '.ci.required = []')" = draft ]
   [ "$(step draft say '.pr.draft = true' '.ci.verdict = "none"')" = "reviewed, no CI checks: mark the PR ready for review" ]
   [ "$(keys '.pr.draft = true' '.pr.merge_state = "DRAFT"' '.ci.verdict = "pending"')" = ci-wait ]
   [ "$(keys '.pr.draft = true' '.pr.merge_state = "DRAFT"' '.review.local = {sha: "x", status: "uncovered", uncovered: 1}')" = review ]

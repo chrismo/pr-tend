@@ -537,7 +537,10 @@ done
 
 # A draft's base branch's required checks, sorted: rulesets, plus classic
 # protection as the branch shows it (branches/<b>/protection itself wants
-# admin rights). Anything else answered, such as no rules, counts as none.
+# admin rights). Anything else answered, such as no rules, counts as none, and
+# so does a 404 or 403 (a GHES without rulesets, a token that can't see them),
+# unless it's a rate limit. Any other failure leaves required null, which
+# keeps a draft from undrafting.
 read -r -d '' REQUIRED <<'EOF' || true
 values {rules: kind(rules) == "array" ? rules : [], branch}
 | values [
@@ -547,11 +550,21 @@ values {rules: kind(rules) == "array" ? rules : [], branch}
     ...coalesce([unnest coalesce(branch.protection.required_status_checks.checks, []) | values context], [])]
 | values coalesce([unnest this | sort this | uniq], [])
 EOF
+rest_rules() { # rest_rules <path>: gh api's answer, null for a 404 or 403
+  local out
+  if out=$(gh api "$1" 2>"$GH_ERR"); then
+    printf '%s\n' "$out"
+  elif grep -q 'HTTP 40[34]' "$GH_ERR" && ! grep -Eqi 'rate.?limit' "$GH_ERR"; then
+    echo null
+  else
+    return 1
+  fi
+}
 required=null
 if [[ $pr != null && $(prc_val "$pr" 'on(state == "OPEN") and on(isDraft)') == true ]]; then
   r_base=$(prc_val "$pr" baseRefName)
-  if r_rules=$(gh api "repos/{owner}/{repo}/rules/branches/$r_base?per_page=100" 2>"$GH_ERR") \
-     && r_branch=$(gh api "repos/{owner}/{repo}/branches/$r_base" 2>"$GH_ERR"); then
+  if r_rules=$(rest_rules "repos/{owner}/{repo}/rules/branches/$r_base?per_page=100") \
+     && r_branch=$(rest_rules "repos/{owner}/{repo}/branches/$r_base"); then
     required=$(prc_json "$REQUIRED" "{\"rules\": $r_rules, \"branch\": $r_branch}" 2>"$GH_ERR") && [[ -n $required ]] \
       || required=null
   fi
