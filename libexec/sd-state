@@ -656,14 +656,19 @@ git_diff_lines() {
       }'
 }
 
+# json_shas: the SHAs on stdin as a JSON list (hex needs no escaping, so no
+# super call).
+json_shas() { local s out=""; while read -r s; do [[ -n $s ]] && out+=${out:+,}\"$s\"; done; echo "[$out]"; }
+
 # flags_json <base> <head> <flags-config>: a JSON list of {kind, file, line,
 # n, text, commits}: commits is the one that added the line (blame), or for a
 # test-edit every commit in base..head that touched the file. 1 with a message
-# on an invalid pattern or a failed step.
+# on an invalid pattern or a failed step. sd state runs it on every call (sd
+# watch's too), so git runs once per file with hits, not once per hit.
 flags_json() {
-  local base=$1 hd=$2 cfg=$3 tests="" st a b p g changed lines hits kind line n file new text sha cj out=""
+  local base=$1 hd=$2 cfg=$3 tests="" st a b p g changed lines hits kind line n file new text cj out="" f ln sha
   local -a globs paths
-  local -A touched
+  local -A touched ranges blamed
   [[ $(prc_val "$cfg" 'len(coalesce([unnest [...suppressions, ...skips] | where is_error(regexp(this, ""))], [])) == 0' 2>/dev/null) == true ]] \
     || { echo "settings.flags has an invalid regex: $cfg"; return 1; }
   # Captured first: a failure inside < <( ) would go unseen.
@@ -677,21 +682,31 @@ flags_json() {
   done <<<"$changed"
   lines=$(git_diff_lines "$base" "$hd" "$tests" | prc_strings) || { echo "couldn't read the diff"; return 1; }
   hits=$(prc_line "$FLAGS" "{\"flags\": $cfg, \"l\": $lines}") || { echo "couldn't match the diff"; return 1; }
+  # One blame per file, every hit's line at once; its porcelain headers are
+  # "<sha> <orig-line> <final-line> [<count>]".
+  while IFS=$'\t' read -r kind line n file new text; do
+    [[ -n $kind && $kind != test-edit ]] && ranges[$file]+="$line"$'\n'
+  done <<<"$hits"
+  for f in "${!ranges[@]}"; do
+    paths=()
+    while read -r ln; do [[ -n $ln ]] && paths+=(-L "$ln,$ln"); done <<<"${ranges[$f]}"
+    while read -r ln sha; do blamed[$f$'\t'$ln]=$sha; done \
+      < <(git blame --porcelain "${paths[@]}" "$hd" -- "$f" 2>/dev/null \
+            | awk 'length($1) == 40 && $1 ~ /^[0-9a-f]+$/ && $3 ~ /^[0-9]+$/ { print $3, $1 }')
+  done
   while IFS=$'\t' read -r kind line n file new text; do
     [[ -n $kind ]] || continue
     if [[ $kind == test-edit ]]; then
       if [[ -z ${touched[$file]+x} ]]; then
         paths=("$file")
         [[ $new == /dev/null || $new == "$file" ]] || paths+=("$new")
-        touched[$file]=$(git log --format=%H "$base..$hd" -- "${paths[@]}" | prc_strings) \
+        touched[$file]=$(git log --format=%H "$base..$hd" -- "${paths[@]}") \
           || { echo "couldn't list the commits that touched $file"; return 1; }
+        touched[$file]=$(json_shas <<<"${touched[$file]}")
       fi
       cj=${touched[$file]}
     else
-      sha=$(git blame --porcelain -L "$line,+1" "$hd" -- "$file" 2>/dev/null) || sha=
-      sha=${sha%%$'\n'*} sha=${sha%% *}
-      cj='[]'
-      [[ -n $sha ]] && cj="[\"$sha\"]"
+      cj=$(json_shas <<<"${blamed[$file$'\t'$line]:-}")
     fi
     text=${text//$'\t'/ } text=${text//[[:cntrl:]]/}
     out+=${out:+,}$(printf '{"kind": "%s", "file": %s, "line": %s, "n": %s, "text": %s, "commits": %s}' \

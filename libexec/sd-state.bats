@@ -2043,6 +2043,16 @@ review() {
   [ "$(field '.flags[0].commits | join(" ")')" = "$added" ]
 }
 
+@test "flags: hits in one file each name their own commit" {
+  git switch -qc feat
+  commit a.sh $'# shellcheck disable=SC1\necho a'
+  first=$(git rev-parse HEAD)
+  commit a.sh $'# shellcheck disable=SC1\necho a\n# eslint-disable-line\n# noqa'
+  second=$(git rev-parse HEAD)
+  state
+  [ "$(field '[.flags[] | "\(.line) \(.commits[0])"] | join(", ")')" = "1 $first, 3 $second, 4 $second" ]
+}
+
 @test "flags: each default suppression is caught" {
   git switch -qc feat
   commit s.txt $'// eslint-disable-next-line\nx = 1  # noqa: E501\n// @ts-ignore\n// @ts-expect-error\ny = 2  # type: ignore\nz := 3 //nolint\n# rubocop:disable Style\n#[allow(dead_code)]\nplain line'

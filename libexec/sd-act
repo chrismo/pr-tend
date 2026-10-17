@@ -138,7 +138,9 @@
 #             decides (review-decide), as at the cap; findings on an older
 #             head get a new review. sd state's flags (suppressions, skips,
 #             edited tests) are printed on stderr for chrismo, whatever the
-#             verdict; never a gate. Spends tokens.
+#             verdict; never a gate. Not stored with the record or the pin:
+#             sd state recomputes them from base..HEAD on every call, so they
+#             outlive stderr and never go stale. Spends tokens.
 #             --accept: pin accepted at HEAD instead, reviewing nothing (HEAD
 #             is reviewed enough), and drop the findings
 #   describe  the agent writes the PR title and body (J6) from the task, the
