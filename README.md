@@ -9,7 +9,7 @@ One command, `sd`, with a verb (`sd help` lists them):
 
 | Command      | What it does                                              |
 |--------------|-----------------------------------------------------------|
-| `sd state`   | Read-only status of a branch's PR, and what to do next    |
+| `sd state`   | Status of a branch's PR, and what to do next              |
 | `sd act`     | Start a branch, then take its next step (address, push…)  |
 | `sd watch`   | Periodic pass over your branches; optional launchd job    |
 | `sd config`  | Show and validate settings                                |

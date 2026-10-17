@@ -49,11 +49,13 @@
 #
 # Never fetches, and writes only the PR numbers it finds (branch.<b>.sd-pr,
 # the parent's too), when they change. That makes it a .git/config writer:
-# while it holds config.lock, another git config write fails. Remote refs are as fresh as the last fetch. One gh
-# GraphQL call per PR (the branch's, and a non-default parent's), by its
-# stored number; a discovery by branch comes first for a PR not yet known,
-# and is the only call for a branch with none. A gh failure is recorded in
-# .errors and the git facts are still reported.
+# while it holds config.lock, another git config write fails. Remote refs
+# are as fresh as the last fetch. One gh GraphQL call per PR (the branch's,
+# and a non-default parent's), by its stored number; a discovery by branch
+# comes first for a PR not yet known, and is the only call for a branch with
+# none. A stored PR that merged stays the branch's PR, even once a newer one
+# is open from the same branch: the branch is done (#122). A gh failure is
+# recorded in .errors and the git facts are still reported.
 #
 # Config: read with lib/config.sh (branch file over global file over
 # built-in defaults), under settings: remote (origin), botLogin (bots that
