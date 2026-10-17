@@ -478,6 +478,24 @@ findings_rec() { git cat-file blob refs/sheepdog/feat-x/findings | jq -c "$1"; }
   [ -n "$(git status --porcelain)" ]
   [ "$(git log -1 --format=%s)" = init ]
   [ "$(findings_rec '[.findings[] | .action]')" = '[null,null]' ]
+  # implement refuses the dirty worktree, so it isn't the next step
+  [[ "$output" == *"sd act attach"* ]]
+  [[ "$output" != *"then sd act implement"* ]]
+}
+
+@test "implement: fixed needs no reply text; declined does" {
+  started
+  two_findings
+  answers '{"id": "1", "action": "fixed", "reply": ""}' '{"id": "2", "action": "fixed", "reply": "B now"}'
+  run "$SD_ACT" implement
+  [ "$status" -eq 0 ]
+  [ "$(git log -1 --format=%s)" = "Add c" ]
+  git reset -q --hard HEAD~1
+  two_findings
+  answers '{"id": "1", "action": "declined", "reply": " "}' '{"id": "2", "action": "fixed", "reply": "B now"}'
+  run "$SD_ACT" implement
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"[1]"*"no reply text"* ]]
 }
 
 @test "implement: a finding the agent didn't answer counts as ask" {

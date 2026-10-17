@@ -51,9 +51,10 @@
 #             only read-only git, the verify command when it's plain words (no
 #             globs, pipes or quotes), and settings.implementAllow's rules; pi
 #             runs nothing. "needs-input" prints the agent's question and
-#             leaves the edits uncommitted. Review findings recorded on HEAD
-#             (sd act review) go into the prompt; changing nothing for them
-#             declines them, which hands them to chrismo. Spends tokens
+#             leaves the edits uncommitted, for chrismo to answer in the
+#             session (sd act attach). Review findings recorded on HEAD (sd
+#             act review) go into the prompt, each answered on its own (see
+#             review). Spends tokens
 #   enroll    mark the branch for sd watch, and register this repo; for a
 #             stacked PR, store its parent and base before a merge erases them
 #             (or warn that git can't find the base, and how to pin it);
@@ -1020,7 +1021,7 @@ For each finding below, pick exactly one action:
 Edit files, but do not commit, push, or run gh: the pipeline commits your edits
 with your commit_message and runs the repo's checks. Return one item per
 finding id (the number in brackets), with your reason or question as its
-reply; a one-line commit_message if you changed anything (else null); and
+reply (for fixed, what you changed, or ""); a one-line commit_message if you changed anything (else null); and
 outcome "done", "needs-input" (anything you marked ask: your edits are left
 uncommitted for the owner) or "gave-up" (you can't make sense of them; say why
 in summary). What you decline goes to the next review round, or to the owner
@@ -1079,8 +1080,9 @@ values coalesce([
 EOF
 
 # The agent's answers on the numbered findings: {f, r: result, changed}. An
-# open finding takes its item's action and reply; no answer, no reply text, or
-# fixed with nothing changed is ask, so chrismo sees it.
+# open finding takes its item's action and reply; no answer, a decline or ask
+# with no reply text, or fixed with nothing changed is ask, so chrismo sees
+# it. A fix needs no reply text: the commit shows it.
 read -r -d '' ANSWERS_Q <<'EOF' || true
 values {f, ctx: {changed, items: kind(coalesce(r.items, null)) == "array" ? r.items : []}}
 | values coalesce([
@@ -1088,11 +1090,12 @@ values {f, ctx: {changed, items: kind(coalesce(r.items, null)) == "array" ? r.it
     | values {f, changed: ctx.changed,
               a: f.open ? coalesce(coalesce([unnest {f, i: ctx.items} | where i.id == f.id | values i], [])[0], {}) : null}
     | values {f, changed, a, act: coalesce(a.action, ""), rep: coalesce(a.reply, null)}
+    | values {f, changed, a, act, rep: is(rep, <string>) ? rep : ""}
     | values a is null ? f : {...f, ...(case
         when not (act in ["fixed", "declined", "ask"]) then {action: "ask", reply: "(the agent did not answer this one)"}
-        when not is(rep, <string>) then {action: "ask", reply: "(the agent gave no reply text)"}
-        when not grep("\\S", rep) then {action: "ask", reply: "(the agent gave no reply text)"}
         when act == "fixed" and not changed then {action: "ask", reply: f"(said fixed but changed nothing): {rep}"}
+        when act == "fixed" then {action: act, reply: rep}
+        when not grep("\\S", rep) then {action: "ask", reply: "(the agent gave no reply text)"}
         else {action: act, reply: rep} end)}
   ], [])
 EOF
@@ -1174,8 +1177,14 @@ implement_run() {
       || die "couldn't read the agent's answers to the findings (session $STEP_SID)"
     [[ -z $asks ]] || outcome=needs-input summary+=$'\n'"$asks"
   fi
-  [[ $outcome != needs-input ]] \
-    || die "the agent needs input on $b: $summary"$'\n'"Edits (if any) are left uncommitted in $wt; answer in session $STEP_SID, then sd act implement"
+  if [[ $outcome == needs-input ]]; then
+    # implement refuses a dirty worktree, so with edits left the answer goes
+    # into the session itself.
+    if [[ -n $(git -C "$wt" status --porcelain) ]]; then
+      die "the agent needs input on $b: $summary"$'\n'"Its edits are left uncommitted in $wt: answer in its session (sd act attach $b) and commit what you keep, or discard them and run sd act implement again"
+    fi
+    die "the agent needs input on $b: $summary"$'\n'"Answer in session $STEP_SID, then sd act implement"
+  fi
   if [[ -n $(git -C "$wt" status --porcelain) ]]; then
     msg=$(prc_line 'values {m: coalesce(commit_message, null)}
       | values case when is(m, <string>) and grep("\\S", m) then m else "" end' "$result")
