@@ -43,8 +43,9 @@
 #             the line (blame), or for a test-edit the commits that touched
 #             the file. Test files: settings.flags.testFiles, globs on the
 #             file's name, a whole path when one has a /, or a directory
-#             anywhere when it ends in /. null without a base, or on an
-#             invalid pattern (an error)
+#             anywhere when it ends in /. null without a base, or when the
+#             check fails (an invalid pattern, an unreadable diff); then
+#             flags_error says why, kept out of errors so NEXT ignores it
 #   threads   what's owed, marked ! (blocks: unresolved threads, reviews
 #             requesting changes) or i (to read: bot review bodies and PR
 #             comments not yet marked handled)
@@ -693,10 +694,12 @@ flags_json() {
   echo "[$out]"
 }
 
-flags=null
+# A failed check is flags_error, not an error: errors steer NEXT, and flags
+# are never a gate.
+flags=null flags_error=""
 if [[ -n ${old_base:-} ]]; then
   flag_cfg=$(prc_get settings.flags "$branch" false json) || die "sd config failed"
-  flags=$(flags_json "$old_base" "$head" "$flag_cfg") || { errors+=("flags: $flags"); flags=null; }
+  flags=$(flags_json "$old_base" "$head" "$flag_cfg") || { flags_error=$flags flags=null; }
 fi
 
 # ── assemble ─────────────────────────────────────────────────────────────────
@@ -830,7 +833,7 @@ values {a: this, c: coalesce(pr.commits.nodes[0].commit, null),
                             and len(coalesce([unnest s.r_findings.findings
                                               | where coalesce(severity, "") != "nit" and coalesce(action, "") != "declined"], [])) == 0,
                   cap: s.review_rounds, items: s.r_findings.findings}},
-    flags: s.flags,
+    flags: s.flags, flags_error: nn(s.flags_error),
     threads: {owed_bot: s.gh_ok ? len(ob) : null,
               owed_human: s.gh_ok ? len(coalesce([unnest owed | where kind == "human"], [])) : null,
               outdated: s.gh_ok ? len(coalesce([unnest owed | where on(outdated)], [])) : null,
@@ -856,13 +859,13 @@ refs_json=$(git for-each-ref --format='%(refname) %(objectname)' "refs/sheepdog/
 args=$(printf '{"branch": %s, "head": %s, "pr": %s, "parent": %s, "parent_source": %s, "parent_pr": %s, "parent_merged": %s, "parent_local": %s, "parent_remote": %s, "parent_unpushed": %s,
   "target": %s, "default_branch": %s, "sync_ahead": %s, "behind": %s, "up_to_date": %s, "old_base": %s, "by_tree": %s, "conflict": %s, "undone": %s,
   "remote_sha": %s, "ahead": %s, "push_behind": %s, "diverged": %s, "remote_ours": %s, "theirs": %s, "remote_made": %s, "dirty": %s, "stale": %s,
-  "r_local": %s, "r_bot": %s, "r_accepted": %s, "r_findings": %s, "r_findings_at_head": %s, "review_rounds": %s, "flags": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s, "bot_triggered": %s, "bot_timeout": %s, "now": %s,
+  "r_local": %s, "r_bot": %s, "r_accepted": %s, "r_findings": %s, "r_findings_at_head": %s, "review_rounds": %s, "flags": %s, "flags_error": %s, "gh_ok": %s, "parent_ok": %s, "viewer": %s, "bots": %s, "bot_command": %s, "bot_triggered": %s, "bot_timeout": %s, "now": %s,
   "required": %s, "ignore": %s, "ignore_body": %s, "handled": %s, "refs": %s, "enrolled": %s, "harness": %s, "session": %s, "lock": %s,
   "rl_cost": %s, "rl_remaining": %s, "rl_reset": %s, "rl_limited": %s, "errors": %s}\n' \
   "$(jstr "$branch")" "$(jstr "$head")" "$pr" "$(jstr "$parent")" "$(jstr "$parent_source")" "$parent_pr" "$parent_merged" "$parent_local" "$parent_remote" "$parent_unpushed" \
   "$(jstr "$target")" "$(jstr "$default_branch")" "$sync_ahead" "$behind" "$up_to_date" "$(jnull "$old_base")" "$by_tree" "$conflict" "$undone" \
   "$(jnull "$remote_sha")" "$ahead" "$push_behind" "$diverged" "$remote_ours" "$theirs" "$remote_made" "$dirty" "$stale_json" \
-  "${review[local]}" "${review[bot]}" "${review[accepted]}" "$r_findings" "$r_findings_at_head" "$review_rounds" "$flags" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" "$(jnull "$bot_triggered")" "$bot_timeout" "$(jstr "$(date -u +%Y-%m-%dT%H:%M:%SZ)")" \
+  "${review[local]}" "${review[bot]}" "${review[accepted]}" "$r_findings" "$r_findings_at_head" "$review_rounds" "$flags" "$(jstr "$flags_error")" "$gh_ok" "$parent_ok" "$(jstr "$viewer")" "$bots" "$(jstr "$bot_command")" "$(jnull "$bot_triggered")" "$bot_timeout" "$(jstr "$(date -u +%Y-%m-%dT%H:%M:%SZ)")" \
   "$required" "$ignore" "$ignore_body" "$(jlist "branch.$branch.sd-handled")" "$refs_json" \
   "$(jstr "$(cfg sheepdog)")" "$(jstr "$(cfg sd-harness)")" "$(jstr "$(cfg sd-session)")" "$(jstr "$(cfg sd-lock)")" \
   "$rl_cost" "$rl_remaining" "$(jnull "$rl_reset")" "$rl_limited" "$errors_json")
@@ -893,7 +896,7 @@ values [
   pin("local", review.local), pin("bot", review.bot), pin("accepted", review.accepted),
   nul(review.findings) ? null
     : f"review: {review.findings.n} finding{review.findings.n == 1 ? "" : "s"} (round {review.findings.round}/{review.findings.cap}{on(review.findings.declined) ? ", declined" : ""}){review.findings.at_head ? "" : " on old head"}",
-  len(coalesce(flags, [])) > 0 ? f"⚑ {len(flags)} flagged" : null,
+  len(coalesce(flags, [])) > 0 ? f"⚑ {len(flags)} flagged" : nul(flags_error) ? null : "⚑ check failed",
   on(session.locked) ? "locked" : null,
   on(fresh == false) ? "⚠ stale: fetch" : null,
   len(errors) > 0 ? f"⚠ {len(errors)} error(s)" : null
@@ -930,3 +933,4 @@ prc_line 'where not nul(review.findings) | unnest review.findings.items
            coalesce(action, null) is null ? null : f"       {action}: {coalesce(reply, "")}"
   | where this is not null' "$state"
 flag_lines "$state"
+prc_line 'where not nul(flags_error) | values f"  ⚑  check failed: {flags_error}"' "$state"

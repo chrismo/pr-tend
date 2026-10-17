@@ -2099,12 +2099,23 @@ review() {
   [ "$(field '[.flags[] | "\(.kind) \(.file):\(.line)"] | join(", ")')" = "suppression a.sh:2, skip checks/a.sh:1" ]
 }
 
-@test "flags: an invalid pattern is an error, not a failure; flags is null" {
+@test "flags: an invalid pattern is flags_error, not an error that steers NEXT; flags is null" {
   git switch -qc feat && commit a.txt a
   "$SD_CONFIG" set --global --json settings.flags '{"skips": ["("]}' >/dev/null
   state
   [ "$(field '.flags')" = null ]
-  [[ "$(field '.errors[]')" == *"settings.flags"* ]]
+  [[ "$(field '.flags_error')" == *"settings.flags"* ]] || false
+  [ "$(field '.errors | length')" = 0 ]
+  [ "$(field '[.next[].key] | index("errors")')" = null ]
+  run "$SD_STATE"
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == *" · ⚑ check failed"* ]]
+}
+
+@test "flags: flags_error is null when the check ran" {
+  git switch -qc feat && commit a.txt a
+  state
+  [ "$(field '.flags_error')" = null ]
 }
 
 @test "flags: no base, no check: flags is null" {
