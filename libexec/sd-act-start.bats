@@ -412,12 +412,123 @@ EOF
   [[ "$output" == *"changed nothing"* ]]
 }
 
-# findings_at <rev> <round>: sd act review's record of one blocking finding on <rev>.
+# findings_at <rev> <round>: sd act review's record of one blocking finding on
+# <rev>, and the agent's answer: fixed.
 findings_at() {
   local rec
   rec=$(jq -nc --arg h "$(git rev-parse "$1")" --argjson r "$2" '{head: $h, base: $h, round: $r,
           findings: [{file: "file.txt", line: 2, severity: "error", body: "b should be B"}]}')
   git update-ref refs/sheepdog/feat-x/findings "$(git hash-object -w --stdin <<<"$rec")"
+  answers '{"id": "1", "action": "fixed", "reply": "B now"}'
+}
+
+# answers <item>...: the agent's result for a fix round, one item per finding.
+answers() {
+  jq -nc '{outcome: "done", commit_message: "Add c", summary: "Fixed what was right.", items: [$ARGS.positional[] | fromjson]}' \
+    --args "$@" > "$FX/result.json"
+}
+
+two_findings() { # two blocking findings on HEAD, round 1
+  local rec
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: $h, round: 1, findings: [
+          {file: "file.txt", line: 1, severity: "warning", body: "a should be A"},
+          {file: "file.txt", line: 2, severity: "error", body: "b should be B"}]}')
+  git update-ref refs/sheepdog/feat-x/findings "$(git hash-object -w --stdin <<<"$rec")"
+}
+findings_rec() { git cat-file blob refs/sheepdog/feat-x/findings | jq -c "$1"; }
+
+@test "implement: a fix round numbers each finding and asks for an answer per id" {
+  started
+  two_findings
+  answers '{"id": "1", "action": "fixed", "reply": "A now"}' '{"id": "2", "action": "fixed", "reply": "B now"}'
+  "$SD_ACT" implement >/dev/null
+  grep -qF -- '- [1] file.txt:1 (warning) a should be A' "$FX/claude.prompt"
+  grep -qF -- '- [2] file.txt:2 (error) b should be B' "$FX/claude.prompt"
+  grep -q 'declined' "$FX/claude.prompt"
+  grep -qF '"action": {"enum": ["fixed", "declined", "ask"]}' "$FX/claude.args"
+}
+
+@test "implement: the first implement keeps its schema, with no items" {
+  started
+  "$SD_ACT" implement >/dev/null
+  grep -qF '"required": ["outcome", "commit_message", "summary"]' "$FX/claude.args"
+  ! grep -q '"items"' "$FX/claude.args" || false
+}
+
+@test "implement: fixed one, declined one: commits, records each answer, and the next review is due" {
+  started
+  two_findings
+  answers '{"id": "1", "action": "declined", "reply": "a is lowercase on purpose"}' '{"id": "2", "action": "fixed", "reply": "B now"}'
+  run "$SD_ACT" implement
+  [ "$status" -eq 0 ]
+  [ "$(git log -1 --format=%s)" = "Add c" ]
+  [[ "$output" == *"declined"*"a is lowercase on purpose"* ]]
+  [[ "$output" == *"sd act review"* ]]
+  [ "$(findings_rec '[.findings[] | [.action, .reply]]')" = '[["declined","a is lowercase on purpose"],["fixed","B now"]]' ]
+  [ "$("$SD_STATE" --json | jq -c '[.review.findings.at_head, any(.next[]; .key == "review")]')" = '[false,true]' ]
+}
+
+@test "implement: a finding the agent marks ask goes to chrismo: nonzero, edits uncommitted, nothing recorded" {
+  started
+  two_findings
+  answers '{"id": "1", "action": "ask", "reply": "A or a?"}' '{"id": "2", "action": "fixed", "reply": "B now"}'
+  run "$SD_ACT" implement
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"needs input"*"A or a?"* ]]
+  [ -n "$(git status --porcelain)" ]
+  [ "$(git log -1 --format=%s)" = init ]
+  [ "$(findings_rec '[.findings[] | .action]')" = '[null,null]' ]
+  # implement refuses the dirty worktree, so it isn't the next step
+  [[ "$output" == *"sd act attach"* ]]
+  [[ "$output" != *"then sd act implement"* ]]
+}
+
+@test "implement: fixed needs no reply text; declined does" {
+  started
+  two_findings
+  answers '{"id": "1", "action": "fixed", "reply": ""}' '{"id": "2", "action": "fixed", "reply": "B now"}'
+  run "$SD_ACT" implement
+  [ "$status" -eq 0 ]
+  [ "$(git log -1 --format=%s)" = "Add c" ]
+  git reset -q --hard HEAD~1
+  two_findings
+  answers '{"id": "1", "action": "declined", "reply": " "}' '{"id": "2", "action": "fixed", "reply": "B now"}'
+  run "$SD_ACT" implement
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"[1]"*"no reply text"* ]]
+}
+
+@test "implement: a finding the agent didn't answer counts as ask" {
+  started
+  two_findings
+  answers '{"id": "2", "action": "fixed", "reply": "B now"}'
+  run "$SD_ACT" implement
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"[1]"*"did not answer"* ]]
+  [ "$(git log -1 --format=%s)" = init ]
+}
+
+@test "implement: fixed with nothing changed counts as ask" {
+  started
+  findings_at HEAD 1
+  rm "$FX/agent"
+  run "$SD_ACT" implement
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"changed nothing"*"B now"* ]]
+  [ "$(findings_rec '.findings[0].action')" = null ]
+}
+
+@test "implement: a finding declined in an earlier answer isn't sent again" {
+  started
+  two_findings
+  rec=$(findings_rec '.findings[0] += {action: "declined", reply: "no"}')
+  git update-ref refs/sheepdog/feat-x/findings "$(git hash-object -w --stdin <<<"$rec")"
+  answers '{"id": "2", "action": "fixed", "reply": "B now"}'
+  run "$SD_ACT" implement
+  [ "$status" -eq 0 ]
+  ! grep -q 'a should be A' "$FX/claude.prompt" || false
+  grep -qF -- '- [2] file.txt:2' "$FX/claude.prompt"
+  [ "$(findings_rec '[.findings[] | [.action, .reply]]')" = '[["declined","no"],["fixed","B now"]]' ]
 }
 
 @test "implement: review findings on HEAD go into the prompt" {
@@ -436,6 +547,7 @@ findings_at() {
           {file: "file.txt", line: 2, severity: "error", body: "b should be B"},
           {file: "file.txt", line: 1, severity: "nit", body: "a could be A"}]}')
   git update-ref refs/sheepdog/feat-x/findings "$(git hash-object -w --stdin <<<"$rec")"
+  answers '{"id": "1", "action": "fixed", "reply": "B now"}'
   "$SD_ACT" implement >/dev/null
   [[ "$(head -1 "$FX/claude.prompt")" == *"review"* ]]
   ! grep -q '^Implement the task below' "$FX/claude.prompt" || false
@@ -456,8 +568,8 @@ findings_at() {
 
 @test "implement: findings the agent already declined aren't sent again" {
   started
-  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: $h, round: 1, declined: true, reason: "no",
-          findings: [{file: "file.txt", line: 2, severity: "error", body: "b should be B"}]}')
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: $h, round: 1,
+          findings: [{file: "file.txt", line: 2, severity: "error", body: "b should be B", action: "declined", reply: "no"}]}')
   git update-ref refs/sheepdog/feat-x/findings "$(git hash-object -w --stdin <<<"$rec")"
   "$SD_ACT" implement >/dev/null
   ! grep -q 'b should be B' "$FX/claude.prompt" || false
@@ -478,6 +590,7 @@ findings_at() {
   other_push main "main moves"
   git fetch -q && git rebase -q origin/main
   [ "$("$SD_STATE" --json | jq .review.findings.at_head)" = true ]
+  answers '{"id": "1", "action": "fixed", "reply": "C now"}'
   "$SD_ACT" implement >/dev/null
   grep -q 'c should be C' "$FX/claude.prompt"
 }
@@ -495,7 +608,7 @@ findings_at() {
 @test "implement: a fix round with no commit message from the agent says it fixed review findings" {
   started
   findings_at HEAD 1
-  echo '{"outcome": "done", "summary": "Fixed b."}' > "$FX/result.json"
+  echo '{"outcome": "done", "summary": "Fixed b.", "items": [{"id": "1", "action": "fixed", "reply": "B now"}]}' > "$FX/result.json"
   "$SD_ACT" implement >/dev/null
   [ "$(git log -1 --format=%s)" = "Fix the local review findings" ]
 }
@@ -512,8 +625,9 @@ findings_at() {
   started
   rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: $h, round: 1, findings: [{file: "file.txt", body: "b?"}]}')
   git update-ref refs/sheepdog/feat-x/findings "$(git hash-object -w --stdin <<<"$rec")"
+  answers '{"id": "1", "action": "fixed", "reply": "B now"}'
   "$SD_ACT" implement >/dev/null
-  grep -qF -- '- file.txt:? (?) b?' "$FX/claude.prompt"
+  grep -qF -- '- [1] file.txt:? (?) b?' "$FX/claude.prompt"
 }
 
 @test "implement: settings.implementPrompt replaces the guidance; the contract and task stay" {
@@ -592,15 +706,16 @@ findings_at() {
   ! grep -q 'b should be B' "$FX/claude.prompt" || false
 }
 
-@test "implement: changing nothing for review findings declines them, for chrismo to decide" {
+@test "implement: declining every review finding records each, for chrismo to decide" {
   started
   findings_at HEAD 2
   rm "$FX/agent"
-  echo '{"outcome": "done", "summary": "b is right as it is."}' > "$FX/result.json"
+  answers '{"id": "1", "action": "declined", "reply": "b is right as it is."}'
   run "$SD_ACT" implement
   [ "$status" -eq 0 ]
   [[ "$output" == *"declined"*"b is right as it is."* ]]
-  [ "$(git cat-file blob refs/sheepdog/feat-x/findings | jq -c '[.declined, .round, .reason]')" = '[true,2,"b is right as it is."]' ]
+  [ "$(findings_rec '[.round, .findings[0].action, .findings[0].reply]')" = '[2,"declined","b is right as it is."]' ]
+  [ "$("$SD_STATE" --json | jq -c '[.review.findings.declined, any(.next[]; .key == "review-decide")]')" = '[true,true]' ]
 }
 
 @test "implement: needs-input prints the question, leaves the edits uncommitted, nonzero" {

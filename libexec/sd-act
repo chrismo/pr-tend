@@ -51,9 +51,10 @@
 #             only read-only git, the verify command when it's plain words (no
 #             globs, pipes or quotes), and settings.implementAllow's rules; pi
 #             runs nothing. "needs-input" prints the agent's question and
-#             leaves the edits uncommitted. Review findings recorded on HEAD
-#             (sd act review) go into the prompt; changing nothing for them
-#             declines them, which hands them to chrismo. Spends tokens
+#             leaves the edits uncommitted, for chrismo to answer in the
+#             session (sd act attach). Review findings recorded on HEAD (sd
+#             act review) go into the prompt, each answered on its own (see
+#             review). Spends tokens
 #   enroll    mark the branch for sd watch, and register this repo; for a
 #             stacked PR, store its parent and base before a merge erases them
 #             (or warn that git can't find the base, and how to pin it);
@@ -123,15 +124,19 @@
 #             libexec/sd-review-local) over the branch's own change, base..HEAD.
 #             Clean, or only nits: pin local at HEAD. Errors or warnings:
 #             printed as JSON and recorded (refs/sheepdog/<b>/findings: head,
-#             base, round, findings; implement adds declined and reason),
-#             nothing pinned; each such review of a changed HEAD is the next
-#             round, until a pin clears the record. A failed reviewer is never clean. sd state
-#             shows the record and NEXT follows it: findings about HEAD (the
-#             same change, even rebased) go to the agent (review-fix: sd act
-#             implement, its prompt carrying them) below settings.reviewRounds,
-#             and to chrismo (review-decide) at the cap or once the agent
-#             declines them by changing nothing; findings on an older head get
-#             a new review. Spends tokens.
+#             base, round, findings; implement adds each finding's id, action
+#             and reply), nothing pinned; each such review of a changed HEAD
+#             is the next round, until a pin clears the record. A failed
+#             reviewer is never clean. sd state shows the record and NEXT
+#             follows it: findings about HEAD (the same change, even rebased)
+#             go to the agent (review-fix: sd act implement, its prompt
+#             carrying the ones it hasn't declined) below
+#             settings.reviewRounds. The agent answers each: fixed, declined
+#             (with why) or ask. Any ask goes to chrismo as needs-input does,
+#             nothing committed; otherwise its fixes are committed and the
+#             next round is due, or with every finding declined, chrismo
+#             decides (review-decide), as at the cap; findings on an older
+#             head get a new review. Spends tokens.
 #             --accept: pin accepted at HEAD instead, reviewing nothing (HEAD
 #             is reviewed enough), and drop the findings
 #   describe  the agent writes the PR title and body (J6) from the task, the
@@ -689,7 +694,7 @@ no_base_why() {
 # ── review ───────────────────────────────────────────────────────────────────
 
 review() {
-  local b=$branch wt state base head task timeout reviewer findings n blocking round rec prev keep
+  local b=$branch wt state base head task timeout reviewer findings n blocking round rec prev
   wt=$(worktree_for "$b")
   [[ -n $wt ]] || die "$b isn't checked out in any worktree"
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
@@ -738,15 +743,11 @@ review() {
     round=$(prc_line 'values coalesce(round, 0)' "${prev:-null}" 2>/dev/null || true)
     [[ $round =~ ^[0-9]+$ ]] || round=0
     # The same HEAD (or the same change rebased, as sd state judged it) reviewed
-    # again isn't a new round, and keeps what the agent declined.
-    keep='{}'
-    if [[ $(prc_val "$state" 'on(review.findings.at_head)') == true ]]; then
-      keep=$(prc_json 'values {declined: coalesce(declined, false), reason: coalesce(reason, null)}' "$prev")
-    else
-      round=$(( round + 1 ))
-    fi
-    rec=$(prc_json 'values {...k, head: h, base: b, round: r, findings: f}' \
-            "{\"k\": $keep, \"h\": \"$head\", \"b\": \"$base\", \"r\": $round, \"f\": $findings}") \
+    # again isn't a new round. Its findings replace the earlier ones and their
+    # answers, which were about a list this one needn't repeat.
+    [[ $(prc_val "$state" 'on(review.findings.at_head)') == true ]] || round=$(( round + 1 ))
+    rec=$(prc_json 'values {head: h, base: b, round: r, findings: f}' \
+            "{\"h\": \"$head\", \"b\": \"$base\", \"r\": $round, \"f\": $findings}") \
       && git update-ref -m "review round $round" "refs/sheepdog/$b/findings" "$(git hash-object -w --stdin <<<"$rec")" \
       || die "couldn't record the findings"
     echo "sd act: $(plural "$n" finding) on $b, $blocking blocking (review round $round); nothing pinned" >&2
@@ -1012,14 +1013,19 @@ you can't make sense of it (say why in summary).
 EOF
 
 read -r -d '' REVIEW_FIX_CONTRACT <<'EOF' || true
-Edit files, but do not commit, push, or run gh: the pipeline commits your edits
-with your commit_message and runs the repo's checks.
+For each finding below, pick exactly one action:
+- fixed:    you changed code to address it
+- declined: you judge it wrong, or it needs no change; say why
+- ask:      it needs a decision from the branch's owner; say what the question is
 
-Return outcome "done" with a one-line commit_message once you have fixed what
-you agree with. If you agree with none, change nothing and return "done": the
-findings then go to the branch's owner. Return "needs-input" when you need a
-decision from the owner (put the question in summary), or "gave-up" when you
-can't make sense of them (say why in summary).
+Edit files, but do not commit, push, or run gh: the pipeline commits your edits
+with your commit_message and runs the repo's checks. Return one item per
+finding id (the number in brackets), with your reason or question as its
+reply (for fixed, what you changed, or ""); a one-line commit_message if you changed anything (else null); and
+outcome "done", "needs-input" (anything you marked ask: your edits are left
+uncommitted for the owner) or "gave-up" (you can't make sense of them; say why
+in summary). What you decline goes to the next review round, or to the owner
+when you decline them all.
 EOF
 
 # guidance_base <branch>: the commit a step reads repo guidance (.sheepdog/,
@@ -1047,23 +1053,79 @@ read -r -d '' IMPLEMENT_SCHEMA <<'EOF' || true
                 "summary": {"type": "string"}}}
 EOF
 
+# A fix round's schema: one item per finding id, in the vocabulary #133 gives
+# every source's findings.
+read -r -d '' REVIEW_FIX_SCHEMA <<'EOF' || true
+{"type": "object", "required": ["outcome", "commit_message", "summary", "items"],
+ "properties": {
+   "outcome": {"enum": ["done", "needs-input", "gave-up"]},
+   "commit_message": {"type": ["string", "null"]},
+   "summary": {"type": "string"},
+   "items": {"type": "array", "items": {"type": "object", "required": ["id", "action", "reply"],
+     "properties": {"id": {"type": "string"},
+                    "action": {"enum": ["fixed", "declined", "ask"]},
+                    "reply": {"type": "string"}}}}}}
+EOF
+
+# The findings record's findings, each with its id (its place in the list)
+# and open: it blocks and the agent hasn't declined it, so a fix round hands
+# it over.
+read -r -d '' NUMBERED_Q <<'EOF' || true
+values coalesce([
+  unnest coalesce(findings, [])
+  | count {r: this, j}
+  | values {...r, id: f"{j}",
+            open: coalesce(r.severity, "") != "nit" and coalesce(r.action, "") != "declined"}
+], [])
+EOF
+
+# The agent's answers on the numbered findings: {f, r: result, changed}. An
+# open finding takes its item's action and reply; no answer, a decline or ask
+# with no reply text, or fixed with nothing changed is ask, so chrismo sees
+# it. A fix needs no reply text: the commit shows it.
+read -r -d '' ANSWERS_Q <<'EOF' || true
+values {f, ctx: {changed, items: kind(coalesce(r.items, null)) == "array" ? r.items : []}}
+| values coalesce([
+    unnest {ctx, f}
+    | values {f, changed: ctx.changed,
+              a: f.open ? coalesce(coalesce([unnest {f, i: ctx.items} | where i.id == f.id | values i], [])[0], {}) : null}
+    | values {f, changed, a, act: coalesce(a.action, ""), rep: coalesce(a.reply, null)}
+    | values {f, changed, a, act, rep: is(rep, <string>) ? rep : ""}
+    | values a is null ? f : {...f, ...(case
+        when not (act in ["fixed", "declined", "ask"]) then {action: "ask", reply: "(the agent did not answer this one)"}
+        when act == "fixed" and not changed then {action: "ask", reply: f"(said fixed but changed nothing): {rep}"}
+        when act == "fixed" then {action: act, reply: rep}
+        when not grep("\\S", rep) then {action: "ask", reply: "(the agent gave no reply text)"}
+        else {action: act, reply: rep} end)}
+  ], [])
+EOF
+
+# The answers, as printed: one line per finding the round handed over.
+read -r -d '' ANSWERS_REPORT <<'EOF' || true
+fn pad(s, n): len(s) >= n ? s : s || "         "[0:n-len(s)]
+unnest this | where open
+| values f"  {pad(action, 9)} [{id}] {coalesce(file, "?")}:{coalesce(line, "?")} {reply}"
+EOF
+
 # implement_run <branch> <worktree>
 implement_run() {
   local b=$1 wt=$2 task verify before prompt result outcome summary msg extra rule rec state gbase guidance listed="" allow=$HARNESS_CLAUDE_ALLOW
+  local numbered answered asks changed=false schema=$IMPLEMENT_SCHEMA
   local -a rules=()
   [[ -z $(git -C "$wt" status --porcelain) ]] || die "$wt has uncommitted changes"
   task=$(git config --get "branch.$b.sd-task" || true)
   before=$(git rev-parse "refs/heads/$b")
-  # A fix round: sd act review's blocking findings, when they're about HEAD and
-  # not yet declined. The task goes along as context.
+  # A fix round: sd act review's open findings, when they're about HEAD. The
+  # task goes along as context.
   rec=$(git cat-file blob "refs/sheepdog/$b/findings" 2>/dev/null || true)
   # sd state decides whether they're about HEAD, so NEXT and this agree.
   if [[ -n $rec ]]; then
     state=$(cd "$wt" && sd-state --json "$b") || die "sd state failed"
   fi
   if [[ -n $rec && $(prc_line 'values on(review.findings.at_head)' "$state") == true ]]; then
-    listed=$(prc_line 'where not on(declined) | unnest findings | where coalesce(severity, "") != "nit"
-      | values f"- {coalesce(file, "?")}:{coalesce(line, "?")} ({coalesce(severity, "?")}) {coalesce(body, "")}"' "$rec") \
+    numbered=$(prc_json "$NUMBERED_Q" "$rec") \
+      && listed=$(prc_line 'unnest this | where open
+        | values f"- [{id}] {coalesce(file, "?")}:{coalesce(line, "?")} ({coalesce(severity, "?")}) {coalesce(body, "")}"' "$numbered") \
       || die "couldn't read the review findings on $b"
   fi
   [[ -n $task || -n $listed ]] || die "no task recorded for $b: git config branch.$b.sd-task \"<task>\""
@@ -1081,6 +1143,7 @@ implement_run() {
   if [[ -n $listed ]]; then
     guidance=$(step_guidance reviewFixPrompt "$b" "$gbase" "$SD_LIB/prompts/review-fix.md") || die "can't read the review-fix guidance"
     prompt="$guidance"$'\n\n'"$REVIEW_FIX_CONTRACT"$'\n\nFindings:\n'"$listed"$'\n\nThe task this branch was made for, for context:\n'"${task:-(none recorded)}"
+    schema=$REVIEW_FIX_SCHEMA
   else
     guidance=$(step_guidance implementPrompt "$b" "$gbase" "$SD_LIB/prompts/implement.md") || die "can't read the implement guidance"
     prompt="$guidance"$'\n\n'"$IMPLEMENT_CONTRACT"$'\n\nTask:\n'"$task"
@@ -1094,34 +1157,56 @@ implement_run() {
   fi
   echo "sd act: $STEP_H ($STEP_MODE session $STEP_SID) is implementing $b…" >&2
   result=$(cd "$wt" && HARNESS_CLAUDE_ALLOW=$allow \
-             && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" "$prompt" "$IMPLEMENT_SCHEMA" "$STEP_CFG") \
+             && harness_run "$STEP_H" "$STEP_SID" "$STEP_MODE" "$STEP_TIMEOUT" "$prompt" "$schema" "$STEP_CFG") \
     || die "the $STEP_H implement step failed or returned no usable result (session $STEP_SID)"
   step_store "$b"
 
   outcome=$(prc_val "$result" 'coalesce(outcome, "")')
   summary=$(prc_val "$result" 'coalesce(summary, "")')
   case $outcome in
-    done) ;;
-    needs-input) die "the agent needs input on $b: $summary"$'\n'"Edits (if any) are left uncommitted in $wt; answer in session $STEP_SID, then sd act implement" ;;
+    done|needs-input) ;;
     gave-up) die "the agent gave up on $b: $summary. Edits (if any) are left uncommitted in $wt" ;;
     *) die "the agent returned outcome \"$outcome\"; edits (if any) are left uncommitted in $wt" ;;
   esac
+  if [[ -n $(git -C "$wt" status --porcelain) || $(git rev-parse "refs/heads/$b") != "$before" ]]; then changed=true; fi
+  # A fix round's answers: any ask goes to chrismo, as needs-input does.
+  if [[ -n $listed ]]; then
+    answered=$(prc_json "$ANSWERS_Q" "{\"f\": $numbered, \"r\": $result, \"changed\": $changed}") \
+      && asks=$(prc_line 'unnest this | where open and coalesce(action, "") == "ask"
+        | values f"  [{id}] {coalesce(file, "?")}:{coalesce(line, "?")} {reply}"' "$answered") \
+      || die "couldn't read the agent's answers to the findings (session $STEP_SID)"
+    [[ -z $asks ]] || outcome=needs-input summary+=$'\n'"$asks"
+  fi
+  if [[ $outcome == needs-input ]]; then
+    # implement refuses a dirty worktree, so with edits left the answer goes
+    # into the session itself.
+    if [[ -n $(git -C "$wt" status --porcelain) ]]; then
+      die "the agent needs input on $b: $summary"$'\n'"Its edits are left uncommitted in $wt: answer in its session (sd act attach $b) and commit what you keep, or discard them and run sd act implement again"
+    fi
+    die "the agent needs input on $b: $summary"$'\n'"Answer in session $STEP_SID, then sd act implement"
+  fi
   if [[ -n $(git -C "$wt" status --porcelain) ]]; then
     msg=$(prc_line 'values {m: coalesce(commit_message, null)}
       | values case when is(m, <string>) and grep("\\S", m) then m else "" end' "$result")
     if [[ -z $msg && -n $listed ]]; then msg="Fix the local review findings"; fi
     [[ -n $msg ]] || msg=$(head -1 <<<"$task")
     git -C "$wt" add -A && git -C "$wt" commit -q -m "$msg" || die "commit failed; the edits are left in $wt"
-  elif [[ $(git rev-parse "refs/heads/$b") == "$before" ]]; then
+  elif ! $changed; then
     [[ -n $listed ]] || die "the agent says done but changed nothing (session $STEP_SID)"
-    rec=$(prc_json 'values {...r, declined: true, reason: why}' "{\"r\": $rec, \"why\": $(prc_json_string "$summary")}") \
-      && git update-ref -m "review findings declined" "refs/sheepdog/$b/findings" "$(git hash-object -w --stdin <<<"$rec")" \
-      || die "couldn't record that the agent declined the findings"
+  fi
+  if [[ -n $listed ]]; then
+    rec=$(prc_json 'values {...r, findings: coalesce([unnest f | drop open], [])}' "{\"r\": $rec, \"f\": $answered}") \
+      && git update-ref -m "review findings answered" "refs/sheepdog/$b/findings" "$(git hash-object -w --stdin <<<"$rec")" \
+      || die "couldn't record the agent's answers to the findings"
+  fi
+  if ! $changed; then
     echo "$b: the agent declined the review findings: $summary"
+    prc_line "$ANSWERS_REPORT" "$answered"
     echo "next: chrismo fixes them, or accepts HEAD: sd act review --accept"
     return 0
   fi
   echo "$b: $summary"
+  [[ -z $listed ]] || prc_line "$ANSWERS_REPORT" "$answered"
   git -C "$wt" log --format='  %h %s' "$before..refs/heads/$b"
   verify_autofix "$wt" "$b" || die "verify failed ($VERIFY_CMD); the commit is kept in $wt"
   echo "next: sd act review"
