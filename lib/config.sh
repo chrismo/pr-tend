@@ -18,7 +18,7 @@ PRC_DEFAULTS='{"harness": "claude",
                "botLogin": [], "botIgnore": [], "botIgnoreBody": [], "implementAllow": [],
                "flags": {"suppressions": ["shellcheck\\s+disable", "eslint-disable", "#\\s*noqa", "@ts-ignore", "@ts-expect-error",
                                           "#\\s*type:\\s*ignore", "//\\s*nolint", "rubocop:disable", "#!?\\[allow\\("],
-                         "skips": ["^\\s*skip(\\s|$)", "\\.skip\\(", "\\bxit\\(", "\\bxdescribe\\(", "\\bt\\.Skip(f|Now)?\\(",
+                         "skips": ["(^|[;&|])\\s*skip(\\s|$)","\\.skip\\(", "\\bxit\\(", "\\bxdescribe\\(", "\\bt\\.Skip(f|Now)?\\(",
                                    "@pytest\\.mark\\.skip", "^\\s*pending(\\s|\\(|$)"],
                          "testFiles": ["*_test.*", "*.test.*", "*.bats", "test/", "spec/", "tests/"]}}}'
 PRC_SKELETON='{"harness": "claude", "harnesses": {"claude": {}, "pi": {}}, "steps": {}, "settings": {}}'

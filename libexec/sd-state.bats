@@ -2074,6 +2074,42 @@ review() {
     = "b_test.go:2 spec/a_spec.rb:2 test/a.test.js:1 test/a.test.js:2 test/a.test.js:3 tests/test_c.py:1 x.bats:2" ]
 }
 
+@test "flags: a guarded bats skip (cond || skip, && skip, ; skip) is a skip; skipped as a word isn't" {
+  git switch -qc feat
+  commit x.bats $'@test "a" {\n  command -v plutil || skip "no plutil"\n  [ -n "$CI" ] && skip\n  true; skip "later"\n  echo skipped\n}'
+  state
+  [ "$(field '[.flags[] | select(.kind == "skip") | .line] | join(" ")')" = "2 3 4" ]
+}
+
+@test "flags: a test file moved out of the test files, even unchanged, is a test-edit" {
+  commit a.bats $'@test "a" {\n  true\n}'
+  mkdir -p test && commit test/b.sh 'true'
+  commit c.bats $'@test "c" {\n  true\n}'
+  git push -q origin main 2>/dev/null
+  git switch -qc feat
+  git mv a.bats a.bats.off && git mv test/b.sh b.sh && git mv c.bats d.bats && git commit -qm "move"
+  moved=$(git rev-parse HEAD)
+  state
+  [ "$(field '[.flags[] | "\(.kind) \(.file):\(.line) -\(.n)"] | join(", ")')" = "test-edit a.bats:1 -3, test-edit test/b.sh:1 -1" ]
+  [ "$(field '.flags[] | select(.file == "a.bats") | .text')" = "moved to a.bats.off, out of the test files" ]
+  [ "$(field '.flags[] | select(.file == "a.bats") | .commits | join(" ")')" = "$moved" ]
+}
+
+@test "flags: a base that isn't in HEAD's history (a tree restack due) isn't diffed: flags_error says why" {
+  git switch -qc parent && commit s.txt X && commit t.txt Y && git push -q origin parent 2>/dev/null
+  local p1 p2; p1=$(git rev-parse parent~1) p2=$(git rev-parse parent)
+  git switch -qc feat main
+  printf 'X\n' > s.txt && printf 'Y\n' > t.txt && git add s.txt t.txt && git commit -qm "parent, copied" && commit c.sh '# noqa'
+  git config branch.feat.sd-parent parent
+  git update-ref refs/sheepdog/feat/base "$p1"
+  squash_parent_away
+  pr_fixture parent '.state = "MERGED"' ".headRefOid = \"$p2\""
+  state
+  [ "$(field .sync.by_tree)" = true ]
+  [ "$(field .flags)" = null ]
+  [[ "$(field .flags_error)" == *"isn't in feat's history"* ]]
+}
+
 @test "flags: lines changed or deleted in a test file the base had; added lines aren't" {
   commit t.bats $'@test "one" {\n  [ 1 -eq 1 ]\n}\n@test "two" {\n  true\n}'
   commit gone.bats $'@test "x" {\n  true\n}'
