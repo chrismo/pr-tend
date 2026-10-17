@@ -1276,15 +1276,30 @@ squash_parent_away() {
   [[ "$output" == *"review: 1 finding (round 2/3)"* ]]
   run "$SD_STATE" --long
   [[ "$output" == *"error  a.txt:1  x"* ]]
-  rec=$(git cat-file blob refs/sheepdog/feat/findings | jq -c '. + {declined: true, reason: "x is fine"}')
+  rec=$(git cat-file blob refs/sheepdog/feat/findings | jq -c '.findings[0] += {action: "declined", reply: "x is fine"}')
   git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
   run "$SD_STATE" --long
-  [[ "$output" == *"the agent declined them: x is fine"* ]]
+  [[ "$output" == *"error  a.txt:1  x"*"declined: x is fine"* ]]
   run "$SD_STATE"
   [[ "$output" == *"review: 1 finding (round 2/3, declined)"* ]]
   commit b.txt b
   state
   [ "$(field .review.findings.at_head)" = false ]
+}
+
+@test "review: findings are declined only when the agent declined every one that blocks" {
+  git switch -qc feat && commit a.txt a
+  rec=$(jq -nc --arg h "$(git rev-parse HEAD)" '{head: $h, base: $h, round: 1, findings: [
+          {file: "a.txt", line: 1, severity: "error", body: "x", action: "declined", reply: "x is fine"},
+          {file: "a.txt", line: 2, severity: "warning", body: "y"},
+          {file: "a.txt", line: 3, severity: "nit", body: "z"}]}')
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
+  state
+  [ "$(field .review.findings.declined)" = false ]
+  rec=$(git cat-file blob refs/sheepdog/feat/findings | jq -c '.findings[1] += {action: "declined", reply: "y too"}')
+  git update-ref refs/sheepdog/feat/findings "$(git hash-object -w --stdin <<<"$rec")"
+  state
+  [ "$(field .review.findings.declined)" = true ]
 }
 
 @test "review: findings count only what blocks; a record missing fields is an error" {
