@@ -27,6 +27,18 @@ setup() {
   cat > "$TMP/fakebin/gh" <<'EOF'
 #!/usr/bin/env bash
 if [[ -n ${GH_FAKE_FAIL:-} ]]; then echo "$GH_FAKE_FAIL" >&2; exit 1; fi
+# REST: the base branch's rulesets and classic protection, from
+# $GH_FIXTURES/rules.json and branch.json (default: none, unprotected).
+if [[ $1 == api && $2 == repos/* ]]; then
+  echo "$2" >> "$GH_FIXTURES/rest"
+  [[ -n ${GH_FAKE_FAIL_REST:-} ]] && { echo "$GH_FAKE_FAIL_REST" >&2; exit 1; }
+  case $2 in
+    */rules/branches/*) cat "$GH_FIXTURES/rules.json" 2>/dev/null || echo '[]' ;;
+    */branches/*) cat "$GH_FIXTURES/branch.json" 2>/dev/null || echo '{"name": "main", "protected": false}' ;;
+    *) echo "fake gh: unexpected api call: $*" >&2; exit 2 ;;
+  esac
+  exit 0
+fi
 b="" c="" n="" prev=""
 for a; do
   case $a in
@@ -1235,6 +1247,96 @@ squash_parent_away() {
     {__typename:"CheckRun",name:"b",status:"COMPLETED",conclusion:"CANCELLED"}]')"
   state
   [ "$(field .ci.verdict)" = inconclusive ]
+}
+
+@test "ci: a check that didn't start or wants approval is blocked, not red" {
+  git switch -qc feat && commit a.txt a && git push -q -u origin feat 2>/dev/null
+  pr_fixture feat "$(checks '[{__typename:"CheckRun",name:"a",status:"COMPLETED",conclusion:"SUCCESS"},
+    {__typename:"CheckRun",name:"wf",status:"COMPLETED",conclusion:"STARTUP_FAILURE"},
+    {__typename:"CheckRun",name:"ok?",status:"COMPLETED",conclusion:"ACTION_REQUIRED"}]')"
+  state
+  [ "$(field .ci.verdict)" = blocked ]
+  [ "$(field '.ci.blocked | join(",")')" = "wf,ok?" ]
+  [ "$(field '.ci.failing | length')" = 0 ]
+  [ "$(field '.next[0].key')" = ci-blocked ]
+}
+
+@test "ci: a failure outranks a blocked check" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat "$(checks '[{__typename:"CheckRun",name:"lint",status:"COMPLETED",conclusion:"FAILURE"},
+    {__typename:"CheckRun",name:"wf",status:"COMPLETED",conclusion:"STARTUP_FAILURE"}]')"
+  state
+  [ "$(field .ci.verdict)" = red ]
+}
+
+# Required checks (#123): read for a draft only, since undraft is the one
+# decision GitHub's merge state doesn't already gate on them.
+required_rules() { # required_rules <context>...: a ruleset requiring them
+  jq -n '[{type: "deletion"}, {type: "required_status_checks", parameters: {required_status_checks:
+    [$ARGS.positional[] | {context: ., integration_id: 15368}], strict_required_status_checks_policy: false}}]' \
+    --args "$@" > "$GH_FIXTURES/rules.json"
+}
+
+@test "ci: a draft's required check with no context on the head is pending, not none" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat '.isDraft = true'
+  required_rules test
+  state
+  [ "$(field .ci.verdict)" = pending ]
+  [ "$(field -c .ci.required)" = '["test"]' ]
+  [ "$(field -c .ci.missing)" = '["test"]' ]
+  [ "$(field '[.next[].key] | index("draft")')" = null ]
+}
+
+@test "ci: a draft's required check missing beside green ones is pending" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat '.isDraft = true' "$(checks '[{__typename:"CheckRun",name:"lint",status:"COMPLETED",conclusion:"SUCCESS"}]')"
+  echo '{"name": "main", "protected": true, "protection": {"enabled": true, "required_status_checks":
+    {"enforcement_level": "non_admins", "contexts": ["lint", "ext"], "checks": [{"context": "lint", "app_id": 1}, {"context": "ext", "app_id": null}]}}}' \
+    > "$GH_FIXTURES/branch.json"
+  state
+  [ "$(field .ci.verdict)" = pending ]
+  [ "$(field -c .ci.required)" = '["ext","lint"]' ]
+  [ "$(field -c .ci.missing)" = '["ext"]' ]
+}
+
+@test "ci: a draft's required checks all reported is green" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat '.isDraft = true' "$(checks '[{__typename:"CheckRun",name:"test",status:"COMPLETED",conclusion:"SUCCESS"},
+    {__typename:"StatusContext",context:"ext",state:"SUCCESS"}]')"
+  required_rules test ext
+  state
+  [ "$(field .ci.verdict)" = green ]
+  [ "$(field -c .ci.missing)" = '[]' ]
+}
+
+@test "ci: a draft with no required checks and nothing reported is still none" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat '.isDraft = true'
+  state
+  [ "$(field .ci.verdict)" = none ]
+  [ "$(field -c .ci.required)" = '[]' ]
+  [ "$(field -c '[.errors[]]')" = '[]' ]
+  [ "$(sort "$GH_FIXTURES/rest" | tr '\n' ' ')" = "repos/{owner}/{repo}/branches/main repos/{owner}/{repo}/rules/branches/main?per_page=100 " ]
+}
+
+@test "ci: required checks aren't read for a PR that isn't a draft" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat
+  required_rules test
+  state
+  [ "$(field .ci.verdict)" = none ]
+  [ "$(field .ci.required)" = null ]
+  [ ! -e "$GH_FIXTURES/rest" ]
+}
+
+@test "ci: reading required checks failing is an error, and the draft step waits on it" {
+  git switch -qc feat && commit a.txt a
+  pr_fixture feat '.isDraft = true'
+  GH_FAKE_FAIL_REST="gh: HTTP 502" state
+  [ "$(field .ci.required)" = null ]
+  [[ "$(field '.errors | join(" ")')" == *"required checks on main"*"HTTP 502"* ]]
+  [ "$(field '.next[0].key')" = errors ]
 }
 
 @test "ci: checks on a SHA other than local HEAD are flagged" {
