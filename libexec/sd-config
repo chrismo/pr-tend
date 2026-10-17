@@ -28,8 +28,9 @@
 #   defaults  harness claude; settings.remote origin, stepTimeout 1800,
 #             stepBudget 0 (USD per claude step; 0 is no cap), reviewRounds 3,
 #             botTimeout 3600 (seconds to wait on the review bot), interval
-#             300, vacuumAfter 604800, replyPrefix "🤖 "; the other settings
-#             empty
+#             300, vacuumAfter 604800, rateLimitFloor 250 (GraphQL points
+#             under which sd watch stops a pass), replyPrefix "🤖 "; the
+#             other settings empty
 #
 # Notes:
 #   - null in a file removes the key; a default still applies
@@ -42,7 +43,8 @@
 #   - files are typed: an unknown key or a bad value is an error naming the
 #     file and path (an empty block under a misspelled key too); a number in
 #     quotes ("1800") is accepted, and a fraction is cut to its whole part;
-#     remote, interval, notify and vacuumAfter are global-file only
+#     remote, interval, notify, vacuumAfter and rateLimitFloor are
+#     global-file only
 #   - set values are strings; --json takes a number, list, object or null
 #   - step: the harness's block, with the step's block for it laid over it
 

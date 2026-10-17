@@ -1188,6 +1188,15 @@ old_super() {
   [ "$output" = "sd config: $(branch_file feat): settings.vacuumAfter: global file only" ]
 }
 
+@test "validate: rateLimitFloor can only be set in the global file, as whole points" {
+  write_global '{"settings":{"rateLimitFloor":50}}'
+  [ "$("$SD_CONFIG" get settings.rateLimitFloor)" = 50 ]
+  write_branch feat '{"settings":{"rateLimitFloor":5}}'
+  run "$SD_CONFIG" get settings.rateLimitFloor
+  [ "$status" -eq 1 ]
+  [ "$output" = "sd config: $(branch_file feat): settings.rateLimitFloor: global file only" ]
+}
+
 @test "validate: null is allowed anywhere, to clear an inherited key" {
   write_global "$GLOBAL"
   write_branch feat '{"harness":null,"steps":{"address":null},"settings":{"verify":null},"harnesses":{"pi":{"effort":null}}}'
@@ -1242,6 +1251,7 @@ old_super() {
   [ "$("$SD_CONFIG" get settings.stepTimeout)" = 1800 ]
   [ "$("$SD_CONFIG" get settings.interval)" = 300 ]
   [ "$("$SD_CONFIG" get settings.vacuumAfter)" = 604800 ]
+  [ "$("$SD_CONFIG" get settings.rateLimitFloor)" = 250 ]
   out=$("$SD_CONFIG" get settings.replyPrefix; echo x)
   [ "$out" = $'🤖 \nx' ]
 }

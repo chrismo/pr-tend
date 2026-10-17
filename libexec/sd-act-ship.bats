@@ -8,7 +8,8 @@ bats_require_minimum_version 1.5.0
 # one, enroll).
 #
 # Real git (a bare origin, our clone, $TMP/other for other people's pushes)
-# and the real sd state. gh is a stub: graphql answers from $GH/<branch>.json,
+# and the real sd state. gh is a stub: graphql answers from $GH/<branch>.json
+# (by number: the node of whichever file has it),
 # `gh pr create|edit|ready` are logged to $GH/calls. claude prints
 # $FX/result.json as structured output.
 
@@ -32,14 +33,23 @@ if [[ $1 == pr ]]; then
   [[ $2 == create ]] && echo "https://example/pr/9"
   exit 0
 fi
-b=""
-for a; do [[ $a == branch=* ]] && b=${a#branch=}; done
+b="" n=""
+for a; do [[ $a == branch=* ]] && b=${a#branch=}; [[ $a == number=* ]] && n=${a#number=}; done
+# By number: the node with that number, from the one branch file that has it.
+if [[ -n $n ]]; then
+  f=$(jq -rn --argjson n "$n" 'inputs | select(any(.data.repository.pullRequests.nodes[]?; .number == $n)) | input_filename' "$GH"/*.json 2>/dev/null)
+  [[ $f != *$'\n'* ]] || { echo "fake gh: #$n is in more than one fixture: $f" >&2; exit 2; }
+  b=$(basename "${f:-none}" .json)
+fi
 [[ -e $GH/fail-$b ]] && { echo "gh: boom for $b" >&2; exit 1; }
 if [[ -e $GH/fail-$b-after-1 ]]; then
   [[ -e $GH/seen-$b ]] && { echo "gh: boom for $b" >&2; exit 1; }
   touch "$GH/seen-$b"
 fi
-if [[ -f $GH/$b.json ]]; then cat "$GH/$b.json"
+if [[ -n $n ]]; then
+  [[ -n $f ]] || { echo "gh: Could not resolve to a PullRequest with the number of $n." >&2; exit 1; }
+  jq --argjson n "$n" '.data.repository |= {defaultBranchRef, pullRequest: (.pullRequests.nodes[] | select(.number == $n))}' "$f"
+elif [[ -f $GH/$b.json ]]; then cat "$GH/$b.json"
 else echo '{"data":{"viewer":{"login":"me"},"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"nodes":[]}}}}'
 fi
 EOF

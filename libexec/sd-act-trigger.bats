@@ -9,7 +9,8 @@ bats_require_minimum_version 1.5.0
 # local review that doesn't cover HEAD is a soft refusal (--force).
 #
 # Real git and the real sd state. gh is a stub: graphql answers from
-# $GH/<branch>.json, the REST trigger comment is logged to $GH/calls.
+# $GH/<branch>.json (by number: the node of whichever file has it), the REST
+# trigger comment is logged to $GH/calls.
 
 SD_ACT="$BATS_TEST_DIRNAME/sd-act"
 SD_CONFIG="$BATS_TEST_DIRNAME/sd-config"
@@ -37,6 +38,14 @@ if [[ $1 == api && $2 == repos/*/issues/*/comments ]]; then
   jq -n --arg t "$(cat "$GH/created_at" 2>/dev/null || echo 2026-10-16T12:00:00Z)" '{id: 1, created_at: (if $t == "" then null else $t end)}' \
     | { filter=""; for a; do [[ $prev == --jq ]] && filter=$a; prev=$a; done; if [[ -n $filter ]]; then jq -r "$filter"; else cat; fi; }
   exit 0
+fi
+n=""; for a; do [[ $a == number=* ]] && n=${a#number=}; done
+# By number: the node with that number, from the one branch file that has it.
+if [[ -n $n ]]; then
+  f=$(jq -rn --argjson n "$n" 'inputs | select(any(.data.repository.pullRequests.nodes[]?; .number == $n)) | input_filename' "$GH"/*.json 2>/dev/null)
+  [[ $f != *$'\n'* ]] || { echo "fake gh: #$n is in more than one fixture: $f" >&2; exit 2; }
+  [[ -n $f ]] || { echo "gh: Could not resolve to a PullRequest with the number of $n." >&2; exit 1; }
+  exec jq --argjson n "$n" '.data.repository |= {defaultBranchRef, pullRequest: (.pullRequests.nodes[] | select(.number == $n))}' "$f"
 fi
 case $q in
   *) if [[ -f $GH/$b.json ]]; then cat "$GH/$b.json"
