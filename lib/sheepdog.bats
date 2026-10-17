@@ -356,6 +356,18 @@ EOF
   ! grep -q -- --max-budget-usd "$FX/args" || false
 }
 
+@test "harness_run: a --max-budget-usd in harnesses.claude.args replaces stepBudget's" {
+  harness_stubs
+  run harness_run claude sid1 new 30 "do it" '{}' '{"harness": "claude", "args": "--verbose --max-budget-usd 10"}'
+  [ "$status" -eq 0 ]
+  [ "$(grep -cx -- --max-budget-usd "$FX/args")" -eq 1 ]
+  [ "$(grep -A1 -x -- --max-budget-usd "$FX/args" | tail -1)" = 10 ]
+  run harness_run claude sid1 new 30 "do it" '{}' '{"harness": "claude", "args": "--max-budget-usd=10"}'
+  [ "$status" -eq 0 ]
+  ! grep -qx -- --max-budget-usd "$FX/args" || false
+  grep -qx -- --max-budget-usd=10 "$FX/args"
+}
+
 @test "harness_run: pi has no budget flag" {
   harness_stubs
   echo '{"settings": {"stepBudget": 2.5}}' > "$SHEEPDOG_CONFIG"
