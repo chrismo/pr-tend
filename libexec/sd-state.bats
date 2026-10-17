@@ -1429,6 +1429,31 @@ squash_parent_away() {
   [ "$(field .review.local.status)" = unknown ]
 }
 
+@test "review: stacked on an open parent, base from the fork-point: a rewritten pin with no recorded base is unknown (#120)" {
+  git switch -qc parent && commit p.txt p1 && git push -q origin parent 2>/dev/null
+  local p1; p1=$(git rev-parse parent)
+  git switch -qc feat && commit c.txt c
+  git config branch.feat.sd-parent parent
+  git update-ref refs/sheepdog/feat/local HEAD
+  (cd "$TMP/other" && git fetch -q origin && git switch -qc parent origin/parent \
+     && git commit -q --amend -m "p1, amended" && git push -qf origin parent 2>/dev/null && git switch -q main)
+  git fetch -q
+  git commit -q --amend -m "reworded"
+  state
+  [ "$(field .sync.old_base)" = "$p1" ]
+  [ "$(field .review.local.status)" = unknown ]
+}
+
+@test "review: stacked on a merged parent with no base: a rewritten pin is unknown, not compared from the merge-base (#120)" {
+  lost_pin_stack nopin
+  git update-ref refs/sheepdog/feat/local HEAD
+  git commit -q --amend -m "reworded"
+  state
+  [ "$(field .sync.target)" = main ]
+  [ "$(field .sync.old_base)" = null ]
+  [ "$(field .review.local.status)" = unknown ]
+}
+
 # ── O7 threads owed a reply ──────────────────────────────────────────────────
 
 @test "threads: unresolved and last word not ours are owed, split bot vs human" {
