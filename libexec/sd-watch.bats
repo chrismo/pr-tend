@@ -1930,3 +1930,13 @@ write_cfg() {
   [ "$status" -ne 0 ]
   [ ! -e "$PLIST" ]
 }
+
+@test "rate limit: vacuum skips the branches the pass didn't check, and says so" {
+  git branch other && enroll other
+  low feat
+  ps_fixture other '.pr.state = "MERGED"'
+  run "$SD_WATCH" vacuum
+  [ "$status" -eq 0 ]
+  [ "$output" = "repo  other  skipped, not checked: GitHub rate limit" ]
+  enrolled other
+}
